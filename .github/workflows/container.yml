@@ -53,8 +53,8 @@ jobs:
               VERSION="${GITHUB_REF_NAME#v}"
               test "$VERSION" = "$(node -p "require('./package.json').version")"
               echo "$IMAGE:$VERSION"
+            elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
               echo "$IMAGE:latest"
-            else
               echo "$IMAGE:edge"
             fi
             echo 'EOF'

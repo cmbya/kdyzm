@@ -122,14 +122,22 @@ export class Store {
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
     this.transaction(() => {
       const orderIds = new Map();
-      for (const input of result.orders) {
+      const admittedIds = new Set(result.orders.map(input => String(input.platformOrderId)));
+      for (const input of [...(result.orderUpdates || []), ...result.orders]) {
         const platformOrderId = String(input.platformOrderId);
         const id = stableId(accountId, account.platform, 'order', platformOrderId);
         orderIds.set(platformOrderId, id);
         const old = parse(this.db.prepare('SELECT data FROM orders WHERE id=?').get(id));
+        // Filtered orders may refresh existing history, but must not create new shopping records.
+        if (!old && !admittedIds.has(platformOrderId)) continue;
+        const inputDate = Number.isFinite(input.orderDate) && input.orderDate > 0 && input.orderDate <= 8640000000000000 ? input.orderDate : 0;
+        const verifiedDate = old?.orderDateSource === 'platform' && old.orderDate > 0;
         const order = { ...old, id, accountId, platform: account.platform, platformOrderId,
           title: String(input.title || old?.title || ''), amount: input.amount == null ? old?.amount ?? null : input.amount,
-          orderDate: old?.orderDate || input.orderDate || this.now(), orderStatus: input.orderStatus || old?.orderStatus || '',
+          orderDate: verifiedDate ? old.orderDate : inputDate || old?.orderDate || 0,
+          orderDateSource: verifiedDate || inputDate ? 'platform' : old?.orderDate ? 'legacy' : 'unknown',
+          firstSeenAt: old?.firstSeenAt || this.now(), tradeStatus: input.tradeStatus || old?.tradeStatus || '',
+          orderStatus: input.orderStatus || old?.orderStatus || '',
           refundStatus: input.refundStatus || old?.refundStatus || '' };
         this.db.prepare('INSERT INTO orders VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, accountId, JSON.stringify(order));
       }
@@ -158,7 +166,8 @@ export class Store {
   snapshot(accountIds) {
     const allowed = new Set(accountIds);
     const accounts = this.accounts(accountIds);
-    const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(o => allowed.has(o.accountId));
+    const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(o => allowed.has(o.accountId))
+      .map(o => ({ ...o, orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0 }));
     const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(s => allowed.has(s.accountId));
     return { schemaVersion: 1, serverRevision: Math.max(0, ...accounts.map(a => a.revision)), accounts, orders, shipments,
       hiddenIds: shipments.filter(s => s.hidden).map(s => s.id), deletedIds: shipments.filter(s => s.deleted).map(s => s.id),

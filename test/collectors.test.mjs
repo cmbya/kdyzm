@@ -5,6 +5,19 @@ import { createCollector, extractSsrFields, pddParcels, platformRequest, taobaoP
 const response = data => new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const ssr = fields => `<script>window['__ICE_SUSPENSE_LOADER__']['undefined'] = ${JSON.stringify({ result: { data: { newLogistics: { fields } } } })};</script>`;
 
+function taobaoFetch(orders, fieldsById = {}, calls = []) {
+  return async (url, options) => {
+    const target = new URL(url); calls.push({ target, options });
+    if (target.hostname === 'pages-g.m.taobao.com') {
+      return new Response(ssr(fieldsById[target.searchParams.get('bizOrderId')] || {}));
+    }
+    if (!target.searchParams.has('sign')) return response({ ret: ['FAIL_SYS_TOKEN_EMPTY'] });
+    if (options.method === 'POST') return response({ ret: ['SUCCESS::调用成功'], data: { data: {} } });
+    const page = JSON.parse(target.searchParams.get('data')).page;
+    return response({ ret: ['SUCCESS::调用成功'], data: { result: JSON.stringify({ mainOrders: page === '1' ? orders : [] }) } });
+  };
+}
+
 test('Taobao structured SSR retains every split waybill and never fans one parent code out to all parcels', () => {
   const fields = { multiPackages: { packages: [{ mailNo: 'A', cpCode: 'ZTO' }, { mailNo: 'B', cpCode: 'SF' }] } };
   assert.deepEqual(extractSsrFields(ssr(fields)), fields);
@@ -36,6 +49,7 @@ test('PDD collectors use real H5 paths with injected network, paginate and keep 
     assert.equal(call.options.redirect, 'error'); assert.match(call.options.headers.Cookie, /PDDAccessToken=FAKE/);
     if (call.target.pathname.includes('/cabinet/')) assert.equal(call.target.search, '');
   }
+  assert.equal(calls.find(c => c.target.pathname.includes('order_list_v4')).target.searchParams.get('type'), 'unreceived');
 });
 
 test('PDD disappearance and bounded pagination have no synthesized pick/delete events', async () => {
@@ -70,4 +84,78 @@ test('upstream expired response is explicit, requests cannot follow redirects or
   await assert.rejects(() => platformRequest('https://evil.example/cookie', 'secret'), { code: 'INVALID_UPSTREAM' });
   await assert.rejects(() => platformRequest('https://mobile.yangkeduo.com/test', 'secret', { fetchImpl: async () => new Response('x', { headers: { 'Content-Length': '99999999' } }) }), { code: 'UPSTREAM_ERROR' });
   assert.equal(timestamp('2026-10-30 10:00:00'), Date.parse('2026-10-30T10:00:00+08:00'));
+});
+
+test('Taobao skips completed or unrelated new orders without requesting logistics', async () => {
+  const calls = [];
+  const orders = [
+    { id: 'done', extra: { tradeStatus: 'TRADE_FINISHED' }, statusInfo: { text: '交易成功' }, subOrders: [{ itemInfo: { title: '闪购商品' } }] },
+    { id: 'unpaid', extra: { tradeStatus: 'WAIT_BUYER_PAY' }, statusInfo: { text: '待付款' } },
+    { id: 'unknown', extra: { tradeStatus: 'SOMETHING_NEW' }, statusInfo: { text: '其他' } },
+    { id: 'conflicting', extra: { tradeStatus: 'WAIT_BUYER_CONFIRM_GOODS' }, statusInfo: { text: '退款成功' } },
+  ];
+  const result = await createCollector({ fetchImpl: taobaoFetch(orders, {}, calls) })({ platform: 'taobao' }, '_m_h5_tk=TEST_1793350000');
+  assert.deepEqual(result.orders, []);
+  assert.deepEqual(result.orderUpdates.map(({ platformOrderId, tradeStatus, orderStatus }) => ({ platformOrderId, tradeStatus, orderStatus })), [
+    { platformOrderId: 'done', tradeStatus: 'TRADE_FINISHED', orderStatus: '交易成功' },
+    { platformOrderId: 'unpaid', tradeStatus: 'WAIT_BUYER_PAY', orderStatus: '待付款' },
+    { platformOrderId: 'unknown', tradeStatus: 'SOMETHING_NEW', orderStatus: '其他' },
+    { platformOrderId: 'conflicting', tradeStatus: 'WAIT_BUYER_CONFIRM_GOODS', orderStatus: '退款成功' },
+  ]);
+  assert.ok(result.warnings.includes('订单筛选：本轮保留0笔，跳过4笔已结束或非待收货订单'));
+  assert.equal(calls.filter(c => c.target.hostname === 'pages-g.m.taobao.com').length, 0);
+});
+
+test('Taobao retains waiting shipment and no-code in-transit orders without inventing logistics', async () => {
+  const calls = [];
+  const orders = [
+    { id: 'ship-later', extra: { tradeStatus: 'WAIT_SELLER_SEND_GOODS' }, statusInfo: { text: '待发货' } },
+    { id: 'moving', extra: { tradeStatus: 'WAIT_BUYER_CONFIRM_GOODS' }, statusInfo: { text: '待收货' } },
+    { id: 'fallback-moving', statusInfo: { text: '派件中' } },
+    { id: 'pending-signature', extra: { tradeStatus: 'WAIT_BUYER_CONFIRM_GOODS' }, statusInfo: { text: '待签收' } },
+  ];
+  const result = await createCollector({ fetchImpl: taobaoFetch(orders, { moving: { mailNo: 'NO-CODE' }, 'fallback-moving': { mailNo: 'FALLBACK-NO-CODE' }, 'pending-signature': { mailNo: 'PENDING-SIGNATURE' } }, calls) })({ platform: 'taobao' }, '_m_h5_tk=TEST_1793350000');
+  assert.deepEqual(result.orders.map(order => order.platformOrderId), ['ship-later', 'moving', 'fallback-moving', 'pending-signature']);
+  assert.equal(result.shipments.length, 3);
+  assert.equal(result.shipments[0].waybillNo, 'NO-CODE');
+  assert.equal(result.shipments[0].status, 'unknown');
+  assert.equal(calls.filter(c => c.target.hostname === 'pages-g.m.taobao.com').length, 3);
+});
+
+test('Taobao refreshes a tracked finished order and reports its metadata without importing it', async () => {
+  const calls = [];
+  const order = { id: 'tracked', extra: { tradeStatus: 'WAIT_BUYER_CONFIRM_GOODS' }, statusInfo: { text: '退款成功' }, refundStatus: 'REFUND_SUCCESS', createTime: '2026-10-30 10:00:00' };
+  const result = await createCollector({ fetchImpl: taobaoFetch([order], { tracked: { mailNo: 'TRACKED-1', multiStage: [{ title: '已签收', labelDesc: { text: '本人签收' } }] } }, calls) })(
+    { platform: 'taobao' }, '_m_h5_tk=TEST_1793350000', { trackedOrderIds: ['tracked'] });
+  assert.deepEqual(result.orders, []);
+  assert.equal(result.orderUpdates[0].tradeStatus, 'WAIT_BUYER_CONFIRM_GOODS');
+  assert.equal(result.orderUpdates[0].refundStatus, 'REFUND_SUCCESS');
+  assert.equal(result.orderUpdates[0].orderDate, Date.parse('2026-10-30T10:00:00+08:00'));
+  assert.equal(result.shipments[0].status, 'signed');
+  assert.equal(calls.filter(c => c.target.hostname === 'pages-g.m.taobao.com').length, 1);
+});
+
+test('Taobao parcel status lets current signature override historical arrival but preserves evidence', () => {
+  const signed = taobaoParcels({ mailNo: 'A', multiStage: [
+    { title: '已签收', labelDesc: { text: '本人签收' }, time: '2026-10-31 10:00:00' },
+    { title: '待取件', labelDesc: { text: '已存放至驿站' }, time: '2026-10-30 10:00:00', cardDesc: { custom: { expressCode: { code: 'OLD-CODE' } } } },
+  ] }, 'o')[0];
+  assert.equal(signed.status, 'signed');
+  assert.equal(signed.pickupCode, 'OLD-CODE');
+  assert.equal(signed.arrivalAt, Date.parse('2026-10-30T10:00:00+08:00'));
+  const station = taobaoParcels({ mailNo: 'B', multiStage: [{ title: '签收', labelDesc: { text: '驿站代收签收请取件' } }] }, 'o')[0];
+  assert.equal(station.status, 'arrived');
+  const transit = taobaoParcels({ mailNo: 'C', multiStage: [
+    { title: '派件中', labelDesc: { text: '正在派件' } },
+    { title: '待取件', labelDesc: { text: '已存放至驿站' }, cardDesc: { custom: { expressCode: { code: 'OLD-CODE' } } } },
+  ] }, 'o')[0];
+  assert.equal(transit.status, 'transit');
+  const pendingSignature = taobaoParcels({ mailNo: 'D', multiStage: [{ title: '待签收', labelDesc: { text: '等待本人签收' } }] }, 'o')[0];
+  assert.equal(pendingSignature.status, 'unknown');
+  const structuredPickup = taobaoParcels({ mailNo: 'E', multiStage: [{ title: '签收', labelDesc: { text: '已签收' }, cardDesc: { title: '驿站', custom: { expressCode: { code: 'CURRENT-CODE' } } } }] }, 'o')[0];
+  assert.equal(structuredPickup.status, 'arrived');
+  assert.equal(taobaoParcels({ mailNo: 'F', multiStage: [{ title: '派送中', labelDesc: { text: '您的快件正在派送，请当面签收' } }] }, 'o')[0].status, 'transit');
+  assert.equal(taobaoParcels({ mailNo: 'G', multiStage: [{ title: '派件中', labelDesc: { text: '等待本人签收' } }] }, 'o')[0].status, 'transit');
+  assert.equal(taobaoParcels({ mailNo: 'H', multiStage: [{ title: '签收失败', labelDesc: { text: '签收失败' } }] }, 'o')[0].status, 'unknown');
+  assert.equal(taobaoParcels({ mailNo: 'I', multiStage: [{ title: '客户拒绝签收', labelDesc: { text: '客户拒绝签收，退回中' } }] }, 'o')[0].status, 'unknown');
 });

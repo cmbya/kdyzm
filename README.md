@@ -4,11 +4,11 @@
 
 源码：https://github.com/zsdd2/kdyzm
 
-镜像：`ghcr.io/zsdd2/kdyzm:3.1.1`（Linux amd64 / arm64，兼容 App 3.1.0）
+镜像：`ghcr.io/zsdd2/kdyzm:latest`（Linux amd64 / arm64）；本次版本为 `3.1.2`，也可固定使用 `ghcr.io/zsdd2/kdyzm:3.1.2`。
 
 ## 直接拉取部署
 
-需要 Docker Engine + Compose v2。**3.1.1 新部署不需要提前配置 PUBLIC_BASE_URL、ADMIN_TOKEN、COOKIE_ENCRYPTION_KEY，也不需要创建 `.env`。** 管理员密码和服务地址在首次打开页面时设置，加密密钥由服务自动生成并保存在数据卷。
+需要 Docker Engine + Compose v2。**新部署不需要提前配置 PUBLIC_BASE_URL、ADMIN_TOKEN、COOKIE_ENCRYPTION_KEY，也不需要创建 `.env`。** 管理员密码和服务地址在首次打开页面时设置，加密密钥由服务自动生成并保存在数据卷。
 
 1. 新建目录并下载完整 Compose：
 
@@ -22,8 +22,7 @@ curl -fL https://raw.githubusercontent.com/zsdd2/kdyzm/main/compose.yaml -o comp
 
 ```sh
 docker compose config --quiet
-docker compose pull
-docker compose up -d
+docker compose up -d --pull always
 docker compose ps
 curl -f http://127.0.0.1:8787/health
 ```
@@ -83,6 +82,8 @@ parcel.example.com {
 ## 数据与刷新
 
 - 订单先进入包裹记录；到站且有码才进入取件列表。普通签收、退款或列表缺席不代表助手已取。
+- 淘宝沿用原项目的待发货、待收货筛选，补充物流暂不可用时保留有效订单；拼多多沿用未收货范围。新发现的结束或无关订单不导入，已有记录只更新状态且保留历史；已有未取运单仍可更新最新物流。筛选摘要显示在账号同步提示中，不依赖商品标题黑名单。
+- 真实下单日期缺失时标记未知，首次同步时间独立保存；旧版数据的日期来源待确认，获取真实日期后补正。App按实际状态显示暂无物流、待发货、运输中或到站待取码，历史记录可展开查看。
 - 一单多运单独立保存，不确定哪个包裹对应取件码时保留无码，避免随意复制。
 - 服务端约每小时采集；App 前台读取已有快照，后台约每小时同步；不是平台实时推送。
 - 领取、恢复、隐藏等助手操作按设备和操作ID去重，离线可重放；不会在电商平台确认收货。
@@ -95,7 +96,11 @@ API见 [PROTOCOL.md](PROTOCOL.md)。
 
 数据在命名卷 `kdyzm_kdyzm-data` 的 `/data` 内，包含SQLite数据库和 `service-config.json`（密码hash及Cookie加密密钥）。容器删除重建不会删除该卷；不要执行 `docker compose down -v`，也不要删除配置文件来重置密码。
 
-升级时更改 Compose 的镜像版本后执行 `docker compose pull && docker compose up -d`。`latest` 跟随正式版本，`edge` 是主分支；建议部署固定版本。必须保留完整数据卷，丢失其中的加密密钥会导致旧Cookie无法解密。一个数据卷只供一个服务实例使用。
+Compose 默认使用 `latest` 和 `pull_policy: always`。每次执行 `docker compose up -d --pull always`（或管理器中的重新部署/构建）都会检查镜像仓库，拉取通过CI验收的主分支最新镜像；无需手动修改版本号。普通 `docker restart`、`docker compose restart`、`docker compose start` 只启动现有容器，不拉取新版本。管理器若有“拉取最新镜像”选项，请启用；上述CLI命令可显式保证拉取。
+
+`latest` 与 `edge` 跟随每次成功的 `main` 构建，版本标签（如 `3.1.2`）用于固定部署或回退。发布旧版本标签不会覆盖 `latest`。这不是后台定时自动升级，正在运行的容器只在你重新部署时更新。必须保留完整数据卷，丢失其中的加密密钥会导致旧Cookie无法解密。一个数据卷只供一个服务实例使用。
+
+3.1.2 恢复有效订单筛选，修正当前签收/运输状态被历史到站覆盖的问题，保留已存订单及人工状态。包裹页的历史开关、准确计数和未知日期展示需要配套更新App，服务端更新不会替换手机里的App资源。
 
 备份时先 `docker compose stop`，备份完整命名卷及自定义部署配置，然后 `docker compose start`。SQLite包含WAL文件，不能只复制运行中的单个 `.db`。备份含加密密钥，应限制读取权限；恢复先在隔离环境验证，再切换正式服务。
 
@@ -112,7 +117,7 @@ docker build -t kdyzm:smoke .
 node scripts/docker-smoke.mjs kdyzm:smoke
 ```
 
-Node需要24.13.0或更新版本；内建SQLite可能显示实验特性提示。CI先跑业务、认证、首次设置和采集器mock测试，再检查无密钥环境变量启动、首访设置、非root容器、只读根目录、API认证及重启持久化，最后构建并推送amd64/arm64镜像。主分支发布`edge`，版本标签`v3.1.1`发布`3.1.1`和`latest`。CI使用GitHub提供的临时token，不需要在仓库保存发布密钥。
+Node需要24.13.0或更新版本；内建SQLite可能显示实验特性提示。CI先跑业务、认证、首次设置和采集器mock测试，再检查无密钥环境变量启动、首访设置、非root容器、只读根目录、API认证及重启持久化，最后构建并推送amd64/arm64镜像。主分支发布`latest`和`edge`，版本标签`v3.1.2`发布`3.1.2`；所有构建均带`sha-提交号`标签。非main分支手动构建不会覆盖`latest`或`edge`。CI使用GitHub提供的临时token，不需要在仓库保存发布密钥。
 
 `npm run fixture`仅供本机临时模拟，监听127.0.0.1:8787，数据保存在内存且不联系电商平台。正式镜像不含fixture脚本或测试数据。
 

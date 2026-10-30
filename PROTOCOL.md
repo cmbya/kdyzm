@@ -39,6 +39,8 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 快照结构：`{schemaVersion:1,serverRevision,accounts,orders,shipments,hiddenIds,deletedIds}`，可有附加警告字段。订单有`id,accountId,platform,platformOrderId,title,amount,orderDate,orderStatus,refundStatus`；金额缺失为null。运单有`id,orderId,accountId,waybillNo,carrier,status,pickupCode,station,arrivalAt,updatedAt,picked,hidden`。status为`transit/arrived/signed/unknown`，普通signed不派生picked。到站时间是首次已知时间，不随刷新改变。数组缺席不代表删除或已取。
 
+订单新增可选字段 `tradeStatus`（平台交易枚举）、`orderDateSource`（`platform/unknown/legacy`）和 `firstSeenAt`（首次记录时间，缺失为0）。新订单没有真实下单日期时 `orderDate=0`，不得用同步时间代替。历史记录没有来源标识时按 `legacy` 展示待确认，保留原数值；以后采集到真实日期可以补正，已验证的日期保持稳定。旧App忽略附加字段仍可同步，但未知日期和历史筛选需要新版App正确展示。
+
 操作请求：`{operations:[{id,shipmentId,action,occurredAt}]}`，action仅为`pick/restore/hide/unhide`，每批1–100条。响应`{appliedIds:[]}`。同设备同ID重放幂等；同ID不同内容返回409；越权批次整体失败。短信正文、解析字段和任意凭证不能经操作接口上行。
 
 账号status为expired表示后台更新Cookie，设备仍有效；设备401表示重新绑定。错误JSON形如`{error:{code,message}}`。分页缺失、网络失败和上游过期时保留历史，真实结果以账号状态与lastSuccessAt为准。

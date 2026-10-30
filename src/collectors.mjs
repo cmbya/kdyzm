@@ -111,7 +111,34 @@ function stageText(stage) {
 }
 function stationOf(value) { return value.match(/(?:存放至|已到达|存入)([^，,。【]+)/)?.[1]?.trim() || value.match(/由【(.+?)】/)?.[1] || ''; }
 function codeOf(value) { return value.match(/(?:取件码|取货码|提货码|自提码)\s*(?:是|为)?\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,15})/)?.[1] || ''; }
-function arrivalEvidence(value) { return /待取件|等待取件|已存放至|存入.*(?:柜|驿站)|已到达.*(?:驿站|代收点)|请(?:及时)?取件|凭取货码/.test(value); }
+function arrivalEvidence(value) { return /待取件|等待取件|已存放至|存入.*(?:柜|驿站)|已到达.*(?:驿站|代收点)|(?:驿站|代收点|自提柜|快递柜)代收|请(?:及时)?取件|凭取货码/.test(value); }
+
+const TO_SHIP_TRADE_STATUS = 'WAIT_SELLER_SEND_GOODS';
+const IN_TRANSIT_TRADE_STATUS = 'WAIT_BUYER_CONFIRM_GOODS';
+const DONE_STATUS_TEXT = /(?<!待|未|拒)签收|拒签|交易成功|交易完成|交易关闭|已完成|已取消|失败|待付款|未付款|退款|退货/;
+const TO_SHIP_STATUS_TEXT = /待发货|等待卖家发货|待卖家发货/;
+const IN_TRANSIT_STATUS_TEXT = /待收货|已发货|运输中|派送中|派件中|物流派件中|待取件|物流中|已到达/;
+
+function taobaoOrderInfo(order) {
+  const platformOrderId = asText(order.id || order.orderId);
+  const tradeStatus = asText(order.tradeStatus || order.extra?.tradeStatus || order.statusInfo?.tradeStatus);
+  const orderStatus = asText(order.statusText || order.statusInfo?.text || order.extra?.statusText || order.extra?.tradeStatus);
+  const orderDate = timestamp(order.createTime || order.orderTime || order.extra?.createTime);
+  const rawAmount = order.payInfo?.actualFee ?? order.payInfo?.actualPay;
+  const amount = rawAmount != null && /^\d+(?:\.\d+)?$/.test(String(rawAmount)) ? Number(rawAmount) : null;
+  const title = (order.subOrders || []).map(s => s.itemInfo?.title || '').filter(Boolean).join(' / ');
+  return { platformOrderId, tradeStatus, orderStatus, orderDate, amount, title, refundStatus: asText(order.refundStatus) };
+}
+
+function taobaoOrderKind({ tradeStatus, orderStatus }) {
+  if (DONE_STATUS_TEXT.test(orderStatus)) return 'skip';
+  if (tradeStatus === TO_SHIP_TRADE_STATUS) return 'to_ship';
+  if (tradeStatus === IN_TRANSIT_TRADE_STATUS) return 'in_transit';
+  if (tradeStatus) return 'skip';
+  if (TO_SHIP_STATUS_TEXT.test(orderStatus)) return 'to_ship';
+  if (IN_TRANSIT_STATUS_TEXT.test(orderStatus)) return 'in_transit';
+  return 'skip';
+}
 
 export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
   const packages = fields.multiPackages?.packages || [];
@@ -135,15 +162,31 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
     // A current structured collection code is itself evidence that the parcel is at a pickup point.
     arrived ||= !!pickupCode;
     const latest = `${stages[0]?.title || ''} ${stages[0] ? stageText(stages[0]) : ''}`;
+    // The first stage is the platform's current event. A current station pickup
+    // notice wins over generic "signed" wording; otherwise a current signature
+    // supersedes older arrival/code evidence while that evidence is retained.
+    const latestCard = stages[0]?.cardDesc || {};
+    const latestCardText = `${latestCard.title || ''} ${latestCard.subTitle || ''}`;
+    const latestStructuredPickup = !!latestCard.custom?.expressCode?.code || /驿站|代收点|代收|自提柜|快递柜|丰巢/.test(latestCardText);
+    const latestAtPickupPoint = latestStructuredPickup || arrivalEvidence(latest);
+    const latestTitle = asText(stages[0]?.title).trim();
+    const latestBody = stages[0] ? stageText(stages[0]) : '';
+    const latestTransitTitle = /运输|发货|揽收|派送|派件中/.test(latestTitle);
+    const latestTransit = latestTransitTitle || /运输|发货|揽收|派送|派件中/.test(latestBody);
+    const latestBodySigned = /已完成签收|签收成功|已签收/.test(latestBody)
+      && !/(?:未|待|拒绝?|请|等待|当面)[^，,。；;！？!?]{0,8}(?:已完成签收|签收成功|已签收)/.test(latestBody);
+    const latestSigned = (!latestTransitTitle && /^(?:签收|已签收|签收成功)$/.test(latestTitle)) || (!latestTransitTitle && latestBodySigned);
+    const status = latestAtPickupPoint ? 'arrived' : latestSigned ? 'signed' : latestTransit ? 'transit' : arrived ? 'arrived' : 'unknown';
     return { platformOrderId, waybillNo: parcel.mailNo, carrier: asText(parcel.cpName || CARRIERS[parcel.cpCode] || selected.logisticCompany?.name || parcel.cpCode),
-      pickupCode, station, arrivalAt, status: arrived ? 'arrived' : /签收/.test(latest) ? 'signed' : /运输|发货|揽收|派送/.test(latest) ? 'transit' : 'unknown' };
+      pickupCode, station, arrivalAt, status };
   });
 }
 
-async function collectTaobao(cookie, { fetchImpl, now, maxPages }) {
+async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds = [] }) {
   const session = { cookie, fetchImpl, now };
-  const orders = [], shipments = [], warnings = [];
+  const orders = [], shipments = [], orderUpdates = [], warnings = [];
   const seen = new Set();
+  const tracked = new Set(trackedOrderIds.map(id => String(id)));
   let pickupCodes = {};
   try {
     const data = await mtop(session, { tabCode: 'waitConfirm', appVersion: '3.0', OrderType: 'OrderList', condition: { inner: 1, deviceLevel: 'high', version: '1.0.0', reqFrom: 'tbpc' }, appName: 'tborder', templateConfigVersion: 0, forceBoughtlist4: 4, page: '1' }, true);
@@ -164,13 +207,26 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages }) {
     if (!inner.mainOrders.length) break;
     let newCount = 0;
     for (const order of inner.mainOrders) {
-      const platformOrderId = asText(order.id);
+      const info = taobaoOrderInfo(order);
+      const platformOrderId = info.platformOrderId;
       if (!platformOrderId || seen.has(platformOrderId)) continue;
       newCount++; seen.add(platformOrderId);
-      const rawAmount = order.payInfo?.actualFee ?? order.payInfo?.actualPay;
-      const amount = rawAmount != null && /^\d+(?:\.\d+)?$/.test(String(rawAmount)) ? Number(rawAmount) : null;
-      orders.push({ platformOrderId, title: (order.subOrders || []).map(s => s.itemInfo?.title || '').filter(Boolean).join(' / '), amount,
-        orderDate: timestamp(order.createTime || order.orderTime || order.extra?.createTime), orderStatus: asText(order.statusInfo?.text || order.extra?.tradeStatus), refundStatus: asText(order.refundStatus) });
+      const kind = taobaoOrderKind(info);
+      const known = tracked.has(platformOrderId);
+      const metadata = { platformOrderId, tradeStatus: info.tradeStatus, orderStatus: info.orderStatus, orderDate: info.orderDate, refundStatus: info.refundStatus };
+      // Rejected orders are metadata-only. A previously imported order is
+      // allowed through for a detail refresh, even after it reaches a terminal
+      // platform status, so an old arrival cannot remain stale forever.
+      if (kind === 'skip' && !known) {
+        orderUpdates.push(metadata);
+        continue;
+      }
+      if (kind === 'skip') orderUpdates.push(metadata);
+      if (kind !== 'skip') {
+        orders.push({ platformOrderId, title: info.title, amount: info.amount, orderDate: info.orderDate, tradeStatus: info.tradeStatus, orderStatus: info.orderStatus, refundStatus: info.refundStatus });
+      }
+      // Waiting for seller shipment has no useful logistics detail yet.
+      if (kind === 'to_ship') continue;
       try {
         const result = await platformRequest(`https://pages-g.m.taobao.com/wow/z/app/mtb/logisticsV2/h5-detail?x-ssr=true&bizOrderId=${encodeURIComponent(platformOrderId)}`, session.cookie, { fetchImpl });
         const fields = extractSsrFields(result.text);
@@ -187,7 +243,8 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages }) {
     if (!newCount) { warnings.push('平台分页重复，停止本轮采集并保留已有记录'); break; }
     if (page === maxPages) warnings.push('已达到分页上限；缺席订单不会标记为已取或删除');
   }
-  return { orders, shipments, warnings: [...new Set(warnings)], refreshedCookie: session.cookie };
+  if (orderUpdates.length) warnings.push(`订单筛选：本轮保留${orders.length}笔，跳过${orderUpdates.length}笔已结束或非待收货订单`);
+  return { orders, shipments, orderUpdates, warnings: [...new Set(warnings)], refreshedCookie: session.cookie };
 }
 
 function pddCheck(value) {
@@ -218,7 +275,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages }) {
   const seen = new Set();
   let offset = '';
   for (let page = 1; page <= maxPages; page++) {
-    const query = new URLSearchParams({ pdduid: uid, page: String(page), type: 'all' });
+    const query = new URLSearchParams({ pdduid: uid, page: String(page), type: 'unreceived' });
     if (offset) query.set('offset', offset);
     const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/api/aristotle/order_list_v4?${query}`, cookie, { fetchImpl, headers });
     const data = pddCheck(json(response.text));
@@ -247,12 +304,12 @@ async function collectPdd(cookie, { fetchImpl, maxPages }) {
     if (data.has_more === false || data.hasMore === false) break;
     if (page === maxPages) warnings.push('已达到分页上限；缺席订单不会标记为已取或删除');
   }
-  return { orders, shipments, warnings: [...new Set(warnings)] };
+  return { orders, shipments, orderUpdates: [], warnings: [...new Set(warnings)] };
 }
 
 export function createCollector({ fetchImpl = fetch, now = Date.now, maxPages = 5 } = {}) {
-  return async (account, cookie) => {
-    const options = { fetchImpl, now, maxPages };
+  return async (account, cookie, { trackedOrderIds = [] } = {}) => {
+    const options = { fetchImpl, now, maxPages, trackedOrderIds };
     return account.platform === 'taobao' ? collectTaobao(cookie, options) : collectPdd(cookie, options);
   };
 }
