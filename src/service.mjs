@@ -5,6 +5,8 @@ import QRCode from 'qrcode';
 import { Store } from './store.mjs';
 import { AdminConfiguration } from './configuration.mjs';
 import { createCollector } from './collectors.mjs';
+import { createSyncJobs } from './sync-jobs.mjs';
+import { serverVersion } from './version.mjs';
 import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './security.mjs';
 
 const PUBLIC = new URL('../public/', import.meta.url);
@@ -28,7 +30,8 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const configuration = new AdminConfiguration({ filename, encryptionKey, adminToken, baseUrl, now, log });
   const store = new Store({ filename, key: configuration.key, now });
   const rate = new RateLimiter(now);
-  const running = new Map();
+  const jobs = createSyncJobs({ store, collector, now });
+  const running = jobs.running;
   const allowed = (device, id) => { if (!device.accountIds.includes(id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); };
   const admin = req => {
     rate.check(`admin:${req.socket.remoteAddress}`, 120);
@@ -45,35 +48,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
     rate.check(`device:${current.id}`, 180);
     return current;
   };
-  const requestSync = id => {
-    if (running.has(id)) return running.get(id);
-    const account = store.account(id);
-    if (!account || !account.enabled || (account.lastAttemptAt && now() - account.lastAttemptAt < 5 * 60000)) return Promise.resolve();
-    store.updateAccount(id, { status: 'syncing', lastAttemptAt: now(), nextSyncAt: now() + account.intervalMinutes * 60000, error: '' });
-    const task = Promise.resolve().then(async () => {
-      try {
-        const previous = store.snapshot([id]);
-        const activeOrderIds = new Set(previous.shipments.filter(s => !s.picked && !s.hidden && !s.deleted && s.status !== 'signed').map(s => s.orderId));
-        const trackedOrderIds = previous.orders.filter(o => activeOrderIds.has(o.id)).map(o => o.platformOrderId);
-        const knownOrders = previous.orders.map(order => ({ platformOrderId: order.platformOrderId,
-          orderDate: order.orderDate, orderDateSource: order.orderDateSource, orderDateOrigin: order.orderDateOrigin || '', dateCheckedAt: order.dateCheckedAt || 0,
-          shipments: previous.shipments.filter(s => s.orderId === order.id).map(s => ({ waybillNo: s.waybillNo, carrier: s.carrier, status: s.status,
-            picked: s.picked, hidden: s.hidden || s.deleted, logisticsCheckedAt: s.logisticsCheckedAt || 0, logisticsDetailCheckedAt: s.logisticsDetailCheckedAt || 0 })) }));
-        const result = await collector(account, store.cookie(id), { trackedOrderIds, knownOrders });
-        // A response started with an old login must not replace newly supplied credentials or state.
-        if (store.account(id).credentialVersion !== account.credentialVersion) return;
-        store.importResult(id, result);
-        if (result.refreshedCookie) store.refreshCookie(id, result.refreshedCookie);
-      } catch (error) {
-        if (store.account(id).credentialVersion !== account.credentialVersion) return;
-        const expired = error.code === 'ACCOUNT_EXPIRED';
-        const known = ['UPSTREAM_ERROR', 'UPSTREAM_FORMAT', 'UPSTREAM_BLOCKED', 'ACCOUNT_EXPIRED'].includes(error.code);
-        store.updateAccount(id, { status: expired ? 'expired' : 'error', error: known ? error.message : '同步未完成，请检查网络与后台配置', warnings: [] });
-      } finally { running.delete(id); }
-    });
-    running.set(id, task);
-    return task;
-  };
+  const requestSync = id => jobs.request(id).done;
   const timer = scheduler ? setInterval(() => {
     for (const account of store.accounts()) if (account.enabled && account.nextSyncAt <= now()) void requestSync(account.id);
   }, 30000).unref() : null;
@@ -112,7 +87,8 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       if (req.method === 'GET' && STATIC.has(path)) {
         const [file, type] = STATIC.get(path);
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
-        res.end(await readFile(new URL(file, PUBLIC))); return;
+        const content = await readFile(new URL(file, PUBLIC));
+        res.end(file === 'index.html' ? content.toString('utf8').replace('__SERVER_VERSION__', serverVersion) : content); return;
       }
       if (path === '/health' && req.method === 'GET') { send(res, 200, { ok: true }); return; }
       if (!path.startsWith('/v1/')) fail(404, 'NOT_FOUND', '接口不存在');
@@ -154,7 +130,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
-        if (path === '/v1/admin/status' && req.method === 'GET') { send(res, 200, { fixture, baseUrl: configuration.baseUrl, configurationMode: configuration.mode }); return; }
+        if (path === '/v1/admin/status' && req.method === 'GET') { send(res, 200, { fixture, serverVersion, baseUrl: configuration.baseUrl, configurationMode: configuration.mode }); return; }
         if (path === '/v1/admin/settings' && req.method === 'PATCH') {
           const body = await bodyOf(req); onlyKeys(body, ['baseUrl']);
           configuration.authenticate(req.headers['x-admin-token']);
@@ -184,7 +160,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           if (accountPath[2] && req.method === 'POST') {
             const body = await bodyOf(req);
             configuration.authenticate(req.headers['x-admin-token']);
-            onlyKeys(body, []); void requestSync(accountPath[1]); send(res, 202, { accepted: true }); return;
+            onlyKeys(body, []); send(res, 202, { accepted: true, jobs: [jobs.request(accountPath[1]).job] }); return;
           }
         }
         fail(404, 'NOT_FOUND', '管理接口不存在');
@@ -198,13 +174,24 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       if (path === '/v1/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts(current.accountIds) }); return; }
       if (path === '/v1/accounts/sync' && req.method === 'POST') {
         onlyKeys(await bodyOf(req), []);
-        current.accountIds.forEach(id => { void requestSync(id); });
-        send(res, 202, { accepted: true }); return;
+        send(res, 202, { accepted: true, jobs: current.accountIds.map(id => jobs.request(id).job) }); return;
       }
       const syncPath = path.match(/^\/v1\/accounts\/([^/]+)\/sync$/);
       if (syncPath && req.method === 'POST') {
         allowed(current, syncPath[1]); onlyKeys(await bodyOf(req), []);
-        void requestSync(syncPath[1]); send(res, 202, { accepted: true }); return;
+        send(res, 202, { accepted: true, jobs: [jobs.request(syncPath[1]).job] }); return;
+      }
+      const orderRefresh = path.match(/^\/v1\/orders\/([^/]+)\/refresh$/);
+      if (orderRefresh && req.method === 'POST') {
+        const order = store.order(orderRefresh[1]);
+        if (!order || !current.accountIds.includes(order.accountId)) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
+        onlyKeys(await bodyOf(req), []);
+        send(res, 202, { accepted: true, jobs: [jobs.request(order.accountId, order.id).job] }); return;
+      }
+      const jobPath = path.match(/^\/v1\/sync-jobs\/([^/]+)$/);
+      if (jobPath && req.method === 'GET') {
+        const job = jobs.read(jobPath[1]); allowed(current, job.accountId);
+        send(res, 200, { job }); return;
       }
       if (path === '/v1/snapshot' && req.method === 'GET') {
         const requested = url.searchParams.getAll('accountId');
@@ -229,11 +216,11 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running,
+  return { server, store, requestSync, fixture, running, jobs,
     async close() {
       if (timer) clearInterval(timer);
       await new Promise(resolve => server.close(resolve));
-      await Promise.all([...running.values()]);
+      await jobs.close();
       store.close();
     } };
 }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
+import { serverVersion, capabilities } from './version.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
@@ -22,6 +23,7 @@ function logisticsData(input, old = {}) {
   }).sort((a, b) => b.time - a.time);
   const state = ['ok', 'empty', 'error', 'unavailable'].includes(input.logisticsState) ? input.logisticsState : old.logisticsState || '';
   return { logisticsEvents: events.slice(0, 100), logisticsState: state,
+    logisticsError: input.logisticsState ? shortText(input.logisticsError, 200) || ({ error: '物流查询未完成，已保留原轨迹', unavailable: '平台未返回该运单轨迹', empty: '平台本次未返回物流轨迹' }[state] || '') : old.logisticsError || '',
     logisticsCheckedAt: Math.max(checkedAt, old.logisticsCheckedAt || 0),
     logisticsDetailCheckedAt: Math.max(validTime(input.logisticsDetailCheckedAt), old.logisticsDetailCheckedAt || 0),
     logisticsUpdatedAt: Math.max(old.logisticsUpdatedAt || 0, state === 'ok' && supplied.some(e => e?.description) ? validTime(input.logisticsUpdatedAt) || checkedAt : 0),
@@ -60,6 +62,7 @@ export class Store {
     return this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision;
   }
   account(id) { return parse(this.db.prepare('SELECT data FROM accounts WHERE id=?').get(id)); }
+  order(id) { return parse(this.db.prepare('SELECT data FROM orders WHERE id=?').get(id)); }
   accounts(ids) {
     const allowed = ids && new Set(ids);
     return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !allowed || allowed.has(a.id));
@@ -162,6 +165,9 @@ export class Store {
           orderDateSource: replaceDate || verifiedDate ? 'platform' : old?.orderDate ? 'legacy' : 'unknown',
           orderDateOrigin: replaceDate ? incomingDetail ? 'detail' : 'list' : old?.orderDateOrigin || (verifiedDate ? 'list' : ''),
           dateCheckedAt: Math.max(old?.dateCheckedAt || 0, checkedAt),
+          dateState: checkedAt >= (old?.dateCheckedAt || 0) && ['ok', 'empty', 'error', 'unavailable'].includes(input.dateState) ? input.dateState : old?.dateState || (inputDate ? 'ok' : 'unknown'),
+          dateError: checkedAt >= (old?.dateCheckedAt || 0) && input.dateState ? shortText(input.dateError, 200) : old?.dateError || '',
+          dateOverride: old?.dateOverride ?? null, dateOverrideAt: old?.dateOverrideAt || 0,
           firstSeenAt: old?.firstSeenAt || this.now(), tradeStatus: input.tradeStatus || old?.tradeStatus || '',
           orderStatus: input.orderStatus || old?.orderStatus || '',
           refundStatus: input.refundStatus || old?.refundStatus || '' };
@@ -192,7 +198,7 @@ export class Store {
         const rows = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse);
         for (const old of rows.filter(s => s.orderId === orderId && (!failure.waybillNo || s.waybillNo === failure.waybillNo))) {
           if (failure.logisticsCheckedAt && failure.logisticsCheckedAt < (old.logisticsCheckedAt || 0)) continue;
-          const updated = { ...old, ...logisticsData({ logisticsState: failure.state, logisticsCheckedAt: failure.logisticsCheckedAt || this.now(), logisticsDetailCheckedAt: failure.logisticsDetailCheckedAt }, old), updatedAt: this.now() };
+          const updated = { ...old, ...logisticsData({ logisticsState: failure.state, logisticsError: failure.logisticsError, logisticsCheckedAt: failure.logisticsCheckedAt || this.now(), logisticsDetailCheckedAt: failure.logisticsDetailCheckedAt }, old), updatedAt: this.now() };
           this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
         }
       }
@@ -204,14 +210,15 @@ export class Store {
     const allowed = new Set(accountIds);
     const accounts = this.accounts(accountIds);
     const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(o => allowed.has(o.accountId))
-      .map(o => ({ ...o, orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0 }));
+      .map(o => ({ ...o, orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
+        dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '' }));
     const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(s => allowed.has(s.accountId));
     const histories = shipments.map(shipment => {
       const events = shipment.logisticsEvents || [];
       shipment.logisticsEvents = []; shipment.logisticsTruncated = !!shipment.logisticsTruncated;
       return { shipment, events };
     });
-    const snapshot = { schemaVersion: 1, serverRevision: Math.max(0, ...accounts.map(a => a.revision)), accounts, orders, shipments,
+    const snapshot = { schemaVersion: 1, serverVersion, capabilities, serverRevision: Math.max(0, ...accounts.map(a => a.revision)), accounts, orders, shipments,
       hiddenIds: shipments.filter(s => s.hidden).map(s => s.id), deletedIds: shipments.filter(s => s.deleted).map(s => s.id),
       events: shipments.filter(s => s.arrivalAt).map(s => ({ id: stableId(s.id, 'arrival', s.arrivalAt), shipmentId: s.id, arrivedAt: s.arrivalAt, code: s.pickupCode, stationKey: s.station })),
       syncWarnings: accounts.flatMap(a => (a.warnings || []).map(message => ({ accountId: a.id, message }))) };
@@ -233,6 +240,29 @@ export class Store {
     return this.transaction(() => {
       const appliedIds = [];
       for (const input of operations) {
+        if (input?.action === 'setOrderDate') {
+          onlyKeys(input, ['id', 'orderId', 'action', 'date', 'occurredAt']);
+          const operation = { id: text(input.id, '操作ID', 128), orderId: text(input.orderId, '订单ID', 128), action: input.action, date: input.date, occurredAt: input.occurredAt };
+          const validDate = operation.date === null || (typeof operation.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(operation.date)
+            && Number.isFinite(Date.parse(operation.date + 'T00:00:00Z')) && new Date(operation.date + 'T00:00:00Z').toISOString().slice(0, 10) === operation.date);
+          if (!validDate || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt <= 0 || operation.occurredAt > this.now() + 300000) fail(400, 'INVALID_OPERATION', '日期或操作时间无效');
+          const order = this.order(operation.orderId);
+          if (!order || !device.accountIds.includes(order.accountId)) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
+          const digest = hash(JSON.stringify(operation));
+          const old = this.db.prepare('SELECT payload_hash FROM operations WHERE device_id=? AND id=?').get(device.id, operation.id);
+          if (old && old.payload_hash !== digest) fail(409, 'OPERATION_CONFLICT', '相同操作ID不能用于不同内容');
+          if (!old) {
+            const stale = order.dateOverrideAt && operation.occurredAt <= order.dateOverrideAt;
+            if (!stale) {
+              Object.assign(order, { dateOverride: operation.date, dateOverrideAt: operation.occurredAt });
+              this.db.prepare('UPDATE orders SET data=? WHERE id=?').run(JSON.stringify(order), order.id);
+            }
+            // Acknowledging a stale offline edit must still refresh the client's optimistic value.
+            this.updateAccount(order.accountId, {});
+            this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
+          }
+          appliedIds.push(operation.id); continue;
+        }
         onlyKeys(input, ['id', 'shipmentId', 'action', 'occurredAt']);
         const operation = { id: text(input.id, '操作ID', 128), shipmentId: text(input.shipmentId, '运单ID', 128), action: input.action, occurredAt: input.occurredAt };
         if (!['pick', 'restore', 'hide', 'unhide'].includes(operation.action) || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt < 0 || operation.occurredAt > this.now() + 5 * 60000) fail(400, 'INVALID_OPERATION', '不支持的操作或时间');

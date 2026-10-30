@@ -129,8 +129,9 @@ async function refresh() {
     for (const warning of account.warnings || []) item.append(node('p', warning, 'hint'));
     const actions = node('div', '', 'actions');
     actions.append(action('更新账号', () => edit(account)), action('立即采集', async () => {
-      await api(`/v1/admin/accounts/${encodeURIComponent(account.id)}/sync`, { method: 'POST', body: '{}' });
-      notice('已提交采集请求；重复请求会合并，五分钟内不重复访问平台。'); await refresh();
+      const result = await api(`/v1/admin/accounts/${encodeURIComponent(account.id)}/sync`, { method: 'POST', body: '{}' });
+      const job = result.jobs?.[0];
+      notice(job?.state === 'cooldown' ? `平台查询冷却中，可于 ${date(job.retryAt)} 重试。` : job?.state === 'disabled' ? job.error : '采集任务已提交；请刷新状态查看完成结果。'); await refresh();
     }));
     item.append(actions); $('accounts').append(item);
     const label = node('label', '', 'checkbox'); const check = document.createElement('input');

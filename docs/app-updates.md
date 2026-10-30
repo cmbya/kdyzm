@@ -2,7 +2,7 @@
 
 手机从本仓库的Latest Release读取 `app-update.json`，下载安装包后交给Android确认。更新不依赖Docker账号或Cookie。App 3.1.4首次需手动覆盖安装，后续使用「我的 → 检查更新」。旧私人版不要卸载；覆盖安装保留绑定、短信和领取记录。
 
-App版本标签为 `app-v3.1.4`，Docker版本标签仍为 `v3.1.3`。容器流水线不匹配app-v标签。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。固定下载入口：
+当前App版本标签为 `app-v3.1.5`，Docker版本标签为 `v3.1.5`。容器流水线不匹配app-v标签。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。固定下载入口：
 
 `https://github.com/zsdd2/kdyzm/releases/latest/download/app-update.json`
 

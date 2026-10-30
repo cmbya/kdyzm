@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createService } from '../src/service.mjs';
+import { serverVersion } from '../src/version.mjs';
 
 const PASSWORD = 'my-first-admin-password';
 const NEXT_PASSWORD = 'my-updated-admin-password';
@@ -92,7 +93,7 @@ test('settings require an admin session; password changes revoke sessions while 
   assert.equal(first.expiresAt, TIME + 8 * 60 * 60000);
   assert.notEqual(first.token, second.token);
   const status = await h.request('/v1/admin/status', { token: first.token });
-  assert.deepEqual(status.data, { fixture: false, baseUrl: '', configurationMode: 'managed' });
+  assert.deepEqual(status.data, { fixture: false, serverVersion, baseUrl: '', configurationMode: 'managed' });
   const account = await h.request('/v1/admin/accounts', { method: 'POST', token: first.token, body: { platform: 'taobao', label: '我的淘宝', cookie: 'private-cookie-value' } });
   assert.equal(account.status, 201);
   const pairing = { method: 'POST', token: first.token, body: { accountIds: [account.data.account.id] } };
