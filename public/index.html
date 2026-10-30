@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>取件助手 · 线上账号管理</title><link rel="stylesheet" href="/admin.css"></head>
+<body>
+  <main>
+    <header><div><p class="eyebrow">取件助手 3.1.0</p><h1>线上账号管理</h1></div><button id="logout" hidden>退出</button></header>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <section id="login-panel"><h2>管理员登录</h2><form id="login-form"><label>管理员密钥<input id="admin-token" type="password" autocomplete="off" required minlength="32"></label><button>进入管理</button></form><p class="hint">使用服务配置的 ADMIN_TOKEN。密钥只在当前页面内存中保留。</p></section>
+    <div id="workspace" hidden>
+      <p id="fixture-notice" class="fixture" hidden>本机联调 · 全部为模拟包裹，未连接真实平台</p>
+      <section><div class="section-heading"><h2>账号与登录状态</h2><button id="refresh" class="secondary">刷新状态</button></div><div id="accounts"></div></section>
+      <section><h2 id="account-heading">添加账号</h2>
+        <form id="account-form">
+          <input id="account-id" type="hidden">
+          <div class="row"><label>平台<select id="platform"><option value="taobao">淘宝</option><option value="pdd">拼多多</option></select></label><label>账号名称<input id="label" required maxlength="80" placeholder="例如：我的淘宝"></label></div>
+          <label>平台 Cookie<textarea id="cookie" rows="3" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="仅在此后台粘贴；设备不会收到 Cookie"></textarea></label>
+          <div class="row"><label>采集间隔<select id="interval"><option value="60">60 分钟</option><option value="30">30 分钟</option></select></label><label class="checkbox"><input id="enabled" type="checkbox" checked>启用自动同步</label></div>
+          <p class="hint">更新已有账号时，留空保留原 Cookie。保存不会立刻访问平台，可点击账号的“立即采集”。</p>
+          <div class="actions"><button>保存账号</button><button id="cancel-edit" type="button" class="secondary">取消编辑</button></div>
+        </form>
+      </section>
+      <section><h2>绑定设备</h2><p>选择这个设备可访问的账号，再生成十分钟有效的一次性绑定码。</p><form id="pair-form"><fieldset id="scope"><legend>授权账号范围</legend></fieldset><button>生成绑定码</button></form><div id="pair-result" hidden><img id="pair-qr" width="256" height="256" alt="设备绑定二维码"><div><p>服务地址：<span id="pair-url"></span></p><p>一次性绑定码：<strong id="pair-code"></strong></p><p id="pair-expires" class="hint"></p></div></div></section>
+      <section><h2>已授权设备</h2><div id="devices"></div><p class="hint">撤销后该设备不能再读取包裹或提交操作；设备上的本地历史保留。</p></section>
+    </div>
+  </main>
+  <script type="module" src="/admin.js"></script>
+</body></html>

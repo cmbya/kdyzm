@@ -1,0 +1,41 @@
+name: kdyzm
+services:
+  kdyzm:
+    image: ghcr.io/zsdd2/kdyzm:3.1.0
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8787}:8787"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8787"
+      DATA_DIR: /data
+      TZ: Asia/Shanghai
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the public HTTPS origin in .env}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set a random admin token in .env}
+      COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:?Set a 64-character hex key in .env}
+    volumes:
+      - kdyzm-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+volumes:
+  kdyzm-data:

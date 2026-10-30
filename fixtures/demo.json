@@ -1,0 +1,12 @@
+{
+  "orders": [
+    { "platformOrderId": "fixture-order-1", "title": "演示：共码两件", "amount": 49.5, "orderDate": 1793318400000, "orderStatus": "待收货", "refundStatus": "" },
+    { "platformOrderId": "fixture-order-2", "title": "演示：运输中暂无取件码", "amount": null, "orderDate": 1793318400000, "orderStatus": "运输中", "refundStatus": "" }
+  ],
+  "shipments": [
+    { "platformOrderId": "fixture-order-1", "waybillNo": "FIXTURE001", "carrier": "中通快递", "status": "arrived", "pickupCode": "7-6-7042", "station": "演示驿站", "arrivalAt": 1793322000000, "updatedAt": 1793322000000 },
+    { "platformOrderId": "fixture-order-1", "waybillNo": "FIXTURE002", "carrier": "中通快递", "status": "arrived", "pickupCode": "7-6-7042", "station": "演示驿站", "arrivalAt": 1793322000000, "updatedAt": 1793322000000 },
+    { "platformOrderId": "fixture-order-2", "waybillNo": "FIXTURE003", "carrier": "顺丰速运", "status": "transit", "pickupCode": "", "station": "", "arrivalAt": 0, "updatedAt": 1793322000000 }
+  ],
+  "warnings": ["本机fixture：全部为模拟包裹，没有登录真实平台"]
+}

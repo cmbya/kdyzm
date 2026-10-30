@@ -1,0 +1,13 @@
+{
+  "name": "pickcode-online-service",
+  "version": "3.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.13.0" },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "fixture": "node scripts/fixture.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": { "qrcode": "1.5.4" }
+}
