@@ -55,7 +55,11 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         const previous = store.snapshot([id]);
         const activeOrderIds = new Set(previous.shipments.filter(s => !s.picked && !s.hidden && !s.deleted && s.status !== 'signed').map(s => s.orderId));
         const trackedOrderIds = previous.orders.filter(o => activeOrderIds.has(o.id)).map(o => o.platformOrderId);
-        const result = await collector(account, store.cookie(id), { trackedOrderIds });
+        const knownOrders = previous.orders.map(order => ({ platformOrderId: order.platformOrderId,
+          orderDate: order.orderDate, orderDateSource: order.orderDateSource, orderDateOrigin: order.orderDateOrigin || '', dateCheckedAt: order.dateCheckedAt || 0,
+          shipments: previous.shipments.filter(s => s.orderId === order.id).map(s => ({ waybillNo: s.waybillNo, carrier: s.carrier, status: s.status,
+            picked: s.picked, hidden: s.hidden || s.deleted, logisticsCheckedAt: s.logisticsCheckedAt || 0, logisticsDetailCheckedAt: s.logisticsDetailCheckedAt || 0 })) }));
+        const result = await collector(account, store.cookie(id), { trackedOrderIds, knownOrders });
         // A response started with an old login must not replace newly supplied credentials or state.
         if (store.account(id).credentialVersion !== account.credentialVersion) return;
         store.importResult(id, result);

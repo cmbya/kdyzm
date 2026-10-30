@@ -43,4 +43,10 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 操作请求：`{operations:[{id,shipmentId,action,occurredAt}]}`，action仅为`pick/restore/hide/unhide`，每批1–100条。响应`{appliedIds:[]}`。同设备同ID重放幂等；同ID不同内容返回409；越权批次整体失败。短信正文、解析字段和任意凭证不能经操作接口上行。
 
+3.1.3新增可选字段，schemaVersion仍为1。订单的`orderDateOrigin=list/detail`区分证据来源，`dateCheckedAt`记录实际详情补查时间。详情日期可以纠正旧列表日期，同一详情的新结果不能被更早的补查或列表值覆盖；人工记录不参与此纠正。
+
+运单新增`logisticsEvents:[{time,timeText,description,location}]`，`time`为毫秒，无法解析为0且保留原`timeText`；`logisticsState=ok/empty/error/unavailable`，未查询时可为空或缺席；`logisticsCheckedAt`与`logisticsUpdatedAt`分别表示最近尝试、最近成功时间。`logisticsTruncated`提示节点已截断。每运单最多100条，description/location/timeText限制为600/120/100字符；同账号同运单的失败或空结果不清旧缓存。快照轨迹预算根据整个JSON实际UTF-8字节数计算，控制在1,900,000字节目标内（基础数据本身已超限的历史边界需另行分页），只裁输出不清数据库。
+
+`logisticsDetailCheckedAt`为采集端内部公平轮询时间，旧客户端可忽略。新增字段不进入设备写操作白名单，仍不能通过App修改平台原始数据。
+
 账号status为expired表示后台更新Cookie，设备仍有效；设备401表示重新绑定。错误JSON形如`{error:{code,message}}`。分页缺失、网络失败和上游过期时保留历史，真实结果以账号状态与lastSuccessAt为准。

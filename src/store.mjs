@@ -6,6 +6,27 @@ import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
+const validTime = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000 ? value : 0;
+const shortText = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
+function logisticsData(input, old = {}) {
+  const checkedAt = validTime(input.logisticsCheckedAt);
+  if (checkedAt && checkedAt < (old.logisticsCheckedAt || 0)) return logisticsData({}, old);
+  const supplied = Array.isArray(input.logisticsEvents) ? input.logisticsEvents : [];
+  const seen = new Set();
+  const events = [...supplied, ...(old.logisticsEvents || [])].filter(e => e && typeof e === 'object').map(e => ({
+    time: validTime(e.time), timeText: shortText(e.timeText, 100), description: shortText(e.description, 600), location: shortText(e.location, 120)
+  })).filter(e => {
+    const key = JSON.stringify([e.time, e.time ? '' : e.timeText, e.description, e.location]);
+    if (!e.description || seen.has(key)) return false;
+    seen.add(key); return true;
+  }).sort((a, b) => b.time - a.time);
+  const state = ['ok', 'empty', 'error', 'unavailable'].includes(input.logisticsState) ? input.logisticsState : old.logisticsState || '';
+  return { logisticsEvents: events.slice(0, 100), logisticsState: state,
+    logisticsCheckedAt: Math.max(checkedAt, old.logisticsCheckedAt || 0),
+    logisticsDetailCheckedAt: Math.max(validTime(input.logisticsDetailCheckedAt), old.logisticsDetailCheckedAt || 0),
+    logisticsUpdatedAt: Math.max(old.logisticsUpdatedAt || 0, state === 'ok' && supplied.some(e => e?.description) ? validTime(input.logisticsUpdatedAt) || checkedAt : 0),
+    logisticsTruncated: !!(input.logisticsTruncated || old.logisticsTruncated || events.length > 100) };
+}
 const carrierKey = value => {
   const name = String(value || '').toUpperCase().replace(/\s/g, '');
   for (const [pattern, key] of [[/中通|^ZTO$/, 'ZTO'], [/圆通|^YTO$/, 'YTO'], [/申通|^STO$/, 'STO'], [/顺丰|^SF$/, 'SF'], [/韵达|^YUNDA$/, 'YUNDA'], [/极兔|^JTSD$/, 'JTSD']]) if (pattern.test(name)) return key;
@@ -130,12 +151,17 @@ export class Store {
         const old = parse(this.db.prepare('SELECT data FROM orders WHERE id=?').get(id));
         // Filtered orders may refresh existing history, but must not create new shopping records.
         if (!old && !admittedIds.has(platformOrderId)) continue;
-        const inputDate = Number.isFinite(input.orderDate) && input.orderDate > 0 && input.orderDate <= 8640000000000000 ? input.orderDate : 0;
+        const inputDate = validTime(input.orderDate) <= this.now() + 300000 ? validTime(input.orderDate) : 0;
         const verifiedDate = old?.orderDateSource === 'platform' && old.orderDate > 0;
+        const checkedAt = validTime(input.dateCheckedAt) <= this.now() + 300000 ? validTime(input.dateCheckedAt) : 0;
+        const incomingDetail = input.orderDateOrigin === 'detail';
+        const replaceDate = !!inputDate && (!verifiedDate || (incomingDetail && (old?.orderDateOrigin !== 'detail' || checkedAt >= (old?.dateCheckedAt || 0))));
         const order = { ...old, id, accountId, platform: account.platform, platformOrderId,
           title: String(input.title || old?.title || ''), amount: input.amount == null ? old?.amount ?? null : input.amount,
-          orderDate: verifiedDate ? old.orderDate : inputDate || old?.orderDate || 0,
-          orderDateSource: verifiedDate || inputDate ? 'platform' : old?.orderDate ? 'legacy' : 'unknown',
+          orderDate: replaceDate ? inputDate : old?.orderDate || 0,
+          orderDateSource: replaceDate || verifiedDate ? 'platform' : old?.orderDate ? 'legacy' : 'unknown',
+          orderDateOrigin: replaceDate ? incomingDetail ? 'detail' : 'list' : old?.orderDateOrigin || (verifiedDate ? 'list' : ''),
+          dateCheckedAt: Math.max(old?.dateCheckedAt || 0, checkedAt),
           firstSeenAt: old?.firstSeenAt || this.now(), tradeStatus: input.tradeStatus || old?.tradeStatus || '',
           orderStatus: input.orderStatus || old?.orderStatus || '',
           refundStatus: input.refundStatus || old?.refundStatus || '' };
@@ -156,8 +182,19 @@ export class Store {
           pickupCode: input.pickupCode || old?.pickupCode || '', station: input.station || old?.station || '',
           arrivalAt: old?.arrivalAt || (status === 'arrived' ? input.arrivalAt || this.now() : 0),
           updatedAt: input.updatedAt || this.now(), picked: old?.picked || false, hidden: old?.hidden || false,
-          deleted: old?.deleted || false, manualAt: old?.manualAt || 0 };
+          deleted: old?.deleted || false, manualAt: old?.manualAt || 0,
+          ...logisticsData(input, old) };
         this.db.prepare('INSERT INTO shipments VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, accountId, JSON.stringify(shipment));
+      }
+      for (const failure of result.logisticsFailures || []) {
+        if (!['error', 'unavailable', 'empty'].includes(failure.state)) continue;
+        const orderId = stableId(accountId, account.platform, 'order', String(failure.platformOrderId));
+        const rows = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse);
+        for (const old of rows.filter(s => s.orderId === orderId && (!failure.waybillNo || s.waybillNo === failure.waybillNo))) {
+          if (failure.logisticsCheckedAt && failure.logisticsCheckedAt < (old.logisticsCheckedAt || 0)) continue;
+          const updated = { ...old, ...logisticsData({ logisticsState: failure.state, logisticsCheckedAt: failure.logisticsCheckedAt || this.now(), logisticsDetailCheckedAt: failure.logisticsDetailCheckedAt }, old), updatedAt: this.now() };
+          this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
+        }
       }
       // Absence, pagination, refunds and source signatures never change manual state or tombstones.
       this.updateAccount(accountId, { status: 'ok', lastSuccessAt: this.now(), error: '', warnings: result.warnings || [] });
@@ -169,10 +206,27 @@ export class Store {
     const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(o => allowed.has(o.accountId))
       .map(o => ({ ...o, orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0 }));
     const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(s => allowed.has(s.accountId));
-    return { schemaVersion: 1, serverRevision: Math.max(0, ...accounts.map(a => a.revision)), accounts, orders, shipments,
+    const histories = shipments.map(shipment => {
+      const events = shipment.logisticsEvents || [];
+      shipment.logisticsEvents = []; shipment.logisticsTruncated = !!shipment.logisticsTruncated;
+      return { shipment, events };
+    });
+    const snapshot = { schemaVersion: 1, serverRevision: Math.max(0, ...accounts.map(a => a.revision)), accounts, orders, shipments,
       hiddenIds: shipments.filter(s => s.hidden).map(s => s.id), deletedIds: shipments.filter(s => s.deleted).map(s => s.id),
       events: shipments.filter(s => s.arrivalAt).map(s => ({ id: stableId(s.id, 'arrival', s.arrivalAt), shipmentId: s.id, arrivedAt: s.arrivalAt, code: s.pickupCode, stationKey: s.station })),
       syncWarnings: accounts.flatMap(a => (a.warnings || []).map(message => ({ accountId: a.id, message }))) };
+    // Android caps the entire response at 2,000,000 bytes, not just the histories.
+    // Reserve headroom and trim this response only; the SQLite cache remains intact.
+    let historyBudget = Math.max(0, 1900000 - Buffer.byteLength(JSON.stringify(snapshot), 'utf8'));
+    histories.sort((a, b) => Number(a.shipment.picked || a.shipment.hidden) - Number(b.shipment.picked || b.shipment.hidden));
+    for (const { shipment, events } of histories) {
+      for (const event of events) {
+        const size = Buffer.byteLength(JSON.stringify(event), 'utf8') + (shipment.logisticsEvents.length ? 1 : 0);
+        if (size > historyBudget) { shipment.logisticsTruncated = true; continue; }
+        shipment.logisticsEvents.push(event); historyBudget -= size;
+      }
+    }
+    return snapshot;
   }
   applyOperations(device, operations) {
     if (!Array.isArray(operations) || !operations.length || operations.length > 100) fail(400, 'INVALID_OPERATIONS', '每批操作须为1到100条');
