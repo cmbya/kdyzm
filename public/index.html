@@ -3,11 +3,29 @@
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>取件助手 · 线上账号管理</title><link rel="stylesheet" href="/admin.css"></head>
 <body>
   <main>
-    <header><div><p class="eyebrow">取件助手 3.1.0</p><h1>线上账号管理</h1></div><button id="logout" hidden>退出</button></header>
+    <header><div><p class="eyebrow">取件助手 3.1.1</p><h1>线上账号管理</h1></div><button id="logout" hidden>退出</button></header>
     <p id="notice" role="status" aria-live="polite"></p>
-    <section id="login-panel"><h2>管理员登录</h2><form id="login-form"><label>管理员密钥<input id="admin-token" type="password" autocomplete="off" required minlength="32"></label><button>进入管理</button></form><p class="hint">使用服务配置的 ADMIN_TOKEN。密钥只在当前页面内存中保留。</p></section>
+    <section id="loading-panel" aria-busy="true"><h2>正在检查服务</h2><p id="loading-message" class="hint">正在读取初始化状态…</p><button id="retry-setup" class="secondary" hidden>重新连接</button></section>
+    <section id="setup-panel" hidden><h2>首次使用设置</h2>
+      <p class="hint" id="setup-code-hint">请从服务的容器日志中获取一次性初始化码。初始化后使用管理员密码登录。</p>
+      <form id="setup-form">
+        <label>初始化码<input id="setup-code" type="password" autocomplete="off" required maxlength="256" aria-describedby="setup-code-hint"></label>
+        <div class="row"><label>管理员密码<input id="setup-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128" aria-describedby="password-hint"></label><label>确认密码<input id="setup-confirm" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label></div>
+        <p id="password-hint" class="hint">密码长度为 12–128 个字符，请妥善保存。</p>
+        <label>HTTPS 服务地址（可稍后填写）<input id="setup-base-url" type="url" autocomplete="url" placeholder="https://pickcode.example.com" aria-describedby="setup-url-hint"></label>
+        <p id="setup-url-hint" class="hint">仅填写域名与可选端口，不包含路径。留空仍可管理账号；绑定设备前需要补充地址。填写地址不会自动配置域名、证书或 HTTPS 代理。</p>
+        <button>完成初始化</button>
+      </form>
+    </section>
+    <section id="login-panel" hidden><h2>管理员登录</h2><form id="login-form"><label><span id="login-label">管理员密码</span><input id="admin-token" type="password" autocomplete="current-password" required aria-describedby="login-hint"></label><button>进入管理</button></form><p id="login-hint" class="hint">输入初始化时设置的密码。登录凭证只在当前页面内存中保留，刷新页面后需重新登录。</p></section>
     <div id="workspace" hidden>
       <p id="fixture-notice" class="fixture" hidden>本机联调 · 全部为模拟包裹，未连接真实平台</p>
+      <section><h2>服务设置</h2><p id="configuration-hint" class="hint"></p><p>当前服务地址：<span id="configured-base-url"></span></p>
+        <div id="managed-settings" hidden>
+          <form id="settings-form"><label>HTTPS 服务地址<input id="settings-base-url" type="url" autocomplete="url" placeholder="https://pickcode.example.com" aria-describedby="settings-url-hint"></label><p id="settings-url-hint" class="hint">仅填写域名与可选端口。留空时无法生成设备绑定码；修改地址后需为设备重新生成绑定码。域名、证书和 HTTPS 代理需自行配置。</p><button>保存地址</button></form>
+          <form id="password-form"><h3>修改管理员密码</h3><label>当前密码<input id="current-password" type="password" autocomplete="current-password" required></label><div class="row"><label>新密码<input id="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128" aria-describedby="change-password-hint"></label><label>确认新密码<input id="confirm-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label></div><p id="change-password-hint" class="hint">新密码为 12–128 个字符。修改后其他管理页面需重新登录，已绑定设备不受影响。</p><button>修改密码</button></form>
+        </div>
+      </section>
       <section><div class="section-heading"><h2>账号与登录状态</h2><button id="refresh" class="secondary">刷新状态</button></div><div id="accounts"></div></section>
       <section><h2 id="account-heading">添加账号</h2>
         <form id="account-form">
@@ -19,7 +37,7 @@
           <div class="actions"><button>保存账号</button><button id="cancel-edit" type="button" class="secondary">取消编辑</button></div>
         </form>
       </section>
-      <section><h2>绑定设备</h2><p>选择这个设备可访问的账号，再生成十分钟有效的一次性绑定码。</p><form id="pair-form"><fieldset id="scope"><legend>授权账号范围</legend></fieldset><button>生成绑定码</button></form><div id="pair-result" hidden><img id="pair-qr" width="256" height="256" alt="设备绑定二维码"><div><p>服务地址：<span id="pair-url"></span></p><p>一次性绑定码：<strong id="pair-code"></strong></p><p id="pair-expires" class="hint"></p></div></div></section>
+      <section><h2>绑定设备</h2><p>选择这个设备可访问的账号，再生成十分钟有效的一次性绑定码。</p><p id="pair-hint" class="hint" role="status"></p><form id="pair-form"><fieldset id="scope"><legend>授权账号范围</legend></fieldset><button id="generate-pair">生成绑定码</button></form><div id="pair-result" hidden><img id="pair-qr" width="256" height="256" alt="设备绑定二维码"><div><p>服务地址：<span id="pair-url"></span></p><p>一次性绑定码：<strong id="pair-code"></strong></p><p id="pair-expires" class="hint"></p></div></div></section>
       <section><h2>已授权设备</h2><div id="devices"></div><p class="hint">撤销后该设备不能再读取包裹或提交操作；设备上的本地历史保留。</p></section>
     </div>
   </main>

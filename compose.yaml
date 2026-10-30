@@ -1,22 +1,27 @@
 name: kdyzm
 services:
   kdyzm:
-    image: ghcr.io/zsdd2/kdyzm:3.1.0
+    image: ghcr.io/zsdd2/kdyzm:3.1.1
     pull_policy: always
     restart: unless-stopped
     init: true
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${PORT:-8787}:8787"
+      # 首次在可信内网打开 http://服务器IP:8787；不要把明文端口映射公网。
+      # 已有同机反向代理时，可将 BIND_ADDRESS 设为 127.0.0.1。
+      - "${BIND_ADDRESS:-0.0.0.0}:${PORT:-8787}:8787"
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: "8787"
       DATA_DIR: /data
       TZ: Asia/Shanghai
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set the public HTTPS origin in .env}
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?Set a random admin token in .env}
-      COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:?Set a 64-character hex key in .env}
+      # 新部署留空：首次访问设置管理员密码和服务地址，加密密钥自动生成。
+      # 以下三项仅供 3.1.0 旧环境变量模式兼容，升级时保留原值。
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-}
     volumes:
+      # 数据库与自动生成的密钥都在此卷，更新/重建容器时必须保留。
       - kdyzm-data:/data
     read_only: true
     tmpfs:

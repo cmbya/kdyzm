@@ -4,25 +4,21 @@
 
 源码：https://github.com/zsdd2/kdyzm
 
-镜像：`ghcr.io/zsdd2/kdyzm:3.1.0`（Linux amd64 / arm64）
+镜像：`ghcr.io/zsdd2/kdyzm:3.1.1`（Linux amd64 / arm64，兼容 App 3.1.0）
 
 ## 直接拉取部署
 
-需要 Docker Engine + Compose v2，以及一个已配置 HTTPS 的反向代理。正式 App 只接受 HTTPS 服务地址，不能直接填服务器的 HTTP IP 地址。
+需要 Docker Engine + Compose v2。**3.1.1 新部署不需要提前配置 PUBLIC_BASE_URL、ADMIN_TOKEN、COOKIE_ENCRYPTION_KEY，也不需要创建 `.env`。** 管理员密码和服务地址在首次打开页面时设置，加密密钥由服务自动生成并保存在数据卷。
 
-1. 下载配置，放进同一个目录：
+1. 新建目录并下载完整 Compose：
 
 ```sh
 mkdir -p kdyzm
 cd kdyzm
 curl -fL https://raw.githubusercontent.com/zsdd2/kdyzm/main/compose.yaml -o compose.yaml
-curl -fL https://raw.githubusercontent.com/zsdd2/kdyzm/main/.env.example -o .env
-chmod 600 .env
 ```
 
-2. 分别运行两次 `openssl rand -hex 32`，将两个不同的随机结果填写到 `.env` 的 `ADMIN_TOKEN` 和 `COOKIE_ENCRYPTION_KEY`。将 `PUBLIC_BASE_URL` 改成自己的 HTTPS 域名，如 `https://parcel.example.com`，不能包含路径。
-
-3. 拉取并启动，不需要克隆或编译源码：
+2. 拉取并启动，不需要克隆或编译源码：
 
 ```sh
 docker compose config --quiet
@@ -32,9 +28,37 @@ docker compose ps
 curl -f http://127.0.0.1:8787/health
 ```
 
-`compose config --quiet` 不会打印配置里的秘密。健康接口正常返回 `{"ok":true}`。
+健康接口正常返回 `{"ok":true}` 表示服务已启动，不代表已完成初始化。
 
-默认只监听主机 `127.0.0.1:8787`。将现有 HTTPS 反向代理指向这个端口；若代理在另一台设备或另一个容器网络中，把 `BIND_ADDRESS` 改为代理可达的主机内网 IP，并限制该端口只允许代理访问。不要直接公开明文8787端口。TLS代理保留 `Authorization`、`If-None-Match`、`ETag`，不记录认证头和请求体。
+3. 在 NAS / Docker 管理器查看此容器日志，或运行：
+
+```sh
+docker compose logs kdyzm
+```
+
+找到 `KDYZM_SETUP_CODE=…`，等号后面是自动生成的**一次性初始化码**。它用来防止后台尚未设置时被其他人抢先初始化，不是需要你提前生成的密钥；初始化完成后不能再使用。不要把这段日志公开。
+
+4. 在可信内网打开 `http://服务器内网IP:8787`，按首次设置页面填写：
+
+| 页面项 | 填写方式 |
+| --- | --- |
+| 一次性初始化码 | 粘贴容器日志中 `KDYZM_SETUP_CODE=` 后的内容 |
+| 管理员密码 / 确认密码 | 自己设置12–128字符密码，以后用它登录后台 |
+| HTTPS服务地址 | 例如 `https://kd.example.com`，不包含路径；尚未配置域名可先留空 |
+
+提交完成后进入登录页。Cookie加密密钥自动保存，无需填写、复制或在界面中显示。配置和数据库都持久保存在 `/data`；重启和升级不会重置密码或密钥。
+
+如果尚未填写HTTPS服务地址，可以先登录管理账号；生成App绑定码前，到「服务设置」填写。后续也可在设置中修改管理员密码，旧管理会话会立即失效。
+
+飞牛 / Portainer 等管理界面可以直接粘贴 [compose.yaml](compose.yaml) 创建项目，保留数据卷，然后按上述日志和首访步骤操作。端口冲突时只需修改主机端口（映射冒号中间的8787），容器内部端口仍为8787。
+
+## HTTPS与访问地址
+
+网页首次设置可以通过可信内网完成；**App绑定仍要求HTTPS地址**。填写地址不会自动创建域名、申请证书或开启HTTPS，需要使用已有反向代理。
+
+默认监听主机 `0.0.0.0:8787` 方便内网首次访问，不要将明文8787端口映射公网。同机HTTPS反向代理转发到 `127.0.0.1:8787`；代理在另一台设备或容器网络时，转发到可达的主机内网地址，并用防火墙限定访问。代理保留原始 `Host`、`Authorization`、`If-None-Match`、`ETag`，不记录认证头、Cookie或请求体。
+
+可以通过可选 `.env` 设置 `BIND_ADDRESS=127.0.0.1` 限制为同机代理访问，或设置 `PORT=其他端口`；这些不是初始化密钥。
 
 同机 Caddy 的最小站点配置示例：
 
@@ -48,7 +72,7 @@ parcel.example.com {
 
 ## 后台和 App 绑定
 
-1. 浏览器打开配置的 HTTPS 域名，使用 `.env` 中的 `ADMIN_TOKEN` 登录后台。
+1. 浏览器打开后台，使用首次设置的管理员密码登录。准备绑定App时，确保「服务设置」中的HTTPS地址已经可访问。
 2. 添加本人淘宝或拼多多账号及 Cookie，点击“立即采集”。默认每小时采集，可改为30分钟。Cookie 加密保存，不发送给 App。
 3. 选择允许同步的账号，生成十分钟一次性绑定码或二维码。
 4. App 的「我的 → 线上账号」填写同一 HTTPS 地址和绑定码。二维码可由系统识别后粘贴到 App。
@@ -69,11 +93,15 @@ API见 [PROTOCOL.md](PROTOCOL.md)。
 
 ## 持久化、升级与备份
 
-数据在命名卷 `kdyzm_kdyzm-data` 的 `/data` 内。容器删除重建不会删除该卷；不要执行 `docker compose down -v`。
+数据在命名卷 `kdyzm_kdyzm-data` 的 `/data` 内，包含SQLite数据库和 `service-config.json`（密码hash及Cookie加密密钥）。容器删除重建不会删除该卷；不要执行 `docker compose down -v`，也不要删除配置文件来重置密码。
 
-升级时更改 Compose 的镜像版本后执行 `docker compose pull && docker compose up -d`。`latest` 跟随正式版本，`edge` 是主分支；建议部署固定版本。保留 `.env` 中的原密钥，否则无法解密旧 Cookie。
+升级时更改 Compose 的镜像版本后执行 `docker compose pull && docker compose up -d`。`latest` 跟随正式版本，`edge` 是主分支；建议部署固定版本。必须保留完整数据卷，丢失其中的加密密钥会导致旧Cookie无法解密。一个数据卷只供一个服务实例使用。
 
-备份时先 `docker compose stop`，备份完整命名卷及 `.env`，然后 `docker compose start`。SQLite包含WAL文件，不能只复制运行中的单个 `.db`。密钥和数据应分开安全保存。恢复先在隔离环境验证，再切换正式服务。
+备份时先 `docker compose stop`，备份完整命名卷及自定义部署配置，然后 `docker compose start`。SQLite包含WAL文件，不能只复制运行中的单个 `.db`。备份含加密密钥，应限制读取权限；恢复先在隔离环境验证，再切换正式服务。
+
+### 已使用3.1.0环境变量部署的用户
+
+保留原 `.env` 中的 `PUBLIC_BASE_URL`、`ADMIN_TOKEN`、`COOKIE_ENCRYPTION_KEY` 和原数据卷，再更新镜像。新Compose会继续透传这些值，以旧环境变量模式运行；登录页面输入原 `ADMIN_TOKEN`，设置页显示由部署环境管理。不要删掉旧密钥后尝试重新初始化，这会使旧Cookie无法解密；程序会拒绝在已有数据库缺少密钥时生成新密钥。首次设置模式与旧环境变量模式不能混用。
 
 ## 开发和镜像构建
 
@@ -84,7 +112,7 @@ docker build -t kdyzm:smoke .
 node scripts/docker-smoke.mjs kdyzm:smoke
 ```
 
-Node需要24.13.0或更新版本；内建SQLite可能显示实验特性提示。CI先跑业务、认证和采集器mock测试，再检查非root容器、只读根目录、API认证、SQLite写入与重启持久化，最后构建并推送amd64/arm64镜像。主分支发布`edge`，版本标签`v3.1.0`发布`3.1.0`和`latest`。CI使用GitHub提供的临时token，不需要在仓库保存发布密钥。
+Node需要24.13.0或更新版本；内建SQLite可能显示实验特性提示。CI先跑业务、认证、首次设置和采集器mock测试，再检查无密钥环境变量启动、首访设置、非root容器、只读根目录、API认证及重启持久化，最后构建并推送amd64/arm64镜像。主分支发布`edge`，版本标签`v3.1.1`发布`3.1.1`和`latest`。CI使用GitHub提供的临时token，不需要在仓库保存发布密钥。
 
 `npm run fixture`仅供本机临时模拟，监听127.0.0.1:8787，数据保存在内存且不联系电商平台。正式镜像不含fixture脚本或测试数据。
 
