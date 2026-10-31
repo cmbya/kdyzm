@@ -44,12 +44,20 @@ export class Store {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS meta (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
       INSERT OR IGNORE INTO meta VALUES(1,0);
+      CREATE TABLE IF NOT EXISTS families (id TEXT PRIMARY KEY, name TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, data TEXT NOT NULL, credential TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, name TEXT NOT NULL, account_ids TEXT NOT NULL, created_at INTEGER NOT NULL, revoked_at INTEGER);
       CREATE TABLE IF NOT EXISTS pairing (code_hash TEXT PRIMARY KEY, account_ids TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER);
       CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS shipments (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS operations (device_id TEXT NOT NULL REFERENCES devices(id), id TEXT NOT NULL, payload_hash TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(device_id,id));`);
+    this.transaction(() => {
+      for (const table of ['devices', 'pairing']) {
+        if (!this.db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === 'family_ids')) {
+          this.db.exec(`ALTER TABLE ${table} ADD COLUMN family_ids TEXT NOT NULL DEFAULT '[]'`);
+        }
+      }
+    });
   }
   close() { this.db.close(); }
   transaction(fn) {
@@ -61,15 +69,35 @@ export class Store {
     this.db.exec('UPDATE meta SET revision=revision+1 WHERE id=1');
     return this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision;
   }
-  account(id) { return parse(this.db.prepare('SELECT data FROM accounts WHERE id=?').get(id)); }
+  family(id) { return this.db.prepare('SELECT id,name FROM families WHERE id=?').get(id); }
+  families(ids) {
+    const allowed = ids && new Set(ids);
+    return this.db.prepare('SELECT id,name FROM families ORDER BY rowid').all().filter(family => !allowed || allowed.has(family.id));
+  }
+  saveFamily(body, id = randomUUID()) {
+    onlyKeys(body, ['name']);
+    const name = text(body.name, '家人姓名', 80);
+    if (this.families().some(family => family.id !== id && family.name === name)) fail(409, 'FAMILY_NAME_EXISTS', '家人姓名已存在');
+    this.db.prepare('INSERT INTO families(id,name) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name').run(id, name);
+    this.revision();
+    return this.family(id);
+  }
+  accountFamily(account) {
+    if (!account) return account;
+    const familyId = account.familyId || '';
+    return { ...account, familyId, familyName: this.family(familyId)?.name || '' };
+  }
+  account(id) { return this.accountFamily(parse(this.db.prepare('SELECT data FROM accounts WHERE id=?').get(id))); }
   order(id) { return parse(this.db.prepare('SELECT data FROM orders WHERE id=?').get(id)); }
   accounts(ids) {
     const allowed = ids && new Set(ids);
-    return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !allowed || allowed.has(a.id));
+    return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !allowed || allowed.has(a.id)).map(a => this.accountFamily(a));
   }
   saveAccount(body, id = randomUUID(), fixture = false) {
-    onlyKeys(body, ['platform', 'label', 'cookie', 'enabled', 'intervalMinutes']);
+    onlyKeys(body, ['platform', 'label', 'cookie', 'enabled', 'intervalMinutes', 'familyId']);
     const old = this.account(id);
+    const familyId = body.familyId === undefined ? old?.familyId || '' : text(body.familyId, '家人ID', 128, false);
+    if (familyId && !this.family(familyId)) fail(400, 'INVALID_FAMILY', '请选择有效家人，待归属请留空');
     const platform = body.platform ?? old?.platform;
     if (!['taobao', 'pdd'].includes(platform) || (old && platform !== old.platform)) fail(400, 'INVALID_PLATFORM', '平台必须是淘宝或拼多多，创建后不可改变');
     const intervalMinutes = body.intervalMinutes ?? old?.intervalMinutes ?? 60;
@@ -83,13 +111,27 @@ export class Store {
       if (!fixture && platform === 'pdd' && (!/(?:^|;\s*)PDDAccessToken=/.test(cookie) || !/(?:^|;\s*)(?:pdd_user_id|pdduid)=/.test(cookie))) fail(400, 'INVALID_COOKIE', '缺少拼多多登录字段');
       credential = encryptCookie(cookie, this.key, id);
     }
-    const data = { id, platform, label, enabled: body.enabled ?? old?.enabled ?? true, intervalMinutes,
+    const data = { id, platform, label, familyId, familyName: this.family(familyId)?.name || '',
+      familyAssigned: !!(familyId || old?.familyAssigned || old?.familyId), enabled: body.enabled ?? old?.enabled ?? true, intervalMinutes,
       status: body.cookie !== undefined || !old ? 'configured' : old.status, lastSuccessAt: old?.lastSuccessAt || 0,
       lastAttemptAt: body.cookie !== undefined ? 0 : old?.lastAttemptAt || 0, nextSyncAt: body.cookie !== undefined || !old ? this.now() + intervalMinutes * 60000 : old.nextSyncAt,
       error: body.cookie !== undefined ? '' : old?.error || '', revision: this.revision(), fixture,
-      credentialVersion: (old?.credentialVersion || 0) + (body.cookie !== undefined || !old ? 1 : 0),
+      // Ownership changes also invalidate results collected under the previous scope.
+      credentialVersion: (old?.credentialVersion || 0) + (body.cookie !== undefined || !old || familyId !== old.familyId ? 1 : 0),
       warnings: old?.warnings || [] };
-    this.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,credential=excluded.credential').run(id, JSON.stringify(data), credential);
+    this.transaction(() => {
+      this.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,credential=excluded.credential').run(id, JSON.stringify(data), credential);
+      if (old && !old.familyId && !old.familyAssigned && familyId) {
+        for (const table of ['orders', 'shipments']) {
+          for (const row of this.db.prepare(`SELECT data FROM ${table} WHERE account_id=?`).all(id)) {
+            const record = parse(row);
+            if (record.familyId) continue;
+            Object.assign(record, { familyId, familyName: data.familyName });
+            this.db.prepare(`UPDATE ${table} SET data=? WHERE id=?`).run(JSON.stringify(record), record.id);
+          }
+        }
+      }
+    });
     return data;
   }
   cookie(id) {
@@ -106,35 +148,82 @@ export class Store {
     this.db.prepare('UPDATE accounts SET data=? WHERE id=?').run(JSON.stringify(updated), id);
     return updated;
   }
-  createPairing(accountIds) {
-    if (!Array.isArray(accountIds) || !accountIds.length || accountIds.length > 100 || new Set(accountIds).size !== accountIds.length || accountIds.some(id => typeof id !== 'string' || !this.account(id))) fail(400, 'INVALID_SCOPE', '请选择有效的授权账号');
+  validateIds(ids, lookup, allowEmpty = false) {
+    if (!Array.isArray(ids) || (!allowEmpty && !ids.length) || ids.length > 100 || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !id || !lookup(id))) fail(400, 'INVALID_SCOPE', '请选择有效的家人或账号范围');
+    return [...ids];
+  }
+  scope(familyIds = [], legacyAccountIds = []) {
+    const familySet = new Set(familyIds);
+    const accountIds = [...new Set([...legacyAccountIds, ...this.accounts().filter(a => a.familyId && familySet.has(a.familyId)).map(a => a.id)])];
+    return { familyIds, legacyAccountIds, accountIds };
+  }
+  canRead(device, record) {
+    if (!record) return false;
+    const legacy = device.legacyAccountIds ?? (device.familyIds === undefined ? device.accountIds || [] : []);
+    return legacy.includes(record.accountId) || !!record.familyId && (device.familyIds || []).includes(record.familyId);
+  }
+  canFilterAccount(device, id) {
+    return device.accountIds.includes(id) || this.db.prepare('SELECT data FROM orders WHERE account_id=?').all(id).map(parse).some(order => this.canRead(device, order));
+  }
+  scopeSummary(scope) {
+    const accounts = this.accounts(scope.accountIds).map(({ id, platform, label, familyId, familyName }) => ({ id, platform, label, familyId, familyName }));
+    return { familyIds: scope.familyIds, legacyAccountIds: scope.legacyAccountIds, families: this.families(scope.familyIds).map(family => ({ ...family, accountCount: accounts.filter(a => a.familyId === family.id).length })),
+      accountIds: scope.accountIds, accounts, includeFutureAccounts: scope.familyIds.length > 0 };
+  }
+  createPairing(input) {
+    const body = Array.isArray(input) ? { accountIds: input } : input;
+    onlyKeys(body, ['familyIds', 'accountIds']);
+    if ((body.familyIds !== undefined) === (body.accountIds !== undefined)) fail(400, 'INVALID_SCOPE', '请选择家人整组授权或旧版账号授权');
+    const familyIds = body.familyIds === undefined ? [] : this.validateIds(body.familyIds, id => this.family(id));
+    const accountIds = body.accountIds === undefined ? [] : this.validateIds(body.accountIds, id => this.account(id));
     const code = hash(secret()).slice(0, 16).toUpperCase();
     const expiresAt = this.now() + 10 * 60000;
     this.db.prepare('DELETE FROM pairing WHERE expires_at<? OR used_at IS NOT NULL').run(this.now());
-    this.db.prepare('INSERT INTO pairing VALUES(?,?,?,NULL)').run(hash(code), JSON.stringify(accountIds), expiresAt);
-    return { code, expiresAt, accountIds };
+    this.db.prepare('INSERT INTO pairing(code_hash,account_ids,expires_at,used_at,family_ids) VALUES(?,?,?,NULL,?)').run(hash(code), JSON.stringify(accountIds), expiresAt, JSON.stringify(familyIds));
+    return { code, expiresAt, ...this.scopeSummary(this.scope(familyIds, accountIds)) };
+  }
+  pairing(code) {
+    code = text(code, '绑定码', 80).toUpperCase();
+    const pair = this.db.prepare('SELECT * FROM pairing WHERE code_hash=?').get(hash(code));
+    if (!pair || pair.used_at !== null || pair.expires_at <= this.now()) fail(400, 'INVALID_PAIRING_CODE', '绑定码无效、已使用或已过期');
+    return pair;
+  }
+  previewPairing(code) {
+    const pair = this.pairing(code);
+    return { scope: this.scopeSummary(this.scope(JSON.parse(pair.family_ids), JSON.parse(pair.account_ids))), expiresAt: pair.expires_at };
   }
   redeem(code, deviceName) {
     code = text(code, '绑定码', 80).toUpperCase();
     deviceName = text(deviceName, '设备名称', 80);
     return this.transaction(() => {
-      const pair = this.db.prepare('SELECT * FROM pairing WHERE code_hash=?').get(hash(code));
-      if (!pair || pair.used_at !== null || pair.expires_at <= this.now()) fail(400, 'INVALID_PAIRING_CODE', '绑定码无效、已使用或已过期');
+      const pair = this.pairing(code);
       const token = `pcd_${secret()}`;
       const deviceId = randomUUID();
       this.db.prepare('UPDATE pairing SET used_at=? WHERE code_hash=?').run(this.now(), hash(code));
-      this.db.prepare('INSERT INTO devices VALUES(?,?,?,?,?,NULL)').run(deviceId, hash(token), deviceName, pair.account_ids, this.now());
-      return { token, deviceId, accounts: this.accounts(JSON.parse(pair.account_ids)), serverTime: this.now() };
+      this.db.prepare('INSERT INTO devices(id,token_hash,name,account_ids,created_at,revoked_at,family_ids) VALUES(?,?,?,?,?,NULL,?)').run(deviceId, hash(token), deviceName, pair.account_ids, this.now(), pair.family_ids);
+      const scope = this.scope(JSON.parse(pair.family_ids), JSON.parse(pair.account_ids));
+      return { token, deviceId, ...this.scopeSummary(scope), accounts: this.accounts(scope.accountIds), serverTime: this.now() };
     });
   }
   device(token) {
     const row = this.db.prepare('SELECT * FROM devices WHERE token_hash=? AND revoked_at IS NULL').get(hash(token));
     if (!row) fail(401, 'DEVICE_UNAUTHORIZED', '设备授权无效，请重新绑定');
-    return { id: row.id, accountIds: JSON.parse(row.account_ids) };
+    return { id: row.id, ...this.scope(JSON.parse(row.family_ids), JSON.parse(row.account_ids)) };
   }
   devices() {
-    return this.db.prepare('SELECT id,name,account_ids,created_at,revoked_at FROM devices ORDER BY created_at DESC').all()
-      .map(row => ({ id: row.id, name: row.name, accountIds: JSON.parse(row.account_ids), createdAt: row.created_at, revokedAt: row.revoked_at }));
+    return this.db.prepare('SELECT id,name,account_ids,family_ids,created_at,revoked_at FROM devices ORDER BY created_at DESC').all()
+      .map(row => ({ id: row.id, name: row.name, ...this.scope(JSON.parse(row.family_ids), JSON.parse(row.account_ids)), createdAt: row.created_at, revokedAt: row.revoked_at }));
+  }
+  updateDevice(id, body) {
+    onlyKeys(body, ['familyIds', 'accountIds']);
+    const row = this.db.prepare('SELECT * FROM devices WHERE id=?').get(id);
+    if (!row) fail(404, 'NOT_FOUND', '设备不存在');
+    if (row.revoked_at !== null) fail(409, 'DEVICE_REVOKED', '已撤销设备不能重新授权');
+    const familyIds = body.familyIds === undefined ? JSON.parse(row.family_ids) : this.validateIds(body.familyIds, familyId => this.family(familyId), true);
+    const accountIds = body.accountIds === undefined ? JSON.parse(row.account_ids) : this.validateIds(body.accountIds, accountId => this.account(accountId), true);
+    this.db.prepare('UPDATE devices SET family_ids=?,account_ids=? WHERE id=?').run(JSON.stringify(familyIds), JSON.stringify(accountIds), id);
+    this.revision();
+    return this.devices().find(device => device.id === id);
   }
   revoke(id) {
     const result = this.db.prepare('UPDATE devices SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(this.now(), id);
@@ -160,6 +249,7 @@ export class Store {
         const incomingDetail = input.orderDateOrigin === 'detail';
         const replaceDate = !!inputDate && (!verifiedDate || (incomingDetail && (old?.orderDateOrigin !== 'detail' || checkedAt >= (old?.dateCheckedAt || 0))));
         const order = { ...old, id, accountId, platform: account.platform, platformOrderId,
+          familyId: old ? old.familyId || '' : account.familyId, familyName: old ? old.familyName || '' : account.familyName,
           title: String(input.title || old?.title || ''), amount: input.amount == null ? old?.amount ?? null : input.amount,
           orderDate: replaceDate ? inputDate : old?.orderDate || 0,
           orderDateSource: replaceDate || verifiedDate ? 'platform' : old?.orderDate ? 'legacy' : 'unknown',
@@ -176,7 +266,8 @@ export class Store {
       for (const input of result.shipments) {
         if (!input.waybillNo) continue;
         const orderId = orderIds.get(String(input.platformOrderId)) || stableId(accountId, account.platform, 'order', String(input.platformOrderId));
-        if (!this.db.prepare('SELECT id FROM orders WHERE id=?').get(orderId)) continue;
+        const order = this.order(orderId);
+        if (!order) continue;
         // Order + carrier + waybill keeps every split parcel and prevents cross-account collisions.
         const carrier = carrierKey(input.carrier);
         const previous = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse)
@@ -184,7 +275,8 @@ export class Store {
         const id = previous.length === 1 ? previous[0].id : stableId(accountId, account.platform, orderId, carrier, String(input.waybillNo));
         const old = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id));
         const status = ['transit', 'arrived', 'signed', 'unknown'].includes(input.status) ? input.status : 'unknown';
-        const shipment = { id, orderId, accountId, waybillNo: String(input.waybillNo), carrier: input.carrier || old?.carrier || '', status,
+        const shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
+          familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: String(input.waybillNo), carrier: input.carrier || old?.carrier || '', status,
           pickupCode: input.pickupCode || old?.pickupCode || '', station: input.station || old?.station || '',
           arrivalAt: old?.arrivalAt || (status === 'arrived' ? input.arrivalAt || this.now() : 0),
           updatedAt: input.updatedAt || this.now(), picked: old?.picked || false, hidden: old?.hidden || false,
@@ -206,19 +298,23 @@ export class Store {
       this.updateAccount(accountId, { status: 'ok', lastSuccessAt: this.now(), error: '', warnings: result.warnings || [] });
     });
   }
-  snapshot(accountIds) {
-    const allowed = new Set(accountIds);
-    const accounts = this.accounts(accountIds);
-    const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(o => allowed.has(o.accountId))
-      .map(o => ({ ...o, orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
+  snapshot(scope, accountFilter) {
+    const device = Array.isArray(scope) ? { accountIds: scope, legacyAccountIds: scope, familyIds: [] } : scope;
+    const narrowed = accountFilter && new Set(accountFilter);
+    const visible = record => this.canRead(device, record) && (!narrowed || narrowed.has(record.accountId));
+    const accounts = this.accounts(device.accountIds).filter(account => !narrowed || narrowed.has(account.id));
+    const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(visible)
+      .map(o => ({ ...o, familyId: o.familyId || '', familyName: o.familyName || '', orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
         dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '' }));
-    const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(s => allowed.has(s.accountId));
+    const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible).map(s => ({ ...s, familyId: s.familyId || '', familyName: s.familyName || '' }));
+    const familyIds = device.familyIds || [];
+    const families = this.families([...new Set([...familyIds, ...accounts.map(a => a.familyId), ...orders.map(o => o.familyId), ...shipments.map(s => s.familyId)].filter(Boolean))]);
     const histories = shipments.map(shipment => {
       const events = shipment.logisticsEvents || [];
       shipment.logisticsEvents = []; shipment.logisticsTruncated = !!shipment.logisticsTruncated;
       return { shipment, events };
     });
-    const snapshot = { schemaVersion: 1, serverVersion, capabilities, serverRevision: Math.max(0, ...accounts.map(a => a.revision)), accounts, orders, shipments,
+    const snapshot = { schemaVersion: 1, serverVersion, capabilities, serverRevision: this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision, familyIds, legacyAccountIds: device.legacyAccountIds || [], families, accounts, orders, shipments,
       hiddenIds: shipments.filter(s => s.hidden).map(s => s.id), deletedIds: shipments.filter(s => s.deleted).map(s => s.id),
       events: shipments.filter(s => s.arrivalAt).map(s => ({ id: stableId(s.id, 'arrival', s.arrivalAt), shipmentId: s.id, arrivedAt: s.arrivalAt, code: s.pickupCode, stationKey: s.station })),
       syncWarnings: accounts.flatMap(a => (a.warnings || []).map(message => ({ accountId: a.id, message }))) };
@@ -247,7 +343,7 @@ export class Store {
             && Number.isFinite(Date.parse(operation.date + 'T00:00:00Z')) && new Date(operation.date + 'T00:00:00Z').toISOString().slice(0, 10) === operation.date);
           if (!validDate || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt <= 0 || operation.occurredAt > this.now() + 300000) fail(400, 'INVALID_OPERATION', '日期或操作时间无效');
           const order = this.order(operation.orderId);
-          if (!order || !device.accountIds.includes(order.accountId)) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
+          if (!this.canRead(device, order)) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
           const digest = hash(JSON.stringify(operation));
           const old = this.db.prepare('SELECT payload_hash FROM operations WHERE device_id=? AND id=?').get(device.id, operation.id);
           if (old && old.payload_hash !== digest) fail(409, 'OPERATION_CONFLICT', '相同操作ID不能用于不同内容');
@@ -267,7 +363,7 @@ export class Store {
         const operation = { id: text(input.id, '操作ID', 128), shipmentId: text(input.shipmentId, '运单ID', 128), action: input.action, occurredAt: input.occurredAt };
         if (!['pick', 'restore', 'hide', 'unhide'].includes(operation.action) || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt < 0 || operation.occurredAt > this.now() + 5 * 60000) fail(400, 'INVALID_OPERATION', '不支持的操作或时间');
         const shipment = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(operation.shipmentId));
-        if (!shipment || !device.accountIds.includes(shipment.accountId)) fail(403, 'SCOPE_FORBIDDEN', '运单不在授权范围内');
+        if (!this.canRead(device, shipment)) fail(403, 'SCOPE_FORBIDDEN', '运单不在授权范围内');
         const digest = hash(JSON.stringify(operation));
         const old = this.db.prepare('SELECT payload_hash FROM operations WHERE device_id=? AND id=?').get(device.id, operation.id);
         if (old && old.payload_hash !== digest) fail(409, 'OPERATION_CONFLICT', '相同操作ID不能用于不同内容');
@@ -287,6 +383,8 @@ export class Store {
   operation(device, id) {
     const result = parse(this.db.prepare('SELECT data FROM operations WHERE device_id=? AND id=?').get(device.id, id));
     if (!result) fail(404, 'NOT_FOUND', '操作不存在');
+    const record = result.orderId ? this.order(result.orderId) : parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(result.shipmentId));
+    if (!this.canRead(device, record)) fail(403, 'SCOPE_FORBIDDEN', '记录不在授权范围内');
     return result;
   }
 }

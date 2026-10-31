@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -9,8 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { createService } from '../src/service.mjs';
 import { serverVersion } from '../src/version.mjs';
 
-const PASSWORD = 'my-first-admin-password';
-const NEXT_PASSWORD = 'my-updated-admin-password';
+const PASSWORD = randomBytes(24).toString('base64url');
+const NEXT_PASSWORD = randomBytes(24).toString('base64url');
 const ADMIN = 'legacy-admin-token-with-at-least-32-characters';
 const KEY = 'cd'.repeat(32);
 const TIME = 1793350000000;
@@ -188,7 +189,7 @@ test('racing login and password changes leave no session authenticated with the 
   const results = await Promise.all([
     h.login(),
     h.request('/v1/admin/password', { method: 'POST', token: first.data.token, body: { currentPassword: PASSWORD, password: NEXT_PASSWORD } }),
-    h.request('/v1/admin/password', { method: 'POST', token: first.data.token, body: { currentPassword: PASSWORD, password: 'other-updated-password' } })
+    h.request('/v1/admin/password', { method: 'POST', token: first.data.token, body: { currentPassword: PASSWORD, password: randomBytes(24).toString('base64url') } })
   ]);
   assert.deepEqual(results.slice(1).map(r => r.status).sort(), [200, 401]);
   if (results[0].status === 200) assert.equal((await h.request('/v1/admin/status', { token: results[0].data.token })).status, 401);
@@ -220,7 +221,7 @@ test('password change rejects every admin mutation whose body started under the 
     [`/v1/admin/accounts/${account.id}/sync`, 'POST', {}],
     ['/v1/pairing-codes', 'POST', { accountIds: [account.id] }],
     ['/v1/admin/settings', 'PATCH', { baseUrl: 'https://unauthorized.example' }],
-    ['/v1/admin/password', 'POST', { currentPassword: NEXT_PASSWORD, password: 'unauthorized-next-password' }]
+    ['/v1/admin/password', 'POST', { currentPassword: NEXT_PASSWORD, password: randomBytes(24).toString('base64url') }]
   ];
   const pending = [];
   try {

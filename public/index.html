@@ -1,11 +1,5 @@
-<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>取件助手 · 线上账号管理</title><link rel="stylesheet" href="/admin.css"></head>
-<body>
-  <main>
-    <header><div><p class="eyebrow">取件助手 __SERVER_VERSION__</p><h1>线上账号管理</h1></div><button id="logout" hidden>退出</button></header>
-    <p id="notice" role="status" aria-live="polite"></p>
-    <section id="loading-panel" aria-busy="true"><h2>正在检查服务</h2><p id="loading-message" class="hint">正在读取初始化状态…</p><button id="retry-setup" class="secondary" hidden>重新连接</button></section>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>取件助手 · 家人工作台</title><link rel="stylesheet" href="/admin.css"></head><body>
+<div id="notice" role="status" aria-live="polite"></div><div id="auth-shell"><div class="auth-brand"><span class="mark">▱</span>取件助手 <small>__SERVER_VERSION__</small></div>    <section id="loading-panel" aria-busy="true"><h2>正在检查服务</h2><p id="loading-message" class="hint">正在读取初始化状态…</p><button id="retry-setup" class="secondary" hidden>重新连接</button></section>
     <section id="setup-panel" hidden><h2>首次使用设置</h2>
       <p class="hint" id="setup-code-hint">请从服务的容器日志中获取一次性初始化码。初始化后使用管理员密码登录。</p>
       <form id="setup-form">
@@ -18,28 +12,30 @@
       </form>
     </section>
     <section id="login-panel" hidden><h2>管理员登录</h2><form id="login-form"><label><span id="login-label">管理员密码</span><input id="admin-token" type="password" autocomplete="current-password" required aria-describedby="login-hint"></label><button>进入管理</button></form><p id="login-hint" class="hint">输入初始化时设置的密码。登录凭证只在当前页面内存中保留，刷新页面后需重新登录。</p></section>
-    <div id="workspace" hidden>
-      <p id="fixture-notice" class="fixture" hidden>本机联调 · 全部为模拟包裹，未连接真实平台</p>
-      <section><h2>服务设置</h2><p id="configuration-hint" class="hint"></p><p>当前服务地址：<span id="configured-base-url"></span></p>
+</div>
+<div id="workspace" hidden><div class="shell"><aside class="sidebar"><div class="brand"><span class="mark">▱</span><span>取件助手<small>PARCEL CONSOLE</small></span></div><p class="nav-label">工作空间</p><button class="nav active" id="nav-accounts" data-page="accounts">▣　账号授权</button><button class="nav" id="nav-devices" data-page="devices">▯　设备管理</button><button class="nav" id="nav-settings" data-page="settings">⚙　服务设置</button><div class="side-footer"><span class="avatar">管</span><div>管理员<p class="hint">私人工作空间</p></div><button id="logout" class="textbtn" hidden>退出</button></div></aside>
+<main class="main"><header class="topbar"><span>工作空间　/　<b id="breadcrumb">账号授权</b></span><span>取件助手 __SERVER_VERSION__</span></header><div class="content"><p id="fixture-notice" class="fixture" hidden>本机联调 · 全部为模拟包裹，未连接真实平台</p>
+<div id="page-accounts"><div class="heading"><div><p class="eyebrow">FAMILY WORKSPACE</p><h1>家人账号</h1><p class="subtitle">按家人管理平台账号，为设备整组授权。</p></div><button id="new-family">＋ 新增家人</button></div>
+<div class="metrics"><div class="metric"><span>家人</span><p id="metric-families">0</p></div><div class="metric"><span>平台账号</span><p id="metric-accounts">0</p></div><div class="metric"><span>已连接</span><p id="metric-connected">0</p></div><div class="metric warn"><span>需要处理</span><p id="metric-attention">0</p></div></div>
+<div class="workbench"><aside class="people"><div class="people-head">家人分组</div><label class="search"><input id="family-search" placeholder="搜索家人" aria-label="搜索家人"></label><div id="families"></div></aside><section class="accounts-panel"><div class="panel-head"><div class="panel-title"><span class="avatar" id="family-avatar">人</span><div><h2 id="family-title">待归属</h2><p id="family-description" class="hint"></p></div></div><div class="actions"><button id="new-account" class="secondary">＋ 添加平台</button><button id="authorize-family">整组授权</button><button id="rename-family" class="textbtn" aria-label="重命名家人">⋯</button></div></div><div class="filter-tabs"><button id="filter-all" class="active textbtn">全部账号</button><button id="filter-attention" class="textbtn">需要处理</button><button id="refresh" class="textbtn">刷新状态</button></div><div class="account-head"><span>平台账号</span><span>登录与采集状态</span><span>最近成功采集</span><span>详情</span></div><div id="accounts"></div><p class="account-note hint">账号登录信息仅保存在后台，设备只接收已授权的包裹数据。</p></section></div></div>
+<div id="page-devices" hidden><div class="heading"><div><p class="eyebrow">DEVICE ACCESS</p><h1>设备管理</h1><p class="subtitle">家人整组授权持续生效，以后新增账号自动包含。</p></div><button id="bind-device">＋ 绑定设备</button></div><div id="devices"></div></div>
+<div id="page-settings" hidden><div class="heading"><div><p class="eyebrow">SERVICE SETTINGS</p><h1>服务设置</h1></div></div>      <section><h2>服务设置</h2><p id="configuration-hint" class="hint"></p><p>当前服务地址：<span id="configured-base-url"></span></p>
         <div id="managed-settings" hidden>
           <form id="settings-form"><label>HTTPS 服务地址<input id="settings-base-url" type="url" autocomplete="url" placeholder="https://pickcode.example.com" aria-describedby="settings-url-hint"></label><p id="settings-url-hint" class="hint">仅填写域名与可选端口。留空时无法生成设备绑定码；修改地址后需为设备重新生成绑定码。域名、证书和 HTTPS 代理需自行配置。</p><button>保存地址</button></form>
           <form id="password-form"><h3>修改管理员密码</h3><label>当前密码<input id="current-password" type="password" autocomplete="current-password" required></label><div class="row"><label>新密码<input id="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128" aria-describedby="change-password-hint"></label><label>确认新密码<input id="confirm-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label></div><p id="change-password-hint" class="hint">新密码为 12–128 个字符。修改后其他管理页面需重新登录，已绑定设备不受影响。</p><button>修改密码</button></form>
         </div>
       </section>
-      <section><div class="section-heading"><h2>账号与登录状态</h2><button id="refresh" class="secondary">刷新状态</button></div><div id="accounts"></div></section>
-      <section><h2 id="account-heading">添加账号</h2>
-        <form id="account-form">
+</div>
+</div></main></div></div>
+<dialog id="account-dialog" class="drawer"><div class="dialog-head"><h2 id="account-dialog-title"><span id="account-heading">添加平台账号</span></h2><button type="button" class="close secondary" data-close="account-dialog" aria-label="关闭">×</button></div><div class="dialog-body">        <form id="account-form">
           <input id="account-id" type="hidden">
-          <div class="row"><label>平台<select id="platform"><option value="taobao">淘宝</option><option value="pdd">拼多多</option></select></label><label>账号名称<input id="label" required maxlength="80" placeholder="例如：我的淘宝"></label></div>
+          <label>所属家人<select id="account-family"></select></label><div class="row"><label>平台<select id="platform"><option value="taobao">淘宝</option><option value="pdd">拼多多</option><option disabled>京东 · 待接入</option><option disabled>抖音商城 · 待接入</option></select></label><label>账号名称<input id="label" required maxlength="80" placeholder="例如：日常购物"></label></div>
           <label>平台 Cookie<textarea id="cookie" rows="3" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="仅在此后台粘贴；设备不会收到 Cookie"></textarea></label>
           <div class="row"><label>采集间隔<select id="interval"><option value="60">60 分钟</option><option value="30">30 分钟</option></select></label><label class="checkbox"><input id="enabled" type="checkbox" checked>启用自动同步</label></div>
           <p class="hint">更新已有账号时，留空保留原 Cookie。保存不会立刻访问平台，可点击账号的“立即采集”。</p>
-          <div class="actions"><button>保存账号</button><button id="cancel-edit" type="button" class="secondary">取消编辑</button></div>
-        </form>
-      </section>
-      <section><h2>绑定设备</h2><p>选择这个设备可访问的账号，再生成十分钟有效的一次性绑定码。</p><p id="pair-hint" class="hint" role="status"></p><form id="pair-form"><fieldset id="scope"><legend>授权账号范围</legend></fieldset><button id="generate-pair">生成绑定码</button></form><div id="pair-result" hidden><img id="pair-qr" width="256" height="256" alt="设备绑定二维码"><div><p>服务地址：<span id="pair-url"></span></p><p>一次性绑定码：<strong id="pair-code"></strong></p><p id="pair-expires" class="hint"></p></div></div></section>
-      <section><h2>已授权设备</h2><div id="devices"></div><p class="hint">撤销后该设备不能再读取包裹或提交操作；设备上的本地历史保留。</p></section>
-    </div>
-  </main>
-  <script type="module" src="/admin.js"></script>
-</body></html>
+          <div class="actions"><button>保存账号</button><button id="account-collect" type="button" class="secondary" hidden>立即采集</button><button id="cancel-edit" type="button" class="secondary">取消编辑</button></div>
+        </form></div></dialog>
+<dialog id="pair-dialog" class=""><div class="dialog-head"><h2 id="pair-dialog-title">选择家人，整组授权</h2><button type="button" class="close secondary" data-close="pair-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><p class="hint">选中家人，包含其当前及以后新增的平台账号。待归属账号须先分配家人。</p><p id="pair-hint" class="hint" role="status"></p><form id="pair-form"><fieldset id="scope"><legend>授权家人组</legend></fieldset><button id="generate-pair">生成绑定码</button></form><div id="pair-result" hidden><img id="pair-qr" width="256" height="256" alt="设备绑定二维码"><div><p>服务地址：<span id="pair-url"></span></p><p>一次性绑定码：<strong id="pair-code"></strong></p><p id="pair-expires" class="hint"></p></div></div></div></dialog>
+<dialog id="family-dialog" class=""><div class="dialog-head"><h2 id="family-dialog-title">新增家人</h2><button type="button" class="close secondary" data-close="family-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><form id="family-form"><input type="hidden" id="family-edit-id"><label>家人名称<input id="family-name" required maxlength="80" placeholder="例如：爸爸"></label><div class="actions"><button>保存家人</button></div></form></div></dialog>
+<dialog id="device-dialog" class=""><div class="dialog-head"><h2 id="device-dialog-title">管理家人授权</h2><button type="button" class="close secondary" data-close="device-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><form id="device-form"><input type="hidden" id="device-id"><fieldset id="device-scope"><legend>授权家人</legend></fieldset><p id="device-legacy" class="hint"></p><label class="checkbox"><input type="checkbox" id="clear-legacy">清除原有单账号授权</label><p class="hint">家人组内新增账号自动包含。清空全部家人可撤销整组权限。</p><button>保存授权</button></form></div></dialog>
+<script type="module" src="/admin.js"></script></body></html>

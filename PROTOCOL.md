@@ -12,13 +12,18 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 | PATCH /v1/admin/settings | 管理员；`{baseUrl}`，设置HTTPS服务地址 |
 | POST /v1/admin/password | 管理员；`{currentPassword,password}`，改密并返回新`{token,expiresAt}` |
 | GET /v1/admin/accounts | 管理员；账号状态及最近全账号采集任务syncJob、响应serverTime，不含Cookie |
-| POST /v1/admin/accounts | 管理员；添加账号，`platform,label,cookie,enabled?,intervalMinutes?` |
+| GET /v1/admin/families | 管理员；`{families:[{id,name}]}`，含无账号家人 |
+| POST /v1/admin/families | 管理员；`{name}`，返回`{family:{id,name}}` |
+| PATCH /v1/admin/families/:id | 管理员；`{name}`，重命名但不改变稳定ID |
+| POST /v1/admin/accounts | 管理员；添加账号，`platform,label,cookie,enabled?,intervalMinutes?,familyId?` |
 | PATCH /v1/admin/accounts/:id | 管理员；更新账号、Cookie或采集设置 |
 | POST /v1/admin/accounts/:id/sync | 管理员；请求采集 |
-| POST /v1/pairing-codes | 管理员；`{accountIds:[]}`，返回一次性码及二维码 |
+| POST /v1/pairing-codes | 管理员；`{familyIds:[...]}`持续家人组授权，或旧`{accountIds:[...]}`，两种输入互斥；返回一次性码及二维码 |
+| POST /v1/pairing-codes/preview | 公开限频；`{code}`，不消耗码的服务及授权范围预检 |
 | GET /v1/admin/devices | 管理员；设备及授权范围 |
+| PATCH /v1/admin/devices/:id | 管理员；`{familyIds?,accountIds?}`，缺席保留、空数组清除对应权限 |
 | DELETE /v1/devices/:id | 管理员；撤销指定设备 |
-| POST /v1/devices | 公开限频；`{code,deviceName}`兑换token、deviceId、accounts |
+| POST /v1/devices | 公开限频；`{code,deviceName}`兑换token、deviceId、accounts、families、familyIds |
 | DELETE /v1/devices/current | 设备；撤销自己 |
 | GET /v1/accounts | 设备；只返回获授权账号 |
 | POST /v1/accounts/sync | 设备；请求获授权账号采集，不是同步完成回执 |
@@ -38,6 +43,20 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 ## 快照与设备操作
 
 快照结构：`{schemaVersion:1,serverRevision,accounts,orders,shipments,hiddenIds,deletedIds}`，可有附加警告字段。订单有`id,accountId,platform,platformOrderId,title,amount,orderDate,orderStatus,refundStatus`；金额缺失为null。运单有`id,orderId,accountId,waybillNo,carrier,status,pickupCode,station,arrivalAt,updatedAt,picked,hidden`。status为`transit/arrived/signed/unknown`，普通signed不派生picked。到站时间是首次已知时间，不随刷新改变。数组缺席不代表删除或已取。
+
+### 家人归属与持续组授权
+
+家人是`{id,name}`。账号新增`familyId,familyName`；`familyId:""`表示待归属，没有待归属伪家人ID。家人可以当前没有账号，仍可整组授权；设备每次请求按保存的`familyIds`解析当前账号，此后新增账号自动包含。暂停采集不会撤销权限。管理家人接口不创建额外登录身份。
+
+旧数据库启动时只补充家人表及设备/绑定码的`family_ids`字段，原账号、订单、运单、设备token、加密凭证及人工操作ID保持不变。旧设备的明确账号权限存为`legacyAccountIds`，不会自动变成家人组授权。设备管理返回`familyIds,legacyAccountIds,accountIds`，其中`accountIds`是当前组账号与旧明确账号权限的并集。修改授权时缺席字段保留，显式`[]`清除；已撤销设备不可通过修改授权恢复。
+
+设备兑换结果和快照增加`familyIds,families,legacyAccountIds`；`GET /v1/accounts`也携带三者。`legacyAccountIds`仅为旧明确账号权限，不能把当前`accounts`动态并集当成旧账号授权。新协议`familyIds`存在时，即使为空，也只按`familyIds`或`legacyAccountIds`判断历史记录权限；旧服务器缺席`familyIds`时客户端才可兼容旧账号范围。账号转组后，原家人的快照可包含历史订单而当前`accounts`为空，客户端应按记录归属导入，不能因此拒绝整个快照。快照的`families`只包含已授权家人及可见账号/记录实际引用的家人，`familyIds`始终表示设备真正持有的持续组权限，不能依据显示名称或`families`数组推导权限。`serverRevision`使用服务全局递增版本，归属、组权限和家人变更会更新快照。
+
+订单与运单新增固化的`familyId,familyName`。记录首次入库时保存归属，新拆分运单继承所属订单的归属；平台输入不能覆写这些字段。旧待归属账号首次显式分配家人时，仅回填该账号尚无家人的既有记录。之后转组或先移回待归属再重新分配，都不会转移非空历史归属；家人重命名也不会改写历史快照名称。账号转组会使当前组账号范围随之改变，新家人组看不到旧家人历史，原家人组仍可读取其历史。转组会使在途采集结果失效，避免旧范围采集结果写入新家人。
+
+家人设备读取快照、领取/隐藏/日期操作、订单详情刷新和对应任务状态，都按记录固化的家人ID校验；整账号采集仍要求当前账号权限。历史记录可能引用已不在`accounts`列表中的账号，客户端应依据记录自身的`platform,familyId,familyName`展示，不可反查当前账号归属覆盖历史。`?accountId=`只缩小已有权限；拥有某账号旧历史的家人仍可用它筛选自己的历史，不能获得该账号新家人的记录。
+
+预检返回`{service:{name,baseUrl},scope:{familyIds,legacyAccountIds,families:[{id,name,accountCount}],accountIds,accounts:[{id,platform,label,familyId,familyName}],includeFutureAccounts},expiresAt}`。家人组模式的`includeFutureAccounts:true`，旧明确账号模式为`false`；摘要不包含Cookie、token、原始授权码、订单、运单或上游错误。预检和兑换共享基于真实连接IP与全局的猜码限频，响应`Cache-Control:no-store`，不信任`X-Forwarded-For`绕过限频。预检不消耗码，兑换时仍在事务内重新检查有效期和一次使用；二维码仍为`{schemaVersion:1,baseUrl,code}`，家人名称以服务端预检为准。
 
 订单新增可选字段 `tradeStatus`（平台交易枚举）、`orderDateSource`（`platform/unknown/legacy`）和 `firstSeenAt`（首次记录时间，缺失为0）。新订单没有真实下单日期时 `orderDate=0`，不得用同步时间代替。历史记录没有来源标识时按 `legacy` 展示待确认，保留原数值；以后采集到真实日期可以补正，已验证的日期保持稳定。旧App忽略附加字段仍可同步，但未知日期和历史筛选需要新版App正确展示。
 

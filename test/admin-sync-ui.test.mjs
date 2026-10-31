@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { createServerClock, syncStatus } from '../public/sync-status.js';
 
 const NOW = 1_800_000_000_000;
-const account = job => ({ id: 'a', label: '我的淘宝', platform: 'taobao', status: 'ok', enabled: true, intervalMinutes: 60, syncJob: job });
+const account = job => ({ id: 'a', familyId: 'f', familyName: '我', label: '我的淘宝', platform: 'taobao', status: 'ok', enabled: true, intervalMinutes: 60, syncJob: job });
 
 test('queued countdown uses server time and monotonic elapsed time despite a wrong or changing local clock', () => {
   let monotonic = 100, wall = NOW + 86_400_000;
@@ -65,6 +65,7 @@ async function browser() {
   const document = {
     hidden: false, forms: [...elements.values()].filter(element => element.tagName === 'FORM'),
     getElementById: id => elements.get(id), createElement: tag => new Element(tag), createTextNode: value => Object.assign(new Element('text'), { textContent: value }),
+    querySelector: () => null,
     addEventListener: (name, listener) => listeners.set(name, listener),
   };
   const context = vm.createContext({ document, URL, Date, console, syncStatus,
@@ -82,6 +83,7 @@ async function browser() {
         return response({ accounts: [account(state.job)], serverTime: NOW + state.monotonic - 100 });
       }
       if (path === '/v1/admin/devices') return response({ devices: [] });
+      if (path === '/v1/admin/families') return response({ families: [{ id: 'f', name: '我' }] });
       if (path === '/v1/admin/status') return response({ configurationMode: 'managed', baseUrl: 'https://example.test' });
       if (path === '/v1/admin/accounts/a/sync') {
         if (state.blockSync) await state.blockSync;

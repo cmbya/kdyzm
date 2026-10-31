@@ -41,6 +41,10 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
     rate.check(`credentials:${req.socket.remoteAddress}`, 10, 10 * 60000);
     rate.check('credentials:global', 100, 10 * 60000);
   };
+  const pairingLimit = req => {
+    rate.check(`pair:${req.socket.remoteAddress}`, 10, 10 * 60000);
+    rate.check('pair:global', 100, 10 * 60000);
+  };
   const device = req => {
     const auth = req.headers.authorization || '';
     if (!auth.startsWith('Bearer ') || auth.length > 300) fail(401, 'DEVICE_UNAUTHORIZED', '请绑定设备');
@@ -88,7 +92,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         const [file, type] = STATIC.get(path);
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
         const content = await readFile(new URL(file, PUBLIC));
-        res.end(file === 'index.html' ? content.toString('utf8').replace('__SERVER_VERSION__', serverVersion) : content); return;
+        res.end(file === 'index.html' ? content.toString('utf8').replaceAll('__SERVER_VERSION__', serverVersion) : content); return;
       }
       if (path === '/health' && req.method === 'GET') { send(res, 200, { ok: true }); return; }
       if (!path.startsWith('/v1/')) fail(404, 'NOT_FOUND', '接口不存在');
@@ -109,20 +113,24 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
 
       if (path === '/v1/devices' && req.method === 'POST') {
         // Never trust a client-provided X-Forwarded-For to partition guessing limits.
-        rate.check(`pair:${req.socket.remoteAddress}`, 10, 10 * 60000);
-        rate.check('pair:global', 100, 10 * 60000);
+        pairingLimit(req);
         const body = await bodyOf(req);
         onlyKeys(body, ['code', 'deviceName']);
         send(res, 201, store.redeem(body.code, body.deviceName)); return;
+      }
+      if (path === '/v1/pairing-codes/preview' && req.method === 'POST') {
+        pairingLimit(req);
+        const body = await bodyOf(req); onlyKeys(body, ['code']);
+        send(res, 200, { service: { name: '取件助手', baseUrl: configuration.baseUrl }, ...store.previewPairing(body.code) }); return;
       }
       if (path === '/v1/pairing-codes' && req.method === 'POST') {
         admin(req);
         const body = await bodyOf(req);
         configuration.authenticate(req.headers['x-admin-token']);
-        onlyKeys(body, ['accountIds']);
+        onlyKeys(body, ['accountIds', 'familyIds']);
         const baseUrl = configuration.baseUrl;
         if (!baseUrl) fail(409, 'BASE_URL_REQUIRED', '请先在设置中填写HTTPS服务地址，再生成绑定码');
-        const pair = store.createPairing(body.accountIds);
+        const pair = store.createPairing(body);
         const qrPayload = JSON.stringify({ schemaVersion: 1, baseUrl, code: pair.code });
         const qrDataUrl = await QRCode.toDataURL(qrPayload, { width: 256, margin: 2, errorCorrectionLevel: 'M' });
         configuration.authenticate(req.headers['x-admin-token']);
@@ -130,6 +138,22 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
+        if (path === '/v1/admin/families' && req.method === 'GET') { send(res, 200, { families: store.families() }); return; }
+        if (path === '/v1/admin/families' && req.method === 'POST') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 201, { family: store.saveFamily(body) }); return;
+        }
+        const familyPath = path.match(/^\/v1\/admin\/families\/([^/]+)$/);
+        if (familyPath && req.method === 'PATCH') {
+          if (!store.family(familyPath[1])) fail(404, 'NOT_FOUND', '家人不存在');
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, { family: store.saveFamily(body, familyPath[1]) }); return;
+        }
+        const devicePath = path.match(/^\/v1\/admin\/devices\/([^/]+)$/);
+        if (devicePath && req.method === 'PATCH') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, { device: store.updateDevice(devicePath[1], body) }); return;
+        }
         if (path === '/v1/admin/status' && req.method === 'GET') { send(res, 200, { fixture, serverVersion, baseUrl: configuration.baseUrl, configurationMode: configuration.mode }); return; }
         if (path === '/v1/admin/settings' && req.method === 'PATCH') {
           const body = await bodyOf(req); onlyKeys(body, ['baseUrl']);
@@ -173,39 +197,42 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       const current = device(req);
       if (path === '/v1/devices/current' && req.method === 'DELETE') { send(res, 200, store.revoke(current.id)); return; }
-      if (path === '/v1/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts(current.accountIds) }); return; }
+      if (path === '/v1/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts(current.accountIds), familyIds: current.familyIds, legacyAccountIds: current.legacyAccountIds, families: store.families(current.familyIds) }); return; }
       if (path === '/v1/accounts/sync' && req.method === 'POST') {
         onlyKeys(await bodyOf(req), []);
-        send(res, 202, { accepted: true, jobs: current.accountIds.map(id => jobs.request(id).job) }); return;
+        send(res, 202, { accepted: true, jobs: device(req).accountIds.map(id => jobs.request(id).job) }); return;
       }
       const syncPath = path.match(/^\/v1\/accounts\/([^/]+)\/sync$/);
       if (syncPath && req.method === 'POST') {
-        allowed(current, syncPath[1]); onlyKeys(await bodyOf(req), []);
+        onlyKeys(await bodyOf(req), []); allowed(device(req), syncPath[1]);
         send(res, 202, { accepted: true, jobs: [jobs.request(syncPath[1]).job] }); return;
       }
       const orderRefresh = path.match(/^\/v1\/orders\/([^/]+)\/refresh$/);
       if (orderRefresh && req.method === 'POST') {
-        const order = store.order(orderRefresh[1]);
-        if (!order || !current.accountIds.includes(order.accountId)) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
         onlyKeys(await bodyOf(req), []);
+        const order = store.order(orderRefresh[1]);
+        if (!store.canRead(device(req), order)) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
         send(res, 202, { accepted: true, jobs: [jobs.request(order.accountId, order.id).job] }); return;
       }
       const jobPath = path.match(/^\/v1\/sync-jobs\/([^/]+)$/);
       if (jobPath && req.method === 'GET') {
-        const job = jobs.read(jobPath[1]); allowed(current, job.accountId);
+        const job = jobs.read(jobPath[1]);
+        if (job.orderId) {
+          if (!store.canRead(current, store.order(job.orderId))) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
+        } else allowed(current, job.accountId);
         send(res, 200, { job }); return;
       }
       if (path === '/v1/snapshot' && req.method === 'GET') {
         const requested = url.searchParams.getAll('accountId');
-        requested.forEach(id => allowed(current, id));
-        const snapshot = store.snapshot(requested.length ? requested : current.accountIds);
+        requested.forEach(id => { if (!store.canFilterAccount(current, id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); });
+        const snapshot = store.snapshot(current, requested.length ? requested : undefined);
         const etag = `"${hash(JSON.stringify(snapshot))}"`;
         const matches = (req.headers['if-none-match'] || '').split(',').map(t => t.trim().replace(/^W\//, '')).includes(etag);
         send(res, matches ? 304 : 200, matches ? undefined : snapshot, { ETag: etag }); return;
       }
       if (path === '/v1/operations' && req.method === 'POST') {
         const body = await bodyOf(req); onlyKeys(body, ['operations']);
-        send(res, 200, store.applyOperations(current, body.operations)); return;
+        send(res, 200, store.applyOperations(device(req), body.operations)); return;
       }
       const operationPath = path.match(/^\/v1\/operations\/([^/]+)$/);
       if (operationPath && req.method === 'GET') { send(res, 200, store.operation(current, decodeURIComponent(operationPath[1]))); return; }

@@ -3,6 +3,11 @@ import { createServerClock, syncStatus } from './sync-status.js';
 const $ = id => document.getElementById(id);
 let token = '';
 let accounts = [];
+let families = [];
+let devices = [];
+let selectedFamily = '';
+let attentionOnly = false;
+let familySearch = '';
 let configurationMode = 'managed';
 let baseUrl = '';
 let settingsDirty = false;
@@ -63,6 +68,7 @@ function clearPairResult() {
   $('pair-expires').textContent = ''; $('pair-qr').removeAttribute('src');
 }
 function showLogin() {
+  $('auth-shell').hidden = false;
   $('loading-panel').hidden = true; $('setup-panel').hidden = true; $('login-panel').hidden = false;
   $('login-label').textContent = configurationMode === 'environment' ? '原 ADMIN_TOKEN' : '管理员密码';
   $('login-hint').textContent = configurationMode === 'environment'
@@ -71,7 +77,8 @@ function showLogin() {
 }
 function clearSession() {
   stopPolling(); syncSubmitting.clear(); syncRows.clear(); scopeKey = ''; pollingError = '';
-  token = ''; accounts = []; baseUrl = ''; settingsDirty = false;
+  token = ''; accounts = []; families = []; devices = []; selectedFamily = ''; baseUrl = ''; settingsDirty = false;
+  for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog']) if ($(id).open) $(id).close();
   for (const form of document.forms) form.reset();
   $('setup-confirm').setCustomValidity(''); $('confirm-password').setCustomValidity('');
   resetForm(); clearPairResult();
@@ -106,8 +113,8 @@ function validateBaseUrl(value) {
 function updatePairAvailability() {
   $('pair-hint').textContent = !baseUrl
     ? (configurationMode === 'environment' ? '服务地址尚未配置，请在部署环境中设置 PUBLIC_BASE_URL 后再绑定设备。' : '服务地址尚未设置，请先在“服务设置”中保存 HTTPS 地址，再绑定设备。')
-    : !accounts.length ? '请先添加至少一个账号，再选择授权范围。' : '';
-  $('generate-pair').disabled = !baseUrl || !accounts.length || busy.has($('pair-form'));
+    : !families.length ? '请先新增家人，并为待归属账号分配家人。' : '';
+  $('generate-pair').disabled = !baseUrl || !families.length || busy.has($('pair-form'));
 }
 function renderSettings(status) {
   configurationMode = status.configurationMode;
@@ -152,14 +159,20 @@ async function refresh(full = true) {
   }
   const request = { token: requestToken, full };
   request.promise = (async () => {
-    const [a, d, status] = await Promise.all([api('/v1/admin/accounts'), ...(full ? [api('/v1/admin/devices'), api('/v1/admin/status')] : [])]);
+    const [a, d, status, f] = await Promise.all([api('/v1/admin/accounts'), ...(full ? [api('/v1/admin/devices'), api('/v1/admin/status'), api('/v1/admin/families')] : [])]);
     if (!token || token !== requestToken) return;
     accounts = a.accounts; serverClock.update(a.serverTime);
+    if (full) {
+      families = f.families;
+      if (!selectedFamily && families.length && !accounts.some(a => !a.familyId)) selectedFamily = families[0].id;
+      if (selectedFamily && !families.some(f => f.id === selectedFamily)) selectedFamily = '';
+      devices = d.devices;
+    }
     if (pollingError && $('notice').textContent === pollingError) notice('');
     pollingError = '';
     if (full) renderSettings(status);
-    renderAccounts(); renderScope(); updatePairAvailability();
-    if (full) renderDevices(d.devices);
+    renderFamilies(); renderAccounts(); renderScope(); updatePairAvailability();
+    if (full) renderDevices(devices);
   })().finally(() => {
     if (refreshRequest === request) refreshRequest = null;
     schedulePolling();
@@ -177,7 +190,7 @@ function renderSyncStates() {
     if (!row) continue;
     const status = syncStatus(account, serverClock.now());
     const submitting = syncSubmitting.has(account.id);
-    row.status.textContent = submitting ? '正在提交采集任务…' : status.label;
+    row.status.textContent = submitting ? '正在提交采集任务…' : account.syncJob ? status.label : statusNames[account.status] || account.status;
     row.details.textContent = status.details.filter(detail => detail !== account.error).join('；');
     row.details.hidden = !row.details.textContent;
     if (!busy.has(row.button)) {
@@ -206,56 +219,152 @@ async function requestSync(accountId) {
 function renderAccounts() {
   syncRows.clear();
   $('accounts').replaceChildren();
-  if (!accounts.length) $('accounts').append(node('p', '尚未配置账号。添加后可为设备选择授权账号范围。', 'hint'));
-  for (const account of accounts) {
-    const item = node('div', '', 'item');
-    const title = node('p', `${account.label} · ${account.platform === 'taobao' ? '淘宝' : '拼多多'}`, 'item-title');
-    title.append(node('span', statusNames[account.status] || account.status, 'badge'));
-    item.append(title, node('p', `最近成功：${date(account.lastSuccessAt)} · ${account.enabled ? `每 ${account.intervalMinutes} 分钟同步` : '自动同步已关闭'}`, 'hint'));
-    if (account.error) item.append(node('p', account.error));
-    for (const warning of account.warnings || []) item.append(node('p', warning, 'hint'));
-    const status = node('p', '', 'hint'), details = node('p', '', 'hint');
+  const visible = accounts.filter(a => (a.familyId || '') === selectedFamily && (!attentionOnly || needsAttention(a)));
+  if (!visible.length) $('accounts').append(node('p', attentionOnly ? '当前没有需要处理的账号。' : '暂无平台账号，添加后即可在此管理。', 'empty'));
+  for (const account of visible) {
+    const item = node('div', '', 'item account-row');
+    const title = node('div', '', 'item-title');
+    title.append(node('span', account.platform === 'taobao' ? '淘' : '拼', `platform ${account.platform === 'pdd' ? 'pdd' : ''}`), node('span', account.label));
+    item.append(title, node('p', `${date(account.lastSuccessAt)} · ${account.enabled ? `${account.intervalMinutes} 分钟` : '已暂停'}`, 'account-meta hint'));
+    const status = node('p', '', 'sync-label'), details = node('p', '', 'sync-details hint');
     item.append(status, details);
+    if (account.error) item.append(node('p', account.error, 'account-error'));
+    for (const warning of account.warnings || []) item.append(node('p', warning, 'account-error hint'));
     const actions = node('div', '', 'actions');
     const button = action('立即采集', () => requestSync(account.id));
     syncRows.set(account.id, { status, details, button });
-    actions.append(action('更新账号', () => edit(account)), button);
+    actions.append(action('详情', () => edit(account)), button);
     item.append(actions); $('accounts').append(item);
   }
   renderSyncStates();
 }
 function renderScope() {
-  const key = JSON.stringify(accounts.map(account => [account.id, account.label]));
+  const key = JSON.stringify([families, accounts.map(account => [account.id, account.familyId, account.label])]);
   if (key === scopeKey) return;
   scopeKey = key;
   const selected = new Set([...$('scope').querySelectorAll('input:checked')].map(el => el.value));
-  $('scope').replaceChildren(node('legend', '授权账号范围'));
-  for (const account of accounts) {
-    const label = node('label', '', 'checkbox'); const check = document.createElement('input');
-    check.type = 'checkbox'; check.value = account.id; check.checked = selected.has(account.id);
-    label.append(check, document.createTextNode(account.label)); $('scope').append(label);
-  }
+  fillFamilyChoices($('scope'), selected);
 }
-function renderDevices(devices) {
+function renderDevices(list) {
   $('devices').replaceChildren();
-  if (!devices.length) $('devices').append(node('p', '尚无已绑定设备。', 'hint'));
-  for (const device of devices) {
-    const item = node('div', '', 'item');
-    item.append(node('p', device.name, 'item-title'), node('p', `绑定于 ${date(device.createdAt)} · ${device.accountIds.map(id => accounts.find(a => a.id === id)?.label || '已移除账号').join('、')}`, 'hint'));
+  if (!list.length) $('devices').append(node('p', '尚无已绑定设备，可选择家人生成绑定码。', 'empty'));
+  for (const device of list) {
+    const item = node('div', '', 'device-card');
+    const info = node('div', '');
+    info.append(node('h3', device.name), node('p', `绑定于 ${date(device.createdAt)}`, 'hint'));
+    info.append(node('p', `授权家人：${(device.familyIds || []).map(familyName).join('、') || '无'}`, 'hint'));
+    info.append(node('p', `当前包含 ${device.accountIds.length} 个账号 · ${(device.familyIds || []).length ? '新增账号自动随家人组授权' : '指定账号授权，范围固定'}`, 'hint'));
+    if (device.legacyAccountIds?.length) info.append(node('p', `另保留 ${device.legacyAccountIds.length} 个原有单账号授权`, 'hint'));
+    item.append(info);
     if (device.revokedAt) item.append(node('p', `已撤销 · ${date(device.revokedAt)}`, 'hint'));
-    else item.append(action('撤销授权', async () => {
+    else {
+      const actions = node('div', '', 'actions');
+      actions.append(action('管理家人授权', () => editDevice(device)), action('撤销设备', async () => {
       if (!confirm(`撤销“${device.name}”的线上访问权限？本地历史会保留。`)) return;
       await api(`/v1/devices/${encodeURIComponent(device.id)}`, { method: 'DELETE' }); await refreshAfterChange(); notice('设备授权已撤销。');
-    }, 'danger'));
+      }, 'danger'));
+      item.append(actions);
+    }
     $('devices').append(item);
   }
 }
 function edit(account) {
+  fillAccountFamilies(account.familyId || '');
   $('account-id').value = account.id; $('label').value = account.label; $('platform').value = account.platform;
   $('platform').disabled = true; $('cookie').value = ''; $('interval').value = account.intervalMinutes; $('enabled').checked = account.enabled;
-  $('account-heading').textContent = '更新账号'; $('account-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('account-heading').textContent = '账号详情与设置';
+  $('account-collect').hidden = false; $('account-collect').onclick = () => run(() => requestSync(account.id), $('account-collect'));
+  $('account-dialog').showModal();
 }
-function resetForm() { $('account-form').reset(); $('account-id').value = ''; $('platform').disabled = false; $('account-heading').textContent = '添加账号'; }
+function resetForm() { $('account-form').reset(); $('account-id').value = ''; $('platform').disabled = false; $('account-heading').textContent = '添加平台账号'; }
+const familyName = id => families.find(f => f.id === id)?.name || '待归属';
+const needsAttention = account => ['expired', 'error'].includes(account.status) || !!account.error;
+function renderFamilies() {
+  $('metric-families').textContent = families.length;
+  $('metric-accounts').textContent = accounts.length;
+  $('metric-connected').textContent = accounts.filter(a => a.status === 'ok').length;
+  $('metric-attention').textContent = accounts.filter(needsAttention).length;
+  $('families').replaceChildren();
+  for (const family of [...families, { id: '', name: '待归属' }]) {
+    if (familySearch && !family.name.includes(familySearch)) continue;
+    const group = accounts.filter(a => (a.familyId || '') === family.id);
+    const button = action('', () => {
+      selectedFamily = family.id; attentionOnly = false;
+      $('filter-all').classList.toggle('active', true); $('filter-attention').classList.toggle('active', false);
+      renderFamilies(); renderAccounts();
+    }, `person ${selectedFamily === family.id ? 'active' : ''} ${family.id ? '' : 'unassigned'}`);
+    button.setAttribute('aria-pressed', String(selectedFamily === family.id));
+    const description = node('span', '', 'desc');
+    description.append(node('strong', family.name), node('small', `${group.length} 个平台账号`));
+    button.append(node('span', family.id ? family.name.slice(0, 1) : '?', 'avatar'), description);
+    if (group.some(needsAttention)) button.append(node('span', '', 'attention'));
+    $('families').append(button);
+  }
+  $('family-title').textContent = familyName(selectedFamily);
+  $('family-avatar').textContent = selectedFamily ? familyName(selectedFamily).slice(0, 1) : '?';
+  $('family-description').textContent = selectedFamily ? `${accounts.filter(a => a.familyId === selectedFamily).length} 个平台账号 · 新增账号自动纳入整组授权` : '先分配所属家人，再进行整组授权';
+  $('authorize-family').disabled = !selectedFamily;
+  $('rename-family').hidden = !selectedFamily;
+}
+function fillFamilyChoices(container, selected = new Set()) {
+  container.replaceChildren(node('legend', '授权家人组'));
+  for (const family of families) {
+    const choice = node('div', '', 'scope-choice');
+    const label = node('label', '', 'checkbox');
+    const check = document.createElement('input'); check.type = 'checkbox'; check.value = family.id; check.checked = selected.has(family.id);
+    const group = accounts.filter(a => a.familyId === family.id);
+    label.append(check, document.createTextNode(`${family.name} · ${group.length} 个平台账号`));
+    const details = node('details', '');
+    details.append(node('summary', '查看包含账号'), node('p', group.map(a => `${a.platform === 'taobao' ? '淘宝' : '拼多多'} · ${a.label}`).join('、') || '当前没有账号，以后新增自动包含', 'hint'));
+    choice.append(label, details); container.append(choice);
+  }
+}
+function fillAccountFamilies(value) {
+  $('account-family').replaceChildren();
+  for (const family of [{ id: '', name: '待归属' }, ...families]) {
+    const option = node('option', family.name); option.value = family.id; $('account-family').append(option);
+  }
+  $('account-family').value = value;
+}
+function openPair(preselected = []) {
+  clearPairResult(); fillFamilyChoices($('scope'), new Set(preselected));
+  updatePairAvailability(); $('pair-dialog').showModal();
+}
+function editDevice(device) {
+  $('device-id').value = device.id; $('device-dialog-title').textContent = `${device.name} · 家人授权`;
+  fillFamilyChoices($('device-scope'), new Set(device.familyIds || []));
+  $('clear-legacy').checked = false;
+  $('clear-legacy').disabled = !device.legacyAccountIds?.length;
+  $('device-legacy').textContent = device.legacyAccountIds?.length ? `保留原有单账号授权：${device.legacyAccountIds.map(id => accounts.find(a => a.id === id)?.label || '已移除账号').join('、')}。仅移除家人不会取消这些独立权限。` : '没有原有单账号授权。';
+  $('device-dialog').showModal();
+}
+function showPage(page) {
+  for (const id of ['accounts', 'devices', 'settings']) {
+    $(`page-${id}`).hidden = id !== page;
+    $(`nav-${id}`).classList.toggle('active', id === page);
+  }
+  $('breadcrumb').textContent = { accounts: '账号授权', devices: '设备管理', settings: '服务设置' }[page];
+}
+for (const id of ['accounts', 'devices', 'settings']) $(`nav-${id}`).addEventListener('click', () => showPage(id));
+for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog']) {
+  document.querySelector(`[data-close="${id}"]`)?.addEventListener('click', () => $(id).close());
+  $(id).addEventListener('close', () => { if (id === 'account-dialog') $('cookie').value = ''; });
+}
+$('new-account').addEventListener('click', () => {
+  resetForm(); fillAccountFamilies(selectedFamily); $('account-collect').hidden = true; $('account-dialog').showModal();
+});
+$('family-search').addEventListener('input', () => { familySearch = $('family-search').value.trim(); renderFamilies(); });
+$('filter-all').addEventListener('click', () => { attentionOnly = false; $('filter-all').classList.toggle('active', true); $('filter-attention').classList.toggle('active', false); renderAccounts(); });
+$('filter-attention').addEventListener('click', () => { attentionOnly = true; $('filter-all').classList.toggle('active', false); $('filter-attention').classList.toggle('active', true); renderAccounts(); });
+$('bind-device').addEventListener('click', () => openPair());
+$('authorize-family').addEventListener('click', () => openPair([selectedFamily]));
+$('scope').addEventListener('change', clearPairResult);
+function openFamily(id = '') {
+  $('family-edit-id').value = id; $('family-name').value = id ? familyName(id) : '';
+  $('family-dialog-title').textContent = id ? '重命名家人' : '新增家人'; $('family-dialog').showModal();
+}
+$('new-family').addEventListener('click', () => openFamily());
+$('rename-family').addEventListener('click', () => openFamily(selectedFamily));
 function submit(id, handler) {
   $(id).addEventListener('submit', event => { event.preventDefault(); run(handler, event.currentTarget); });
 }
@@ -265,6 +374,18 @@ function confirmPassword(passwordId, confirmId) {
 }
 confirmPassword('setup-password', 'setup-confirm');
 confirmPassword('new-password', 'confirm-password');
+submit('family-form', async () => {
+  const id = $('family-edit-id').value;
+  const result = await api(id ? `/v1/admin/families/${encodeURIComponent(id)}` : '/v1/admin/families', { method: id ? 'PATCH' : 'POST', body: JSON.stringify({ name: $('family-name').value.trim() }) });
+  selectedFamily = result.family.id; $('family-dialog').close(); await refreshAfterChange(); notice('家人已保存。');
+});
+submit('device-form', async () => {
+  const familyIds = [...$('device-scope').querySelectorAll('input:checked')].map(el => el.value);
+  const body = { familyIds };
+  if ($('clear-legacy').checked) body.accountIds = [];
+  await api(`/v1/admin/devices/${encodeURIComponent($('device-id').value)}`, { method: 'PATCH', body: JSON.stringify(body) });
+  $('device-dialog').close(); await refreshAfterChange(); notice('设备授权已更新。');
+});
 submit('setup-form', async () => {
   const address = validateBaseUrl($('setup-base-url').value);
   try {
@@ -281,6 +402,7 @@ submit('login-form', async () => {
     token = session.token; await refresh();
     if (!token) return;
     $('login-panel').hidden = true; $('workspace').hidden = false; $('logout').hidden = false; notice('');
+    $('auth-shell').hidden = true;
   } catch (error) { clearSession(); throw error; }
   finally { $('admin-token').value = ''; }
 });
@@ -302,24 +424,26 @@ document.addEventListener('visibilitychange', () => {
   stopPolling();
   if (!document.hidden && token) run(() => refresh(false));
 });
-$('cancel-edit').addEventListener('click', resetForm);
+$('cancel-edit').addEventListener('click', () => { resetForm(); $('account-dialog').close(); });
 submit('account-form', async () => {
   const id = $('account-id').value;
-  const body = { platform: $('platform').value, label: $('label').value, intervalMinutes: Number($('interval').value), enabled: $('enabled').checked };
+  const body = { platform: $('platform').value, familyId: $('account-family').value, label: $('label').value, intervalMinutes: Number($('interval').value), enabled: $('enabled').checked };
+  const old = accounts.find(a => a.id === id);
+  if (old && (old.familyId || '') !== body.familyId && !confirm(old.familyId || old.familyAssigned ? '调整归属会改变家人组设备可访问的账号范围，历史包裹保留原家人。确认调整？' : '首次归属会将此账号已有包裹一并分配给所选家人。确认分配？')) return;
   if ($('cookie').value.trim()) body.cookie = $('cookie').value.trim();
   try {
     await api(id ? `/v1/admin/accounts/${encodeURIComponent(id)}` : '/v1/admin/accounts', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
-    resetForm(); await refreshAfterChange(); notice('账号已保存。');
+    selectedFamily = body.familyId; resetForm(); $('account-dialog').close(); await refreshAfterChange(); notice('账号已保存。');
   } finally { $('cookie').value = ''; }
 });
 submit('pair-form', async () => {
   if (!baseUrl) throw new Error('请先设置 HTTPS 服务地址，再生成设备绑定码。');
-  const accountIds = [...$('scope').querySelectorAll('input:checked')].map(el => el.value);
-  if (!accountIds.length) throw new Error('请至少选择一个设备可访问的账号。');
+  const familyIds = [...$('scope').querySelectorAll('input:checked')].map(el => el.value);
+  if (!familyIds.length) throw new Error('请至少选择一位家人。');
   clearPairResult();
-  const result = await api('/v1/pairing-codes', { method: 'POST', body: JSON.stringify({ accountIds }) });
+  const result = await api('/v1/pairing-codes', { method: 'POST', body: JSON.stringify({ familyIds }) });
   $('pair-code').textContent = result.code; $('pair-url').textContent = result.baseUrl; $('pair-qr').src = result.qrDataUrl;
-  $('pair-expires').textContent = `有效至 ${date(result.expiresAt)}；使用一次后立即失效。`; $('pair-result').hidden = false;
+  $('pair-expires').textContent = `授权家人：${familyIds.map(familyName).join('、')}；以后新增账号自动包含。有效至 ${date(result.expiresAt)}；使用一次后失效。`; $('pair-result').hidden = false;
   notice('在 App 的“线上账号”页扫码，或输入服务地址与绑定码。');
 });
 run(checkSetup, $('retry-setup'));
