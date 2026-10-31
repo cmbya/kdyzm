@@ -27,7 +27,7 @@ function fullResult(job, result) {
 export function createSyncJobs({ store, collector, now }) {
   const records = new Map(), scopes = new Map(), queues = new Map(), timers = new Map(), running = new Map();
   let closed = false;
-  const finish = record => { record.resolve(record.job); };
+  const finish = record => { record.job.finishedAt = now(); record.resolve(record.job); };
   const context = (accountId, orderId) => {
     const previous = store.snapshot([accountId]);
     const selected = previous.orders.filter(order => !orderId || order.id === orderId);
@@ -51,7 +51,8 @@ export function createSyncJobs({ store, collector, now }) {
       record.job.retryAt = retryAt;
       timers.set(accountId, setTimeout(() => pump(accountId), retryAt - now()).unref()); return;
     }
-    queue.shift(); Object.assign(record.job, { state: 'running', retryAt: 0, error: '' });
+    queue.shift(); record.accountVersion = account.credentialVersion;
+    Object.assign(record.job, { state: 'running', retryAt: 0, error: '' });
     store.updateAccount(accountId, { status: 'syncing', lastAttemptAt: now(), nextSyncAt: now() + account.intervalMinutes * 60000, error: '' });
     const task = Promise.resolve().then(async () => {
       try {
@@ -95,7 +96,10 @@ export function createSyncJobs({ store, collector, now }) {
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
     if (orderId && store.order(orderId)?.accountId !== accountId) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
     const key = `${accountId}:${orderId}`, existing = scopes.get(key);
-    if (existing && (active(existing.job) || (account.enabled && existing.accountVersion === account.credentialVersion && existing.job.state === 'cooldown' && existing.job.retryAt > now()))) return existing;
+    if (existing && (active(existing.job) || (account.enabled && existing.accountVersion === account.credentialVersion && existing.job.state === 'cooldown' && existing.job.retryAt > now()))) {
+      if (existing.job.state === 'queued') pump(accountId);
+      return existing;
+    }
     for (const [id, value] of records) if (!active(value.job) && (now() - value.createdAt > 3600000 || records.size >= 1000)) {
       records.delete(id);
       const scope = `${value.job.accountId}:${value.job.orderId}`;
@@ -105,9 +109,12 @@ export function createSyncJobs({ store, collector, now }) {
     queues.set(accountId, queue);
     const retryAt = account.lastAttemptAt ? account.lastAttemptAt + INTERVAL : 0;
     const inFlight = running.has(accountId) || queue.length > 0;
-    const state = !account.enabled ? 'disabled' : queue.length >= 25 ? 'cooldown' : !inFlight && retryAt > now() ? 'cooldown' : 'queued';
-    const job = { id: randomUUID(), accountId, orderId, state, retryAt: state === 'cooldown' || inFlight ? Math.max(retryAt, now() + (queue.length >= 25 ? INTERVAL : 0)) : 0,
-      error: state === 'disabled' ? '账号同步已关闭，请先在后台启用' : state === 'cooldown' ? '平台查询冷却中，请在提示时间后重试' : '' };
+    // Keep a single pending request per scope. The account timer starts it at
+    // the original cooldown deadline; repeated clicks never extend that time.
+    const state = !account.enabled ? 'disabled' : queue.length >= 25 ? 'cooldown' : 'queued';
+    const job = { id: randomUUID(), accountId, orderId, state, createdAt: now(),
+      retryAt: state !== 'disabled' && (retryAt > now() || inFlight || state === 'cooldown') ? Math.max(retryAt, now() + (queue.length >= 25 ? INTERVAL : 0)) : 0,
+      error: state === 'disabled' ? '账号同步已关闭，请先在后台启用' : state === 'cooldown' ? '账号等待任务已满，本次未排队，请稍后重新获取' : '' };
     let resolve;
     const record = { job, accountVersion: account.credentialVersion, createdAt: now(), done: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
     records.set(job.id, record); scopes.set(key, record);
@@ -115,6 +122,10 @@ export function createSyncJobs({ store, collector, now }) {
     return record;
   }
   return { running, request, pump,
+    latest(accountId) {
+      const record = scopes.get(`${accountId}:`);
+      return record && record.accountVersion === store.account(accountId)?.credentialVersion ? { ...record.job } : null;
+    },
     read(id) { const record = records.get(id); if (!record) fail(404, 'NOT_FOUND', '同步任务已过期或服务已重启，请重新刷新'); return { ...record.job }; },
     async close() {
       closed = true;

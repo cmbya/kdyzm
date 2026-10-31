@@ -1,9 +1,19 @@
+import { createServerClock, syncStatus } from './sync-status.js';
+
 const $ = id => document.getElementById(id);
 let token = '';
 let accounts = [];
 let configurationMode = 'managed';
 let baseUrl = '';
 let settingsDirty = false;
+let refreshRequest = null;
+let pollTimer = null;
+let countdownTimer = null;
+let scopeKey = '';
+let pollingError = '';
+const serverClock = createServerClock();
+const syncSubmitting = new Map();
+const syncRows = new Map();
 const busy = new WeakSet();
 const statusNames = { configured: '待首次采集', syncing: '同步中', ok: '已连接', expired: 'Cookie 已失效', error: '同步失败' };
 const date = value => value ? new Date(value).toLocaleString('zh-CN') : '尚无';
@@ -29,6 +39,7 @@ async function run(fn, owner) {
     if (owner) { busy.delete(owner); owner.removeAttribute('aria-busy'); }
     if (owner === $('account-form')) $('platform').disabled = Boolean($('account-id').value);
     updatePairAvailability();
+    renderSyncStates();
   }
 }
 async function api(path, options = {}, authenticated = true) {
@@ -59,6 +70,7 @@ function showLogin() {
     : '输入初始化时设置的密码。登录凭证只在当前页面内存中保留，刷新页面后需重新登录。';
 }
 function clearSession() {
+  stopPolling(); syncSubmitting.clear(); syncRows.clear(); scopeKey = ''; pollingError = '';
   token = ''; accounts = []; baseUrl = ''; settingsDirty = false;
   for (const form of document.forms) form.reset();
   $('setup-confirm').setCustomValidity(''); $('confirm-password').setCustomValidity('');
@@ -110,16 +122,91 @@ function renderSettings(status) {
   if (!settingsDirty) $('settings-base-url').value = baseUrl;
   updatePairAvailability();
 }
-async function refresh() {
+function stopPolling() {
+  clearTimeout(pollTimer); clearInterval(countdownTimer); pollTimer = null; countdownTimer = null;
+}
+function reportPollingError(error, requestToken) {
+  if (token !== requestToken) return;
+  pollingError = `采集状态暂时无法更新：${error.message}`; notice(pollingError, true);
+}
+function schedulePolling() {
+  stopPolling();
+  if (!token || document.hidden) return;
   const requestToken = token;
-  const [a, d, status] = await Promise.all([api('/v1/admin/accounts'), api('/v1/admin/devices'), api('/v1/admin/status')]);
-  if (!token || token !== requestToken) return;
-  accounts = a.accounts;
-  renderSettings(status);
+  const pending = accounts.some(account => syncStatus(account, serverClock.now()).pending);
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    refresh(false).catch(error => reportPollingError(error, requestToken));
+  }, pending ? 3000 : 30000);
+  if (accounts.some(account => account.syncJob?.retryAt > serverClock.now())) countdownTimer = setInterval(renderSyncStates, 1000);
+}
+async function refresh(full = true) {
+  if (!token) return;
+  const requestToken = token;
+  if (refreshRequest) {
+    const active = refreshRequest;
+    if (active.token === requestToken && (!full || active.full)) return active.promise;
+    await active.promise.catch(() => {});
+    if (token !== requestToken) return;
+    return refresh(full);
+  }
+  const request = { token: requestToken, full };
+  request.promise = (async () => {
+    const [a, d, status] = await Promise.all([api('/v1/admin/accounts'), ...(full ? [api('/v1/admin/devices'), api('/v1/admin/status')] : [])]);
+    if (!token || token !== requestToken) return;
+    accounts = a.accounts; serverClock.update(a.serverTime);
+    if (pollingError && $('notice').textContent === pollingError) notice('');
+    pollingError = '';
+    if (full) renderSettings(status);
+    renderAccounts(); renderScope(); updatePairAvailability();
+    if (full) renderDevices(d.devices);
+  })().finally(() => {
+    if (refreshRequest === request) refreshRequest = null;
+    schedulePolling();
+  });
+  refreshRequest = request;
+  return request.promise;
+}
+async function refreshAfterChange(full = true) {
+  if (refreshRequest) await refreshRequest.promise.catch(() => {});
+  return refresh(full);
+}
+function renderSyncStates() {
+  for (const account of accounts) {
+    const row = syncRows.get(account.id);
+    if (!row) continue;
+    const status = syncStatus(account, serverClock.now());
+    const submitting = syncSubmitting.has(account.id);
+    row.status.textContent = submitting ? '正在提交采集任务…' : status.label;
+    row.details.textContent = status.details.filter(detail => detail !== account.error).join('；');
+    row.details.hidden = !row.details.textContent;
+    if (!busy.has(row.button)) {
+      row.button.disabled = submitting || status.pending;
+      row.button.textContent = submitting ? '提交中…' : status.pending ? (account.syncJob?.state === 'queued' ? '已排队' : '采集中…') : '立即采集';
+    }
+  }
+}
+async function requestSync(accountId) {
+  const account = accounts.find(value => value.id === accountId);
+  if (!account || syncSubmitting.has(accountId) || syncStatus(account, serverClock.now()).pending) return;
+  const requestToken = token;
+  const submission = {};
+  syncSubmitting.set(accountId, submission); notice(''); renderSyncStates();
+  try {
+    const result = await api(`/v1/admin/accounts/${encodeURIComponent(accountId)}/sync`, { method: 'POST', body: '{}' });
+    const current = accounts.find(value => value.id === accountId);
+    if (current) current.syncJob = result.job || result.jobs?.[0] || current.syncJob;
+    renderSyncStates();
+    await refreshAfterChange(false).catch(error => reportPollingError(error, requestToken));
+  } finally {
+    if (syncSubmitting.get(accountId) === submission) syncSubmitting.delete(accountId);
+    renderSyncStates(); schedulePolling();
+  }
+}
+function renderAccounts() {
+  syncRows.clear();
   $('accounts').replaceChildren();
   if (!accounts.length) $('accounts').append(node('p', '尚未配置账号。添加后可为设备选择授权账号范围。', 'hint'));
-  const selected = new Set([...$('scope').querySelectorAll('input:checked')].map(el => el.value));
-  $('scope').replaceChildren(node('legend', '授权账号范围'));
   for (const account of accounts) {
     const item = node('div', '', 'item');
     const title = node('p', `${account.label} · ${account.platform === 'taobao' ? '淘宝' : '拼多多'}`, 'item-title');
@@ -127,26 +214,38 @@ async function refresh() {
     item.append(title, node('p', `最近成功：${date(account.lastSuccessAt)} · ${account.enabled ? `每 ${account.intervalMinutes} 分钟同步` : '自动同步已关闭'}`, 'hint'));
     if (account.error) item.append(node('p', account.error));
     for (const warning of account.warnings || []) item.append(node('p', warning, 'hint'));
+    const status = node('p', '', 'hint'), details = node('p', '', 'hint');
+    item.append(status, details);
     const actions = node('div', '', 'actions');
-    actions.append(action('更新账号', () => edit(account)), action('立即采集', async () => {
-      const result = await api(`/v1/admin/accounts/${encodeURIComponent(account.id)}/sync`, { method: 'POST', body: '{}' });
-      const job = result.jobs?.[0];
-      notice(job?.state === 'cooldown' ? `平台查询冷却中，可于 ${date(job.retryAt)} 重试。` : job?.state === 'disabled' ? job.error : '采集任务已提交；请刷新状态查看完成结果。'); await refresh();
-    }));
+    const button = action('立即采集', () => requestSync(account.id));
+    syncRows.set(account.id, { status, details, button });
+    actions.append(action('更新账号', () => edit(account)), button);
     item.append(actions); $('accounts').append(item);
+  }
+  renderSyncStates();
+}
+function renderScope() {
+  const key = JSON.stringify(accounts.map(account => [account.id, account.label]));
+  if (key === scopeKey) return;
+  scopeKey = key;
+  const selected = new Set([...$('scope').querySelectorAll('input:checked')].map(el => el.value));
+  $('scope').replaceChildren(node('legend', '授权账号范围'));
+  for (const account of accounts) {
     const label = node('label', '', 'checkbox'); const check = document.createElement('input');
     check.type = 'checkbox'; check.value = account.id; check.checked = selected.has(account.id);
     label.append(check, document.createTextNode(account.label)); $('scope').append(label);
   }
+}
+function renderDevices(devices) {
   $('devices').replaceChildren();
-  if (!d.devices.length) $('devices').append(node('p', '尚无已绑定设备。', 'hint'));
-  for (const device of d.devices) {
+  if (!devices.length) $('devices').append(node('p', '尚无已绑定设备。', 'hint'));
+  for (const device of devices) {
     const item = node('div', '', 'item');
     item.append(node('p', device.name, 'item-title'), node('p', `绑定于 ${date(device.createdAt)} · ${device.accountIds.map(id => accounts.find(a => a.id === id)?.label || '已移除账号').join('、')}`, 'hint'));
     if (device.revokedAt) item.append(node('p', `已撤销 · ${date(device.revokedAt)}`, 'hint'));
     else item.append(action('撤销授权', async () => {
       if (!confirm(`撤销“${device.name}”的线上访问权限？本地历史会保留。`)) return;
-      await api(`/v1/devices/${encodeURIComponent(device.id)}`, { method: 'DELETE' }); await refresh(); notice('设备授权已撤销。');
+      await api(`/v1/devices/${encodeURIComponent(device.id)}`, { method: 'DELETE' }); await refreshAfterChange(); notice('设备授权已撤销。');
     }, 'danger'));
     $('devices').append(item);
   }
@@ -195,10 +294,14 @@ submit('settings-form', async () => {
 submit('password-form', async () => {
   try {
     const session = await api('/v1/admin/password', { method: 'POST', body: JSON.stringify({ currentPassword: $('current-password').value, password: $('new-password').value }) });
-    token = session.token; notice('管理员密码已修改，当前页面保持登录；其他管理页面需重新登录。');
+    token = session.token; schedulePolling(); notice('管理员密码已修改，当前页面保持登录；其他管理页面需重新登录。');
   } finally { $('current-password').value = ''; $('new-password').value = ''; $('confirm-password').value = ''; $('confirm-password').setCustomValidity(''); }
 });
-$('refresh').addEventListener('click', event => run(refresh, event.currentTarget));
+$('refresh').addEventListener('click', event => run(async () => { notice(''); await refresh(); }, event.currentTarget));
+document.addEventListener('visibilitychange', () => {
+  stopPolling();
+  if (!document.hidden && token) run(() => refresh(false));
+});
 $('cancel-edit').addEventListener('click', resetForm);
 submit('account-form', async () => {
   const id = $('account-id').value;
@@ -206,7 +309,7 @@ submit('account-form', async () => {
   if ($('cookie').value.trim()) body.cookie = $('cookie').value.trim();
   try {
     await api(id ? `/v1/admin/accounts/${encodeURIComponent(id)}` : '/v1/admin/accounts', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
-    resetForm(); await refresh(); notice('账号已保存。');
+    resetForm(); await refreshAfterChange(); notice('账号已保存。');
   } finally { $('cookie').value = ''; }
 });
 submit('pair-form', async () => {

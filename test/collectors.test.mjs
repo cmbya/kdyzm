@@ -49,7 +49,7 @@ test('PDD collectors use real H5 paths with injected network, paginate and keep 
     assert.equal(call.options.redirect, 'error'); assert.match(call.options.headers.Cookie, /PDDAccessToken=FAKE/);
     if (call.target.pathname.includes('/cabinet/')) assert.equal(call.target.search, '');
   }
-  assert.equal(calls.find(c => c.target.pathname.includes('order_list_v4')).target.searchParams.get('type'), 'unreceived');
+  assert.deepEqual([...new Set(calls.filter(c => c.target.pathname.includes('order_list_v4')).map(c => c.target.searchParams.get('type')))], ['unshipping', 'unreceived']);
 });
 
 test('PDD disappearance and bounded pagination have no synthesized pick/delete events', async () => {

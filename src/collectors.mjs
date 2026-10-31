@@ -377,6 +377,26 @@ function pddCheck(value) {
   if (value.error_code || value.success === false) upstream();
   return value;
 }
+// Official orders.html bundle (2026-10-31): UI tab 2/3 -> PATH_TYPE unshipping/unreceived;
+// getOrdersList uses PATH_TYPE and a separate offset per tab. Keep the existing GET transport.
+// https://static.pddpic.com/assets/js/react_orders_7c4eb98c8a268eacd674.js
+function pddStatusText(order) {
+  return asText(order.order_status_text || order.status_text || order.order_status_prompt)
+    || (/\D/.test(asText(order.order_status)) ? asText(order.order_status) : '');
+}
+function pddOrderKind(order, type) {
+  const status = pddStatusText(order);
+  const combined = asText(order.combined_order_status);
+  // Official combined states: 0=Unpayed, 5=Cancelled, 10=Expired, 15=Deleted.
+  // Received/refund enums do not prove pickup or a full refund; keep records returned by these active tabs.
+  if (/交易成功|交易完成|交易关闭|订单已完成|订单已结束|已取消|待付款|未付款|待支付|未支付/.test(status)
+    || /全额退款(?:已)?(?:成功|完成)|已全额退款/.test(`${status} ${asText(order.refund_status)}`)
+    || ['0', '5', '10', '15'].includes(combined)
+    || asText(order.order_status) === '2' || asText(order.pay_status) === '0') return 'skip';
+  if (combined === '3' || asText(order.shipping_status) === '1' || IN_TRANSIT_STATUS_TEXT.test(status)) return 'in_transit';
+  if (combined === '2' || TO_SHIP_STATUS_TEXT.test(status)) return 'to_ship';
+  return type === 'unshipping' ? 'to_ship' : 'in_transit';
+}
 export function pddParcels(order, cabinet) {
   const platformOrderId = asText(order.order_sn);
   const listed = order.shipping_list || order.express_list || order.package_list;
@@ -396,7 +416,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
   const uid = cookie.match(/(?:^|;\s*)(?:pdd_user_id|pdduid)=([^;]+)/)?.[1];
   if (!uid) expired();
   const headers = { Referer: 'https://mobile.yangkeduo.com/orders.html' };
-  const orders = [], shipments = [], warnings = [], logisticsFailures = [];
+  const orders = [], shipments = [], orderUpdates = [], warnings = [], logisticsFailures = [];
   const seen = new Set();
   let logisticsBudget = 20;
   async function collectLogistics(platformOrderId, parcels) {
@@ -441,48 +461,79 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     const parcels = (targetOrder.shipments || []).filter(parcel => asText(parcel.waybillNo)).map(parcel => ({
       platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
     }));
-    await collectLogistics(platformOrderId, parcels);
+    if (parcels.length || !TO_SHIP_STATUS_TEXT.test(asText(targetOrder.orderStatus))) await collectLogistics(platformOrderId, parcels);
     const hasDate = targetOrder.orderDateSource === 'platform' && targetOrder.orderDate > 0;
     const metadata = { platformOrderId, dateCheckedAt: now(), dateState: 'unavailable',
       dateError: hasDate ? '拼多多暂不支持单单日期详情查询，已保留平台列表日期' : '拼多多暂未提供可验证的单单日期查询，日期仍待确认' };
     return { orders: [], orderUpdates: [metadata], shipments: parcels, logisticsFailures, warnings };
   }
-  let offset = '';
-  for (let page = 1; page <= maxPages; page++) {
-    const query = new URLSearchParams({ pdduid: uid, page: String(page), type: 'unreceived' });
-    if (offset) query.set('offset', offset);
-    const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/api/aristotle/order_list_v4?${query}`, cookie, { fetchImpl, headers });
-    const data = pddCheck(json(response.text));
-    if (!Array.isArray(data.orders)) throw new CollectorError('UPSTREAM_FORMAT', '拼多多订单字段已变化，保留上次数据');
-    if (!data.orders.length) break;
-    let newCount = 0;
-    for (const order of data.orders) {
-      const platformOrderId = asText(order.order_sn);
-      if (!platformOrderId || seen.has(platformOrderId)) continue;
-      newCount++; seen.add(platformOrderId);
-      orders.push({ platformOrderId, title: (order.order_goods || []).map(g => g.goods_name || g.goods_title || '').filter(Boolean).join(' / '),
-        amount: Number.isFinite(order.order_amount) ? order.order_amount / 100 : null, orderDate: timestamp(order.order_time || order.created_time || order.create_time),
-        ...(timestamp(order.order_time || order.created_time || order.create_time) ? { orderDateOrigin: 'list' } : {}),
-        orderStatus: asText(order.order_status_text || order.status_text || order.order_status), refundStatus: asText(order.refund_status) });
-      let cabinet = {};
+  const listedOrders = new Map();
+  for (const type of ['unshipping', 'unreceived']) {
+    let offset = '';
+    const rangeSeen = new Set();
+    for (let page = 1; page <= maxPages; page++) {
+      const query = new URLSearchParams({ pdduid: uid, page: String(page), type });
+      if (offset) query.set('offset', offset);
+      // A failure in either range aborts this batch; callers keep the previous successful snapshot.
+      const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/api/aristotle/order_list_v4?${query}`, cookie, { fetchImpl, headers });
+      const data = pddCheck(json(response.text));
+      if (!Array.isArray(data.orders)) throw new CollectorError('UPSTREAM_FORMAT', '拼多多订单字段已变化，保留上次数据');
+      if (!data.orders.length) break;
+      let newCount = 0;
+      for (const order of data.orders) {
+        const platformOrderId = asText(order.order_sn);
+        if (!platformOrderId || rangeSeen.has(platformOrderId)) continue;
+        newCount++; rangeSeen.add(platformOrderId); seen.add(platformOrderId);
+        const previous = listedOrders.get(platformOrderId);
+        const kind = pddOrderKind(order, type);
+        const ranks = { to_ship: 0, in_transit: 1, skip: 2 };
+        const useIncoming = !previous || ranks[kind] >= ranks[previous.kind];
+        const merged = useIncoming ? { ...previous?.order, ...order } : { ...order, ...previous.order };
+        const parcels = new Map((previous?.parcels || []).map(parcel => [parcel.waybillNo, parcel]));
+        for (const parcel of pddParcels(order, {})) {
+          const prior = parcels.get(parcel.waybillNo);
+          parcels.set(parcel.waybillNo, { ...parcel, carrier: parcel.carrier || prior?.carrier || '',
+            status: parcel.status === 'signed' || prior?.status === 'signed' ? 'signed' : parcel.status });
+        }
+        const orderStatus = pddStatusText(order) || (kind === 'to_ship' ? '待发货' : kind === 'in_transit' ? '待收货' : asText(order.order_status));
+        listedOrders.set(platformOrderId, { order: merged, kind: useIncoming ? kind : previous.kind,
+          orderStatus: useIncoming ? orderStatus : previous.orderStatus, parcels: [...parcels.values()] });
+      }
+      if (!newCount) { warnings.push(`平台${type === 'unshipping' ? '待发货' : '待收货'}分页重复，停止该范围采集并保留已有记录`); break; }
+      offset = asText(data.orders.at(-1)?.offset);
+      if (data.has_more === false || data.hasMore === false) break;
+      if (page === maxPages) warnings.push(`已达到${type === 'unshipping' ? '待发货' : '待收货'}分页上限；缺席订单不会标记为已取或删除`);
+    }
+  }
+  let skippedCount = 0;
+  for (const [platformOrderId, { order, kind, orderStatus, parcels }] of listedOrders) {
+    const metadata = { platformOrderId, title: (order.order_goods || []).map(g => g.goods_name || g.goods_title || '').filter(Boolean).join(' / '),
+      amount: Number.isFinite(order.order_amount) ? order.order_amount / 100 : null, orderDate: timestamp(order.order_time || order.created_time || order.create_time),
+      ...(timestamp(order.order_time || order.created_time || order.create_time) ? { orderDateOrigin: 'list' } : {}),
+      orderStatus, refundStatus: asText(order.refund_status) };
+    if (kind === 'skip') {
+      skippedCount++; orderUpdates.push(metadata); seen.delete(platformOrderId);
+      continue;
+    }
+    orders.push(metadata);
+    if (parcels.length) {
       try {
         const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/api/express/cabinet/${encodeURIComponent(platformOrderId)}`, cookie, { fetchImpl, headers });
-        cabinet = pddCheck(json(response.text)).result || {};
+        const cabinet = pddCheck(json(response.text)).result || {};
+        const enriched = pddParcels({ order_sn: platformOrderId, order_status_text: orderStatus,
+          shipping_list: parcels.map(parcel => ({ tracking_number: parcel.waybillNo, shipping_name: parcel.carrier,
+            shipping_status_text: parcel.status === 'signed' ? '已签收' : '' })) }, cabinet);
+        for (let i = 0; i < parcels.length; i++) Object.assign(parcels[i], enriched[i]);
       } catch (error) {
         if (error.code === 'ACCOUNT_EXPIRED') throw error;
         warnings.push('部分驿站取件码暂不可用，无码运单继续保留');
       }
-      const parcels = pddParcels(order, cabinet);
-      for (const parcel of activeKnownParcels(knownOrders.find(item => asText(item.platformOrderId) === platformOrderId))) {
-        if (parcels.some(item => item.waybillNo === asText(parcel.waybillNo))) continue;
-        parcels.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
-      }
-      shipments.push(...parcels);
     }
-    if (!newCount) { warnings.push('平台分页重复，停止本轮采集并保留已有记录'); break; }
-    offset = asText(data.orders.at(-1)?.offset);
-    if (data.has_more === false || data.hasMore === false) break;
-    if (page === maxPages) warnings.push('已达到分页上限；缺席订单不会标记为已取或删除');
+    for (const parcel of activeKnownParcels(knownOrders.find(item => asText(item.platformOrderId) === platformOrderId))) {
+      if (parcels.some(item => item.waybillNo === asText(parcel.waybillNo))) continue;
+      parcels.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
+    }
+    shipments.push(...parcels);
   }
   const candidates = orders.map(order => ({ platformOrderId: order.platformOrderId, parcels: shipments.filter(parcel => parcel.platformOrderId === order.platformOrderId) }));
   for (const order of activeKnownOrders(knownOrders, seen, logisticsBudget)) {
@@ -502,7 +553,8 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     await collectLogistics(candidate.platformOrderId, candidate.parcels);
     if (candidate.missingFromList) shipments.push(...candidate.parcels.filter(parcel => parcel.logisticsState));
   }
-  return { orders, shipments, orderUpdates: [], logisticsFailures, warnings: [...new Set(warnings)] };
+  if (skippedCount) warnings.push(`订单筛选：本轮保留${orders.length}笔，跳过${skippedCount}笔已结束或非待发货/待收货订单`);
+  return { orders, shipments, orderUpdates, logisticsFailures, warnings: [...new Set(warnings)] };
 }
 
 export function createCollector({ fetchImpl = fetch, now = Date.now, maxPages = 5 } = {}) {

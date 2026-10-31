@@ -11,7 +11,7 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 | GET /v1/admin/status | 管理员；服务地址和模式 |
 | PATCH /v1/admin/settings | 管理员；`{baseUrl}`，设置HTTPS服务地址 |
 | POST /v1/admin/password | 管理员；`{currentPassword,password}`，改密并返回新`{token,expiresAt}` |
-| GET /v1/admin/accounts | 管理员；账号状态，不含Cookie |
+| GET /v1/admin/accounts | 管理员；账号状态及最近全账号采集任务syncJob、响应serverTime，不含Cookie |
 | POST /v1/admin/accounts | 管理员；添加账号，`platform,label,cookie,enabled?,intervalMinutes?` |
 | PATCH /v1/admin/accounts/:id | 管理员；更新账号、Cookie或采集设置 |
 | POST /v1/admin/accounts/:id/sync | 管理员；请求采集 |

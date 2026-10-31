@@ -31,7 +31,7 @@ async function setup(t, collector = async () => ({ orders: [], shipments: [] }))
   return { service, account, other, device, foreign, order, request, base, advance: ms => { current += ms; } };
 }
 
-test('sync jobs expose scope, terminal states, capability/version and explicit cooldown instead of false completion', async t => {
+test('sync jobs expose scope, terminal states, capability/version and queue during cooldown instead of false completion', async t => {
   let calls = 0;
   const { service, account, request, base, advance } = await setup(t, async () => { calls++; return { orders: [], shipments: [] }; });
   const start = await request('/v1/accounts/sync', { method: 'POST', body: {} });
@@ -40,7 +40,7 @@ test('sync jobs expose scope, terminal states, capability/version and explicit c
   const job = (await request('/v1/sync-jobs/' + start.data.jobs[0].id)).data.job;
   assert.equal(job.state, 'completed'); assert.equal(job.accountId, account.id); assert.equal(job.orderId, '');
   const blocked = (await request('/v1/accounts/sync', { method: 'POST', body: {} })).data.jobs[0];
-  assert.equal(blocked.state, 'cooldown'); assert.equal(blocked.retryAt, NOW + 300000); assert.equal(calls, 1);
+  assert.equal(blocked.state, 'queued'); assert.equal(blocked.retryAt, NOW + 300000); assert.equal(calls, 1);
   assert.equal((await request('/v1/accounts/sync', { method: 'POST', body: {} })).data.jobs[0].id, blocked.id);
   const snapshot = (await request('/v1/snapshot')).data;
   assert.equal(snapshot.serverVersion, serverVersion); assert.ok(snapshot.capabilities.includes('orderRefresh'));

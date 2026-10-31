@@ -10,7 +10,7 @@ import { serverVersion } from './version.mjs';
 import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './security.mjs';
 
 const PUBLIC = new URL('../public/', import.meta.url);
-const STATIC = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']], ['/admin.css', ['admin.css', 'text/css; charset=utf-8']]]);
+const STATIC = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']], ['/sync-status.js', ['sync-status.js', 'text/javascript; charset=utf-8']], ['/admin.css', ['admin.css', 'text/css; charset=utf-8']]]);
 
 async function bodyOf(req) {
   if (!(req.headers['content-type'] || '').startsWith('application/json')) fail(415, 'JSON_REQUIRED', '请使用 application/json');
@@ -142,7 +142,9 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           configuration.authenticate(req.headers['x-admin-token']);
           send(res, 200, await configuration.changePassword(req.headers['x-admin-token'], body.currentPassword, body.password)); return;
         }
-        if (path === '/v1/admin/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts() }); return; }
+        if (path === '/v1/admin/accounts' && req.method === 'GET') {
+          send(res, 200, { accounts: store.accounts().map(account => ({ ...account, syncJob: jobs.latest(account.id) })), serverTime: now() }); return;
+        }
         if (path === '/v1/admin/accounts' && req.method === 'POST') {
           const body = await bodyOf(req);
           configuration.authenticate(req.headers['x-admin-token']);

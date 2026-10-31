@@ -159,9 +159,30 @@ test('manual sync coalesces requests, rate-limits platform collection and separa
   const a = await account(); service.store.importResult(a.id, data()); const device = await bind([a.id]);
   const pending = service.requestSync(a.id); const repeat = service.requestSync(a.id); assert.equal(pending, repeat);
   await new Promise(resolve => setImmediate(resolve)); assert.equal(calls, 1); release(); await pending;
-  await service.requestSync(a.id); assert.equal(calls, 1);
+  const queued = service.requestSync(a.id); assert.equal(calls, 1);
   const snapshot = await request('/v1/snapshot', { token: device.token }); assert.equal(snapshot.status, 200); assert.equal(snapshot.data.accounts[0].status, 'expired'); assert.equal(snapshot.data.shipments.length, 2);
-  advance(5 * 60000); await service.requestSync(a.id); assert.equal(calls, 2);
+  advance(5 * 60000); service.jobs.pump(a.id); await queued; assert.equal(calls, 2);
+});
+
+test('admin account status exposes the latest full collection without leaking credentials or granting device access', async t => {
+  const { service, request, account, bind } = await setup(t);
+  const a = await account(), device = await bind([a.id]);
+  let status = await request('/v1/admin/accounts', { admin: true });
+  assert.equal(status.data.accounts[0].syncJob, null);
+  const started = await request(`/v1/admin/accounts/${a.id}/sync`, { admin: true, method: 'POST', body: {} });
+  await Promise.all([...service.running.values()]);
+  status = await request('/v1/admin/accounts', { admin: true });
+  assert.equal(status.data.serverTime, TIME);
+  assert.equal(status.data.accounts[0].syncJob.id, started.data.jobs[0].id);
+  assert.equal(status.data.accounts[0].syncJob.state, 'completed');
+  assert.equal(status.data.accounts[0].syncJob.finishedAt, TIME);
+  assert.ok(!status.raw.includes('cookie-secret-only'));
+  assert.equal((await request('/v1/admin/accounts', { token: device.token })).status, 401);
+  const queued = await request(`/v1/admin/accounts/${a.id}/sync`, { admin: true, method: 'POST', body: {} });
+  status = await request('/v1/admin/accounts', { admin: true });
+  assert.equal(status.data.accounts[0].syncJob.id, queued.data.jobs[0].id);
+  assert.equal(status.data.accounts[0].syncJob.state, 'queued');
+  assert.equal(status.data.accounts[0].syncJob.retryAt, TIME + 300000);
 });
 
 test('cookies use authenticated encryption bound to account, persist ciphertext only, and tampering fails', async t => {
