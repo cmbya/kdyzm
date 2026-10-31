@@ -1,10 +1,12 @@
 # kdyzm · 私人取件助手服务端
 
-为私人取件助手提供线上订单、运单和取件码同步，推荐配套App 3.1.8，兼容旧版设备协议。Node 24 + SQLite，单容器运行，无需 Redis 或外部数据库。
+为私人取件助手提供线上订单、运单和取件码同步，推荐配套App 3.1.9，兼容旧版设备协议。Node 24 + SQLite，单容器运行，无需 Redis 或外部数据库。
 
 源码：https://github.com/zsdd2/kdyzm
 
 手机安装包：[最新App Release](https://github.com/zsdd2/kdyzm/releases/latest)。App 3.1.4起支持「我的 → 检查更新」；首次需覆盖安装启用该功能。App与Docker独立版本，发布APK无需重新部署Docker。维护者后续发布见 [App发布说明](docs/app-updates.md)。
+
+App 3.1.9 采用已确认的包裹记录通栏排版与家人灰色底纹；大号桌面卡片上下分开展示待取快递和路上订单。安装包从77.10 MB降至44.01 MB，保留四种架构及离线扫码/OCR。后台继续使用3.1.8，无需为本次App更新重建容器。见 [3.1.9说明](docs/app-layout-3.1.9.md)。
 
 镜像：`ghcr.io/zsdd2/kdyzm:latest`（Linux amd64 / arm64）。当前服务端源码版本为 `3.1.8`；推送主分支后，GitHub Actions通过测试与容器验收才更新 `latest`。已有部署需重新拉取镜像并重建容器，修复才会生效。
 
