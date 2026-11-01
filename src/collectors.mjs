@@ -6,7 +6,7 @@ import { activeKnownOrders, activeKnownParcels, eventStatus, logisticsTimestamp,
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
-const HOSTS = new Set(['h5api.m.taobao.com', 'pages-g.m.taobao.com', 'buyertrade.taobao.com', 'mobile.yangkeduo.com']);
+const HOSTS = new Set(['h5api.m.taobao.com', 'pages-g.m.taobao.com', 'buyertrade.taobao.com', 'mobile.yangkeduo.com', 'api.m.jd.com']);
 const CARRIERS = { YTO: '圆通速递', ZTO: '中通快递', STO: '申通快递', YUNDA: '韵达速递', SF: '顺丰速运', EMS: 'EMS', JD: '京东物流', JTSD: '极兔速递', HTKY: '百世快递', YZPY: '邮政快递包裹' };
 
 export class CollectorError extends Error {
@@ -557,9 +557,148 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
   return { orders, shipments, orderUpdates, logisticsFailures, warnings: [...new Set(warnings)] };
 }
 
+function jdCheck(data) {
+  // Verified PC buyer APIs return HTTP 200 with { code: 3 } after logout.
+  if (String(data?.code) === '3') expired();
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new CollectorError('UPSTREAM_FORMAT', '京东返回结构已变化，已保留原记录');
+  if (data.success === false || (data.code != null && String(data.code) !== '0')) upstream();
+  return data;
+}
+
+function jdOrderKind(order) {
+  const status = asText(order.statusInfo?.orderStateName);
+  // PC samples: type 4 is local services, type 69 / wareType 1 is virtual goods.
+  if ([4, 69].includes(Number(order.orderType)) || order.wareList?.length && order.wareList.every(ware => Number(ware.wareType) === 1)) return 'skip';
+  if (Number(order.statusInfo?.orderState) === 18 || /已完成|已签收|已取消|已关闭|交易关闭|待付款|待支付|未付款|全额退款|退款完成|已退款/.test(status)) return 'skip';
+  if (/待发货|等待发货|等待卖家发货|等待出库|正在出库/.test(status)) return 'to_ship';
+  if (/待收货|等待收货|已发货|等待揽收|运输中|派送中|派件中|待签收|待取件|待自提/.test(status)) return 'in_transit';
+  return 'skip';
+}
+
+export function jdParcels(data, platformOrderId, checkedAt) {
+  if (!Array.isArray(data.multiPackageTrackInfoList)) throw new CollectorError('UPSTREAM_FORMAT', '京东物流字段已变化，已保留原轨迹');
+  return data.multiPackageTrackInfoList.flatMap(item => {
+    const group = item?.trackGroupInfo || {};
+    const carriage = item?.carriageInfo || group.orderCarriageInfo || {};
+    const waybillNo = asText(carriage.carriageId);
+    if (!waybillNo) return [];
+    if (!Array.isArray(group.orderTrackShowList)) throw new CollectorError('UPSTREAM_FORMAT', '京东物流节点字段已变化，已保留原轨迹');
+    const { events, truncated } = normalizeLogisticsEvents(group.orderTrackShowList.map(step => ({
+      time: step.CreationTime, description: [asText(step.StatusName), asText(step.Content)].filter(Boolean).join('：'),
+    })), timestamp);
+    const latest = events[0];
+    const pickupCode = asText(group.checkCode).trim() || codeOf(latest?.description || '');
+    const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'unknown');
+    return [{ platformOrderId, waybillNo, carrier: asText(carriage.carrier), status, pickupCode,
+      station: status === 'arrived' ? stationOf(latest?.description || '') : '', arrivalAt: status === 'arrived' ? latest?.time || 0 : 0,
+      logisticsEvents: events, logisticsTruncated: truncated, logisticsState: events.length ? 'ok' : 'empty',
+      logisticsCheckedAt: checkedAt, logisticsDetailCheckedAt: checkedAt, ...(events.length ? { logisticsUpdatedAt: checkedAt } : {}) }];
+  });
+}
+
+async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], trackedOrderIds = [], targetOrder }) {
+  const orders = [], shipments = [], orderUpdates = [], logisticsFailures = [], warnings = [];
+  const session = { cookie };
+  const request = async (functionId, input, detail = false) => {
+    // Verified 2026-11-01 with fresh Node requests: PC Cookie is sufficient;
+    // no captured h5st, device token, UUID, detail PassKey or browser is required.
+    const query = new URLSearchParams({ appid: detail ? 'details-jd-com' : 'order-jd-com', client: 'pc', clientVersion: '1.0.0',
+      loginType: '3', t: String(now()), functionId });
+    if (detail) query.set('body', JSON.stringify(input));
+    const response = await platformRequest(`https://api.m.jd.com/api?${query}`, session.cookie, { fetchImpl, method: 'POST',
+      body: detail ? undefined : new URLSearchParams({ body: JSON.stringify(input) }).toString(),
+      headers: { Origin: detail ? 'https://details.jd.com' : 'https://order.jd.com',
+        Referer: detail ? 'https://details.jd.com/' : 'https://order.jd.com/center/list.action', 'Content-Type': 'application/x-www-form-urlencoded' } });
+    session.cookie = withCookies(session.cookie, response.headers);
+    return jdCheck(json(response.text));
+  };
+  let detailBudget = 20;
+  async function detail(platformOrderId) {
+    if (detailBudget-- <= 0) return;
+    const checkedAt = now();
+    try {
+      const data = await request('pcdetail_traceMultiPackage', { orderId: platformOrderId }, true);
+      const returnedParcels = jdParcels(data, platformOrderId, checkedAt);
+      const known = knownOrders.find(order => asText(order.platformOrderId) === platformOrderId);
+      const parcels = returnedParcels.filter(parcel => {
+        if (!parcel.logisticsEvents.length && !parcel.pickupCode && known?.shipments?.some(old => asText(old.waybillNo) === parcel.waybillNo)) {
+          logisticsFailures.push({ platformOrderId, waybillNo: parcel.waybillNo, state: 'empty', logisticsCheckedAt: checkedAt });
+          return false;
+        }
+        return true;
+      });
+      // The PC API formats its submit time with a literal HTML line break.
+      const submitDate = asText(data.processTimeInfo?.submitDate).replace(/\s*<br\s*\/?>\s*/gi, ' ');
+      const orderDate = logisticsTimestamp(submitDate, timestamp);
+      const terminal = returnedParcels.length && returnedParcels.every(parcel => parcel.status === 'signed');
+      const update = { platformOrderId, ...(orderDate ? { orderDate, orderDateOrigin: 'detail' } : {}), dateCheckedAt: checkedAt,
+        dateState: orderDate ? 'ok' : 'empty', ...(terminal ? { orderStatus: '已签收' } : {}) };
+      const listed = orders.find(order => order.platformOrderId === platformOrderId);
+      if (listed) Object.assign(listed, update); else orderUpdates.push(update);
+      shipments.push(...parcels);
+      const returned = new Set(returnedParcels.map(parcel => parcel.waybillNo));
+      const missing = activeKnownParcels(known).filter(parcel => !returned.has(asText(parcel.waybillNo)));
+      for (const parcel of missing) logisticsFailures.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), state: 'unavailable', logisticsCheckedAt: checkedAt });
+      if (!returnedParcels.length && !missing.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
+    } catch (error) {
+      if (error.code === 'ACCOUNT_EXPIRED') throw error;
+      logisticsFailures.push({ platformOrderId, state: 'error', logisticsCheckedAt: checkedAt });
+      orderUpdates.push({ platformOrderId, dateCheckedAt: checkedAt, dateState: 'error', dateError: '京东订单日期补查失败，已保留原日期' });
+      warnings.push('部分京东订单详情读取失败，已保留原记录');
+    }
+  }
+  if (targetOrder) {
+    await detail(asText(targetOrder.platformOrderId));
+    return { orders, shipments, orderUpdates, logisticsFailures, warnings, refreshedCookie: session.cookie };
+  }
+  const seen = new Set(), candidates = new Set();
+  let skipped = 0;
+  for (let page = 1; page <= maxPages; page++) {
+    const data = await request('pcorder_center_list', { page, d: 1, s: 4096 });
+    if (data.success !== true || !Array.isArray(data.data?.orderList)) throw new CollectorError('UPSTREAM_FORMAT', '京东订单字段已变化，已保留原记录');
+    const list = data.data.orderList;
+    if (!list.length) break;
+    let added = 0;
+    for (const order of list) {
+      const platformOrderId = asText(order.orderId);
+      if (!platformOrderId || seen.has(platformOrderId)) continue;
+      seen.add(platformOrderId); added++;
+      const kind = jdOrderKind(order);
+      const rawAmount = order.itemPayInfo?.shouldPay;
+      const metadata = { platformOrderId, title: (order.wareList || []).map(ware => asText(ware.name)).filter(Boolean).join(' / '),
+        amount: rawAmount != null && /^\d+(?:\.\d+)?$/.test(String(rawAmount)) ? Number(rawAmount) : null,
+        orderDate: timestamp(order.dateSubmit), orderDateOrigin: 'list', tradeStatus: asText(order.statusInfo?.orderState),
+        orderStatus: asText(order.statusInfo?.orderStateName) };
+      if (kind === 'skip') { skipped++; orderUpdates.push(metadata); }
+      else orders.push(metadata);
+      const known = knownOrders.find(item => asText(item.platformOrderId) === platformOrderId);
+      const activeParcels = activeKnownParcels(known);
+      if (kind === 'in_transit' && (!known?.shipments?.length || activeParcels.length) || trackedOrderIds.includes(platformOrderId) || activeParcels.length) candidates.add(platformOrderId);
+    }
+    if (!added) { warnings.push('京东分页重复，已停止采集；缺席订单不会删除或标记已取'); break; }
+    if (Number.isInteger(data.data.totalNum) && seen.size >= data.data.totalNum) break;
+    if (page === maxPages) warnings.push('已达到京东分页上限；缺席订单不会删除或标记已取');
+  }
+  for (const order of activeKnownOrders(knownOrders, new Set(candidates), 20)) candidates.add(asText(order.platformOrderId));
+  const lastChecked = id => {
+    const known = knownOrders.find(order => asText(order.platformOrderId) === id);
+    const parcels = activeKnownParcels(known);
+    return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsCheckedAt || 0)) : known?.dateCheckedAt || 0;
+  };
+  for (const id of [...candidates].sort((a, b) => lastChecked(a) - lastChecked(b))) {
+    if (detailBudget <= 0) { warnings.push('京东本轮详情补查已达上限，其余订单下轮继续'); break; }
+    await detail(id);
+  }
+  if (skipped) warnings.push(`京东订单筛选：保留${orders.length}笔待发货/待收货订单，跳过${skipped}笔已结束或非快递订单`);
+  return { orders, shipments, orderUpdates, logisticsFailures, warnings: [...new Set(warnings)], refreshedCookie: session.cookie };
+}
+
 export function createCollector({ fetchImpl = fetch, now = Date.now, maxPages = 5 } = {}) {
   return async (account, cookie, { trackedOrderIds = [], knownOrders = [], targetOrder } = {}) => {
     const options = { fetchImpl, now, maxPages, trackedOrderIds, knownOrders: targetOrder ? [targetOrder] : knownOrders, targetOrder };
-    return account.platform === 'taobao' ? collectTaobao(cookie, options) : collectPdd(cookie, options);
+    if (account.platform === 'taobao') return collectTaobao(cookie, options);
+    if (account.platform === 'pdd') return collectPdd(cookie, options);
+    if (account.platform === 'jd') return collectJd(cookie, options);
+    throw new CollectorError('INVALID_PLATFORM', '不支持的授权平台');
   };
 }

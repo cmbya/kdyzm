@@ -20,6 +20,12 @@ const serverClock = createServerClock();
 const syncSubmitting = new Map();
 const syncRows = new Map();
 const busy = new WeakSet();
+const platformMeta = {
+  taobao: { label: '淘宝', mark: '淘', className: '' },
+  pdd: { label: '拼多多', mark: '拼', className: 'pdd' },
+  jd: { label: '京东', mark: '京', className: 'jd' },
+};
+const platformOf = platform => platformMeta[platform] || { label: platform || '未知平台', mark: '?', className: '' };
 const statusNames = { configured: '待首次采集', syncing: '同步中', ok: '已连接', expired: 'Cookie 已失效', error: '同步失败' };
 const date = value => value ? new Date(value).toLocaleString('zh-CN') : '尚无';
 function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
@@ -224,7 +230,8 @@ function renderAccounts() {
   for (const account of visible) {
     const item = node('div', '', 'item account-row');
     const title = node('div', '', 'item-title');
-    title.append(node('span', account.platform === 'taobao' ? '淘' : '拼', `platform ${account.platform === 'pdd' ? 'pdd' : ''}`), node('span', account.label));
+    const platform = platformOf(account.platform);
+    title.append(node('span', platform.mark, `platform ${platform.className}`), node('span', account.label));
     item.append(title, node('p', `${date(account.lastSuccessAt)} · ${account.enabled ? `${account.intervalMinutes} 分钟` : '已暂停'}`, 'account-meta hint'));
     const status = node('p', '', 'sync-label'), details = node('p', '', 'sync-details hint');
     item.append(status, details);
@@ -315,7 +322,7 @@ function fillFamilyChoices(container, selected = new Set()) {
     const group = accounts.filter(a => a.familyId === family.id);
     label.append(check, document.createTextNode(`${family.name} · ${group.length} 个平台账号`));
     const details = node('details', '');
-    details.append(node('summary', '查看包含账号'), node('p', group.map(a => `${a.platform === 'taobao' ? '淘宝' : '拼多多'} · ${a.label}`).join('、') || '当前没有账号，以后新增自动包含', 'hint'));
+    details.append(node('summary', '查看包含账号'), node('p', group.map(a => `${platformOf(a.platform).label} · ${a.label}`).join('、') || '当前没有账号，以后新增自动包含', 'hint'));
     choice.append(label, details); container.append(choice);
   }
 }

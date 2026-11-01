@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import { createServerClock, syncStatus } from '../public/sync-status.js';
 
 const NOW = 1_800_000_000_000;
-const account = job => ({ id: 'a', familyId: 'f', familyName: '我', label: '我的淘宝', platform: 'taobao', status: 'ok', enabled: true, intervalMinutes: 60, syncJob: job });
+const account = (job, platform = 'taobao') => ({ id: 'a', familyId: 'f', familyName: '我', label: platform === 'jd' ? '我的京东' : '我的淘宝', platform, status: 'ok', enabled: true, intervalMinutes: 60, syncJob: job });
 
 test('queued countdown uses server time and monotonic elapsed time despite a wrong or changing local clock', () => {
   let monotonic = 100, wall = NOW + 86_400_000;
@@ -18,6 +18,18 @@ test('queued countdown uses server time and monotonic elapsed time despite a wro
   monotonic += 60_000;
   assert.equal(syncStatus(queued, clock.now()).label, '已排队 · 等待采集');
   assert.equal(syncStatus(queued, clock.now()).pending, true);
+});
+
+test('JD accounts use explicit platform labels in account rows and family scope details', async () => {
+  const page = await browser();
+  page.state.platform = 'jd';
+  await page.login();
+  const row = page.elements.get('accounts').children[0];
+  assert.equal(row.children[0].children[0].textContent, '京');
+  const scopeDetails = page.elements.get('scope').children[1].children[1].children[1];
+  assert.match(scopeDetails.textContent, /京东 · 我的京东/);
+  const platformHtml = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+  assert.match(platformHtml, /<option value="jd">京东<\/option>/);
 });
 
 test('rejected cooldown does not promise execution and completed jobs retain partial and platform failures', () => {
@@ -61,7 +73,7 @@ async function browser() {
   const elements = new Map([...html.matchAll(/<([\w-]+)[^>]*\bid="([^"]+)"/g)].map(match => [match[2], new Element(match[1])]));
   const listeners = new Map(), timeouts = new Map(), intervals = new Map(), requests = [];
   let timerId = 0;
-  const state = { job: null, monotonic: 100, unauthorized: false, offline: false, blockAccounts: null, blockSync: null };
+  const state = { job: null, platform: 'taobao', monotonic: 100, unauthorized: false, offline: false, blockAccounts: null, blockSync: null };
   const document = {
     hidden: false, forms: [...elements.values()].filter(element => element.tagName === 'FORM'),
     getElementById: id => elements.get(id), createElement: tag => new Element(tag), createTextNode: value => Object.assign(new Element('text'), { textContent: value }),
@@ -80,7 +92,7 @@ async function browser() {
         if (state.blockAccounts) await state.blockAccounts;
         if (state.offline) throw new Error('offline');
         if (state.unauthorized) return response({ error: { code: 'ADMIN_UNAUTHORIZED', message: '请重新登录' } }, 401);
-        return response({ accounts: [account(state.job)], serverTime: NOW + state.monotonic - 100 });
+        return response({ accounts: [account(state.job, state.platform)], serverTime: NOW + state.monotonic - 100 });
       }
       if (path === '/v1/admin/devices') return response({ devices: [] });
       if (path === '/v1/admin/families') return response({ families: [{ id: 'f', name: '我' }] });

@@ -30,6 +30,8 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 | GET /v1/snapshot | 设备；完整快照，支持ETag/If-None-Match/304 |
 | POST /v1/operations | 设备；批量幂等人工操作 |
 
+账号 `platform` 支持 `taobao`、`pdd`，服务端3.1.9起增加 `jd`。创建后不可改变平台；京东采用本人PC网页版会话 Cookie（需包含 `thor`），凭证仅由后台加密保存，不出现在设备快照中。订单与运单字段沿用协议v1。
+
 ## 服务端3.1.1初始化与管理会话
 
 新部署无须提供密钥环境变量。服务生成持久Cookie加密密钥，并在尚未初始化时将一次性初始化码写入容器日志。`POST /v1/setup`要求正确初始化码与12–128字符密码；`baseUrl`可暂为空，否则须为HTTPS origin。成功返回`{initialized:true}`，重复初始化返回409。初始化前业务接口返回409 `SETUP_REQUIRED`。初始化和登录共享限频；服务不会将密码或密钥返回网页。

@@ -29,7 +29,7 @@
 </div></main></div></div>
 <dialog id="account-dialog" class="drawer"><div class="dialog-head"><h2 id="account-dialog-title"><span id="account-heading">添加平台账号</span></h2><button type="button" class="close secondary" data-close="account-dialog" aria-label="关闭">×</button></div><div class="dialog-body">        <form id="account-form">
           <input id="account-id" type="hidden">
-          <label>所属家人<select id="account-family"></select></label><div class="row"><label>平台<select id="platform"><option value="taobao">淘宝</option><option value="pdd">拼多多</option><option disabled>京东 · 待接入</option><option disabled>抖音商城 · 待接入</option></select></label><label>账号名称<input id="label" required maxlength="80" placeholder="例如：日常购物"></label></div>
+          <label>所属家人<select id="account-family"></select></label><div class="row"><label>平台<select id="platform"><option value="taobao">淘宝</option><option value="pdd">拼多多</option><option value="jd">京东</option><option disabled>抖音商城 · 待接入</option></select></label><label>账号名称<input id="label" required maxlength="80" placeholder="例如：日常购物"></label></div>
           <label>平台 Cookie<textarea id="cookie" rows="3" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="仅在此后台粘贴；设备不会收到 Cookie"></textarea></label>
           <div class="row"><label>采集间隔<select id="interval"><option value="60">60 分钟</option><option value="30">30 分钟</option></select></label><label class="checkbox"><input id="enabled" type="checkbox" checked>启用自动同步</label></div>
           <p class="hint">更新已有账号时，留空保留原 Cookie。保存不会立刻访问平台，可点击账号的“立即采集”。</p>

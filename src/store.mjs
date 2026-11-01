@@ -99,7 +99,7 @@ export class Store {
     const familyId = body.familyId === undefined ? old?.familyId || '' : text(body.familyId, '家人ID', 128, false);
     if (familyId && !this.family(familyId)) fail(400, 'INVALID_FAMILY', '请选择有效家人，待归属请留空');
     const platform = body.platform ?? old?.platform;
-    if (!['taobao', 'pdd'].includes(platform) || (old && platform !== old.platform)) fail(400, 'INVALID_PLATFORM', '平台必须是淘宝或拼多多，创建后不可改变');
+    if (!['taobao', 'pdd', 'jd'].includes(platform) || (old && platform !== old.platform)) fail(400, 'INVALID_PLATFORM', '平台必须是淘宝、拼多多或京东，创建后不可改变');
     const intervalMinutes = body.intervalMinutes ?? old?.intervalMinutes ?? 60;
     if (![30, 60].includes(intervalMinutes)) fail(400, 'INVALID_INTERVAL', '同步间隔仅支持30或60分钟');
     if (body.enabled !== undefined && typeof body.enabled !== 'boolean') fail(400, 'INVALID_INPUT', 'enabled 必须是布尔值');
@@ -109,6 +109,7 @@ export class Store {
       const cookie = text(body.cookie, 'Cookie', 16384);
       if (/\r|\n/.test(cookie)) fail(400, 'INVALID_COOKIE', 'Cookie 不得包含换行');
       if (!fixture && platform === 'pdd' && (!/(?:^|;\s*)PDDAccessToken=/.test(cookie) || !/(?:^|;\s*)(?:pdd_user_id|pdduid)=/.test(cookie))) fail(400, 'INVALID_COOKIE', '缺少拼多多登录字段');
+      if (!fixture && platform === 'jd' && !/(?:^|;\s*)thor=[^;\s]+/.test(cookie)) fail(400, 'INVALID_COOKIE', '缺少京东网页版登录字段 thor，请从订单页复制完整 Cookie');
       credential = encryptCookie(cookie, this.key, id);
     }
     const data = { id, platform, label, familyId, familyName: this.family(familyId)?.name || '',
