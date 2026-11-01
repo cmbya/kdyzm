@@ -2,7 +2,7 @@
 // Copyright (c) 2026. Non-commercial license: ../licenses/Pickup-Code-Display-LICENSE.txt.
 // This adapter intentionally does not inherit upstream's automatic "picked" transitions.
 import { createHash } from 'node:crypto';
-import { activeKnownOrders, activeKnownParcels, eventStatus, logisticsTimestamp, normalizeLogisticsEvents, pddShippingEvents, taobaoDetailDate, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
+import { activeKnownOrders, activeKnownParcels, eventStatus, homeDeliveryCompleted, logisticsTimestamp, normalizeLogisticsEvents, pddShippingEvents, taobaoDetailDate, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
@@ -116,7 +116,7 @@ function stageText(stage) {
 }
 function stationOf(value) { return value.match(/(?:存放至|已到达|存入)([^，,。【]+)/)?.[1]?.trim() || value.match(/由【(.+?)】/)?.[1] || ''; }
 function codeOf(value) { return value.match(/(?:取件码|取货码|提货码|自提码)\s*(?:是|为)?\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,15})/)?.[1] || ''; }
-function arrivalEvidence(value) { return /待取件|等待取件|已存放至|存入.*(?:柜|驿站)|已到达.*(?:驿站|代收点)|(?:驿站|代收点|自提柜|快递柜)代收|请(?:及时)?取件|凭取货码/.test(value); }
+function arrivalEvidence(value) { return eventStatus(value) === 'arrived'; }
 
 const TO_SHIP_TRADE_STATUS = 'WAIT_SELLER_SEND_GOODS';
 const IN_TRANSIT_TRADE_STATUS = 'WAIT_BUYER_CONFIRM_GOODS';
@@ -180,7 +180,7 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
     const latestTransit = latestTransitTitle || /运输|发货|揽收|派送|派件中/.test(latestBody);
     const latestBodySigned = /已完成签收|签收成功|已签收/.test(latestBody)
       && !/(?:未|待|拒绝?|请|等待|当面)[^，,。；;！？!?]{0,8}(?:已完成签收|签收成功|已签收)/.test(latestBody);
-    const latestSigned = (!latestTransitTitle && /^(?:签收|已签收|签收成功)$/.test(latestTitle)) || (!latestTransitTitle && latestBodySigned);
+    const latestSigned = homeDeliveryCompleted(latest) || (!latestTransitTitle && /^(?:签收|已签收|签收成功)$/.test(latestTitle)) || (!latestTransitTitle && latestBodySigned);
     const status = latestAtPickupPoint ? 'arrived' : latestSigned ? 'signed' : latestTransit ? 'transit' : arrived ? 'arrived' : 'unknown';
     const { events: logisticsEvents, truncated: logisticsTruncated } = taobaoStageEvents(stages, timestamp, stageText);
     return { platformOrderId, waybillNo: parcel.mailNo, carrier: asText(parcel.cpName || CARRIERS[parcel.cpCode] || selected.logisticCompany?.name || parcel.cpCode),
@@ -406,10 +406,10 @@ export function pddParcels(order, cabinet) {
     const cabinetMatches = parcels.length === 1 || asText(cabinet.tracking_number) === waybillNo;
     const code = cabinetMatches ? asText(cabinet.code).trim() : '';
     const statusText = asText(parcel.shipping_status_text || order.order_status_text || order.status_text);
-    const signed = /已签收|交易成功|交易完成/.test(statusText);
+    const status = eventStatus(statusText, /交易成功|交易完成/.test(statusText) ? 'signed' : code ? 'arrived' : 'transit');
     return { platformOrderId, waybillNo, carrier: asText(parcel.shipping_name || parcel.company_name || (cabinetMatches && cabinet.companyName)),
       pickupCode: code, station: cabinetMatches ? asText(cabinet.address) : '',
-      status: signed ? 'signed' : code ? 'arrived' : 'transit', arrivalAt: code && !signed ? timestamp(cabinet.arrival_time || cabinet.create_time) : 0 };
+      status, arrivalAt: status === 'arrived' ? timestamp(cabinet.arrival_time || cabinet.create_time) : 0 };
   });
 }
 async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], targetOrder }) {
@@ -522,7 +522,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
         const cabinet = pddCheck(json(response.text)).result || {};
         const enriched = pddParcels({ order_sn: platformOrderId, order_status_text: orderStatus,
           shipping_list: parcels.map(parcel => ({ tracking_number: parcel.waybillNo, shipping_name: parcel.carrier,
-            shipping_status_text: parcel.status === 'signed' ? '已签收' : '' })) }, cabinet);
+            shipping_status_text: parcel.status === 'signed' ? '已签收' : parcel.status === 'arrived' ? '待取件' : '' })) }, cabinet);
         for (let i = 0; i < parcels.length; i++) Object.assign(parcels[i], enriched[i]);
       } catch (error) {
         if (error.code === 'ACCOUNT_EXPIRED') throw error;
@@ -588,7 +588,7 @@ export function jdParcels(data, platformOrderId, checkedAt) {
     })), timestamp);
     const latest = events[0];
     const pickupCode = asText(group.checkCode).trim() || codeOf(latest?.description || '');
-    const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'unknown');
+    const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'transit');
     return [{ platformOrderId, waybillNo, carrier: asText(carriage.carrier), status, pickupCode,
       station: status === 'arrived' ? stationOf(latest?.description || '') : '', arrivalAt: status === 'arrived' ? latest?.time || 0 : 0,
       logisticsEvents: events, logisticsTruncated: truncated, logisticsState: events.length ? 'ok' : 'empty',

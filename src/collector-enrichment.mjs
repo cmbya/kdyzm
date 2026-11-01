@@ -81,8 +81,16 @@ export function pddShippingEvents(shipping, timestamp) {
   })), timestamp);
 }
 
+export function homeDeliveryCompleted(description) {
+  return /已(?:经)?(?:成功)?(?:送达|妥投)|妥投成功|已(?:经)?(?:送(?:到|至)|派送(?:到|至)|投递(?:到|至)|放(?:在|到|至)?)[^，,。；;！？!?]{0,12}门口|(?:^|[：:\s])(?:送达|妥投)(?:$|[：:\s])/.test(description)
+    && !/(?:未|待|等待|预计|预定|计划|将|请|要求|希望|安排|同意|约定)[^，,。；;！？!?]{0,12}(?:送达|妥投|送到|送至|投递|放)/.test(description)
+    && !/(?:送达|妥投|派送|投递)[^，,。；;！？!?]{0,8}(?:失败|未成功)/.test(description);
+}
+
 export function eventStatus(description, fallback = 'unknown') {
-  if (/待取件|等待取件|已存放至|存入.*(?:柜|驿站)|已到达.*(?:驿站|代收点)|(?:驿站|代收点|自提柜|快递柜)代收|请(?:及时)?取件|凭取货码/.test(description)) return 'arrived';
+  if (/(?:存入|已(?:经)?(?:成功)?(?:存放至|到达?|送(?:达|到|至)|派送(?:到|至)|妥投(?:至|到)?|投递(?:至|到)|放(?:在|到|至)?))[^，,。；;！？!?]*(?:驿站|代收点|柜|丰巢)|(?:驿站|代收点|自提柜|快递柜)代收/.test(description)) return 'arrived';
+  if (homeDeliveryCompleted(description)) return 'signed';
+  if (/待取件|等待取件|已存放至|存入.*(?:柜|驿站)|请(?:及时)?取件|凭取货码/.test(description)) return 'arrived';
   if (/已完成签收|签收成功|已签收/.test(description) && !/签收失败|拒绝?签收|拒签/.test(description)
     && !/(?:未|待|拒绝?|请|等待|当面)[^，,。；;！？!?]{0,8}(?:已完成签收|签收成功|已签收)/.test(description)) return 'signed';
   if (/运输|发货|揽收|派送|派件中/.test(description)) return 'transit';
