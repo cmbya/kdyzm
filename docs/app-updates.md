@@ -2,7 +2,7 @@
 
 手机从本仓库的Latest Release读取 `app-update.json`，下载安装包后交给Android确认。更新不依赖Docker账号或Cookie。App 3.1.4首次需手动覆盖安装，后续使用「我的 → 检查更新」。旧私人版不要卸载；覆盖安装保留绑定、短信和领取记录。
 
-当前App版本标签为 `app-v3.1.10`，Docker版本标签为 `v3.1.8`。3.1.10修复大组件路上区的签收/归档过滤与原生布局比例；已在3.1.8的后台无需重新部署，旧设备无需重新绑定。尚未升级到3.1.8的后台仍需先完成家人授权预检升级。容器流水线不匹配app-v标签。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。固定下载入口：
+当前App版本标签为 `app-v3.1.11`，服务端为 `3.1.9`。3.1.11补齐京东名称和图标，进入账号页时读取最新快照；京东采集需要后台3.1.9，只有原单账号授权的设备需明确增加家人整组授权。旧设备无需重绑，已有3.1.9后台无需为本次App更新重建。容器流水线不匹配app-v标签。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。固定下载入口：
 
 `https://github.com/zsdd2/kdyzm/releases/latest/download/app-update.json`
 
