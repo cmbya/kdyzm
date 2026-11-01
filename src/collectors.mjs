@@ -673,7 +673,8 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
       else orders.push(metadata);
       const known = knownOrders.find(item => asText(item.platformOrderId) === platformOrderId);
       const activeParcels = activeKnownParcels(known);
-      if (kind === 'in_transit' && (!known?.shipments?.length || activeParcels.length) || trackedOrderIds.includes(platformOrderId) || activeParcels.length) candidates.add(platformOrderId);
+      // JD can assign a waybill and publish warehouse events before the order leaves the warehouse.
+      if ((kind === 'to_ship' || kind === 'in_transit') && (!known?.shipments?.length || activeParcels.length) || trackedOrderIds.includes(platformOrderId) || activeParcels.length) candidates.add(platformOrderId);
     }
     if (!added) { warnings.push('京东分页重复，已停止采集；缺席订单不会删除或标记已取'); break; }
     if (Number.isInteger(data.data.totalNum) && seen.size >= data.data.totalNum) break;

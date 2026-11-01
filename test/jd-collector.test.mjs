@@ -42,7 +42,7 @@ test('JD imports active physical orders with amounts in yuan, split waybills and
   assert.equal(result.shipments.length, 2);
   assert.deepEqual(result.shipments.map(s => [s.waybillNo, s.pickupCode, s.status]), [['JD-A', '8-2-1234', 'arrived'], ['JD-B', '', 'transit']]);
   assert.ok(result.shipments.every(s => !('picked' in s) && s.logisticsState === 'ok'));
-  assert.equal(calls.length, 2); assert.ok(calls.every(c => c.options.headers.Cookie === 'thor=FAKE'));
+  assert.equal(calls.length, 3); assert.ok(calls.every(c => c.options.headers.Cookie === 'thor=FAKE'));
   assert.equal(result.orderUpdates.length, 5);
 });
 
@@ -82,6 +82,34 @@ test('JD empty logistics retains a valid no-code order and does not invent a way
   assert.equal(result.logisticsFailures[0].state, 'unavailable');
 });
 
+test('JD pending warehouse orders discover preassigned waybills before the list changes to shipped', async () => {
+  for (const state of ['待发货', '等待出库', '正在出库']) {
+    for (const existing of [false, true]) {
+      const calls = [];
+      const waiting = order('warehouse', state);
+      const printed = parcel('SYNTHETIC-JD-WAREHOUSE', '仓库处理中');
+      printed.trackGroupInfo.orderTrackShowList[0].Content = '您的订单已经打印完成';
+      const result = await createCollector({ now, fetchImpl: network([waiting], { warehouse: tracking(printed) }, calls) })(
+        { platform: 'jd' }, 'thor=FAKE', { knownOrders: existing ? [{ platformOrderId: 'warehouse', orderStatus: state, shipments: [] }] : [] });
+      assert.equal(calls.filter(c => c.target.searchParams.get('functionId') === 'pcdetail_traceMultiPackage').length, 1);
+      assert.equal(result.orders[0].orderStatus, state);
+      assert.equal(result.shipments[0]?.waybillNo, 'SYNTHETIC-JD-WAREHOUSE');
+      assert.equal(result.shipments[0].status, 'unknown', 'printing a label is not evidence that the parcel is in transit');
+      assert.equal(result.shipments[0].logisticsState, 'ok');
+      assert.match(result.shipments[0].logisticsEvents[0].description, /仓库处理中.*订单已经打印完成/);
+    }
+  }
+});
+
+test('JD pending orders without a preassigned waybill remain valid without fabricated logistics', async () => {
+  const calls = [];
+  const result = await createCollector({ now, fetchImpl: network([order('warehouse', '正在出库')], {}, calls) })({ platform: 'jd' }, 'thor=FAKE');
+  assert.equal(calls.length, 2);
+  assert.equal(result.orders[0].orderStatus, '正在出库');
+  assert.deepEqual(result.shipments, []);
+  assert.equal(result.logisticsFailures[0].state, 'unavailable');
+});
+
 test('JD an absent detail date cannot erase a valid list date and empty tracks cannot downgrade known arrival', async () => {
   const emptyParcel = parcel('A'); emptyParcel.trackGroupInfo.orderTrackShowList = [];
   const result = await createCollector({ now, fetchImpl: network([order('moving')], { moving: { multiPackageTrackInfoList: [emptyParcel] } }) })(
@@ -93,7 +121,7 @@ test('JD an absent detail date cannot erase a valid list date and empty tracks c
 });
 
 test('JD detail budget excludes manual completed parcels and rotates no-waybill orders by their last detail attempt', async () => {
-  const list = Array.from({ length: 23 }, (_, i) => order('o' + i)), calls = [];
+  const list = Array.from({ length: 23 }, (_, i) => order('o' + i, i % 2 ? '正在出库' : '待收货')), calls = [];
   const knownOrders = list.map((o,i)=>({platformOrderId:o.orderId,dateCheckedAt:i===20?now():0,
     shipments:i<20?[{waybillNo:'P'+i,hidden:i%2===0,picked:i%2!==0}]:[]}));
   const result = await createCollector({now,fetchImpl:network(list,{},calls)})({platform:'jd'},'thor=FAKE',{knownOrders});
