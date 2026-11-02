@@ -2,7 +2,7 @@
 // Copyright (c) 2026. Non-commercial license: ../licenses/Pickup-Code-Display-LICENSE.txt.
 // This adapter intentionally does not inherit upstream's automatic "picked" transitions.
 import { createHash } from 'node:crypto';
-import { activeKnownOrders, activeKnownParcels, eventStatus, homeDeliveryCompleted, logisticsTimestamp, normalizeLogisticsEvents, pddShippingEvents, taobaoDetailDate, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
+import { activeKnownOrders, activeKnownParcels, eventStatus, homeDeliveryCompleted, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDate, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
@@ -114,9 +114,17 @@ function stageText(stage) {
   const label = stage.labelDesc;
   return Array.isArray(label?.richContent) ? label.richContent.map(r => r.text || '').join('') : typeof label === 'string' ? label : label?.text || stage.text || '';
 }
-function stationOf(value) { return value.match(/(?:存放至|已到达|存入)([^，,。【]+)/)?.[1]?.trim() || value.match(/由【(.+?)】/)?.[1] || ''; }
 function codeOf(value) { return value.match(/(?:取件码|取货码|提货码|自提码)\s*(?:是|为)?\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,15})/)?.[1] || ''; }
 function arrivalEvidence(value) { return eventStatus(value) === 'arrived'; }
+function applyTrackEvidence(parcel, events) {
+  const evidence = pickupEvidence(events);
+  const reset = events.some(event => pickupCycleReset(event.description) && (!event.time || !parcel.arrivalAt || event.time >= parcel.arrivalAt));
+  const stationConflict = evidence.station && parcel.station
+    && evidence.station.replace(/[\s\p{P}]/gu, '') !== parcel.station.replace(/[\s\p{P}]/gu, '');
+  if (evidence.arrivalAt || reset || stationConflict || !parcel.arrivalAt) Object.assign(parcel, evidence);
+  else if (!parcel.station && evidence.station) Object.assign(parcel, { station: evidence.station, stationSource: evidence.stationSource });
+  if (reset) parcel.pickupCode = '';
+}
 
 const TO_SHIP_TRADE_STATUS = 'WAIT_SELLER_SEND_GOODS';
 const IN_TRANSIT_TRADE_STATUS = 'WAIT_BUYER_CONFIRM_GOODS';
@@ -154,16 +162,16 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
     const specific = parcel.fields || (parcel.multiStage ? parcel : null);
     const selected = specific || (sources.length === 1 || parcel.mailNo === baseNo ? fields : {});
     const stages = Array.isArray(selected.multiStage) ? selected.multiStage : [];
-    let pickupCode = '', station = '', arrivalAt = 0, arrived = false;
+    let pickupCode = '', arrived = false;
     for (const stage of stages) {
       const content = stageText(stage);
+      if (pickupCycleReset(`${stage.title || ''} ${content}`)) break;
       const card = stage.cardDesc || {};
       const code = asText(card.custom?.expressCode?.code) || codeOf(content);
       pickupCode ||= code;
-      station ||= asText(card.title || card.subTitle) || stationOf(content);
-      if (arrivalEvidence(`${stage.title || ''} ${content}`)) { arrived = true; arrivalAt ||= logisticsTimestamp(stage.time || stage.date || stage.occurTime || stage.subtitle, timestamp); }
+      if (arrivalEvidence(`${stage.title || ''} ${content}`)) arrived = true;
     }
-    if (!pickupCode && sources.length === 1) pickupCode = fallbackCode;
+    if (!pickupCode && sources.length === 1 && !stages.some(stage => pickupCycleReset(`${stage.title || ''} ${stageText(stage)}`))) pickupCode = fallbackCode;
     // A current structured collection code is itself evidence that the parcel is at a pickup point.
     arrived ||= !!pickupCode;
     const latest = `${stages[0]?.title || ''} ${stages[0] ? stageText(stages[0]) : ''}`;
@@ -183,8 +191,14 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
     const latestSigned = homeDeliveryCompleted(latest) || (!latestTransitTitle && /^(?:签收|已签收|签收成功)$/.test(latestTitle)) || (!latestTransitTitle && latestBodySigned);
     const status = latestAtPickupPoint ? 'arrived' : latestSigned ? 'signed' : latestTransit ? 'transit' : arrived ? 'arrived' : 'unknown';
     const { events: logisticsEvents, truncated: logisticsTruncated } = taobaoStageEvents(stages, timestamp, stageText);
+    const evidence = pickupEvidence(stages.filter(stage => stage && !/^送至/.test(asText(stage.title))).map(stage => {
+      const rawTime = stage.time || stage.date || stage.occurTime || stage.subtitle;
+      const description = `${stage.title || ''}：${stageText(stage)}`;
+      return { time: logisticsTimestamp(rawTime, timestamp), timePrecision: logisticsTimePrecision(rawTime), description,
+        station: arrivalEvidence(description) ? [stage.cardDesc?.title, stage.cardDesc?.subTitle].filter(Boolean).join(' ') : '' };
+    }));
     return { platformOrderId, waybillNo: parcel.mailNo, carrier: asText(parcel.cpName || CARRIERS[parcel.cpCode] || selected.logisticCompany?.name || parcel.cpCode),
-      pickupCode, station, arrivalAt, status, logisticsEvents, logisticsTruncated,
+      pickupCode, ...evidence, status, logisticsEvents, logisticsTruncated,
       logisticsState: logisticsEvents.length ? 'ok' : specific || selected === fields ? 'empty' : 'unavailable' };
   });
 }
@@ -345,7 +359,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
           // Only replace its current state when the two sources can be ordered.
           if (canUpdateStatus) parcel.status = eventStatus(events[0].description, parcel.status);
           parcel.carrier ||= asText(data.expressName);
-          if (canUpdateStatus && eventStatus(events[0].description) === 'arrived') parcel.arrivalAt ||= events[0].time;
+          if (canUpdateStatus) applyTrackEvidence(parcel, events);
         }
         parcel.logisticsUpdatedAt = checkedAt;
         if (!events.length) { parcel.logisticsState = 'empty'; parcel.logisticsError = '平台本次未返回物流轨迹'; }
@@ -406,10 +420,14 @@ export function pddParcels(order, cabinet) {
     const cabinetMatches = parcels.length === 1 || asText(cabinet.tracking_number) === waybillNo;
     const code = cabinetMatches ? asText(cabinet.code).trim() : '';
     const statusText = asText(parcel.shipping_status_text || order.order_status_text || order.status_text);
-    const status = eventStatus(statusText, /交易成功|交易完成/.test(statusText) ? 'signed' : code ? 'arrived' : 'transit');
+    const status = eventStatus(statusText, /交易成功|交易完成/.test(statusText) ? 'signed' : code || (cabinetMatches && cabinet.arrival_time) ? 'arrived' : 'transit');
+    const arrivalTime = cabinetMatches && status === 'arrived' ? cabinet.arrival_time || cabinet.create_time : 0;
+    const arrivalAt = logisticsTimestamp(arrivalTime, timestamp);
+    const station = cabinetMatches && status === 'arrived' ? asText(cabinet.address) : '';
     return { platformOrderId, waybillNo, carrier: asText(parcel.shipping_name || parcel.company_name || (cabinetMatches && cabinet.companyName)),
-      pickupCode: code, station: cabinetMatches ? asText(cabinet.address) : '',
-      status, arrivalAt: status === 'arrived' ? timestamp(cabinet.arrival_time || cabinet.create_time) : 0 };
+      pickupCode: code, station, stationSource: station ? 'locker' : 'unknown', status, arrivalAt,
+      arrivalAtSource: arrivalAt ? cabinet.arrival_time ? 'locker_arrival' : 'locker_created' : 'unknown',
+      arrivalAtPrecision: arrivalAt ? logisticsTimePrecision(arrivalTime) : 'unknown' };
   });
 }
 async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], targetOrder }) {
@@ -446,7 +464,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
         parcel.logisticsUpdatedAt = checkedAt;
         if (events.length) {
           parcel.status = eventStatus(events[0].description, parcel.status);
-          if (parcel.status === 'arrived') parcel.arrivalAt ||= events[0].time;
+          applyTrackEvidence(parcel, events);
         }
       }
     } catch (error) {
@@ -587,10 +605,11 @@ export function jdParcels(data, platformOrderId, checkedAt) {
       time: step.CreationTime, description: [asText(step.StatusName), asText(step.Content)].filter(Boolean).join('：'),
     })), timestamp);
     const latest = events[0];
-    const pickupCode = asText(group.checkCode).trim() || codeOf(latest?.description || '');
+    const pickupCode = pickupCycleReset(latest?.description || '') ? '' : asText(group.checkCode).trim() || codeOf(latest?.description || '');
     const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'transit');
+    const evidence = status === 'signed' ? pickupEvidence([]) : pickupEvidence(events);
     return [{ platformOrderId, waybillNo, carrier: asText(carriage.carrier), status, pickupCode,
-      station: status === 'arrived' ? stationOf(latest?.description || '') : '', arrivalAt: status === 'arrived' ? latest?.time || 0 : 0,
+      ...evidence,
       logisticsEvents: events, logisticsTruncated: truncated, logisticsState: events.length ? 'ok' : 'empty',
       logisticsCheckedAt: checkedAt, logisticsDetailCheckedAt: checkedAt, ...(events.length ? { logisticsUpdatedAt: checkedAt } : {}) }];
   });

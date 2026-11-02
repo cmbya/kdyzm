@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
 import { serverVersion, capabilities } from './version.mjs';
+import { genericPickupStation, pickupCycleReset, pickupEvidence } from './collector-enrichment.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
@@ -15,7 +16,8 @@ function logisticsData(input, old = {}) {
   const supplied = Array.isArray(input.logisticsEvents) ? input.logisticsEvents : [];
   const seen = new Set();
   const events = [...supplied, ...(old.logisticsEvents || [])].filter(e => e && typeof e === 'object').map(e => ({
-    time: validTime(e.time), timeText: shortText(e.timeText, 100), description: shortText(e.description, 600), location: shortText(e.location, 120)
+    time: validTime(e.time), timeText: shortText(e.timeText, 100), description: shortText(e.description, 600), location: shortText(e.location, 120),
+    ...(['second', 'minute', 'unknown'].includes(e.timePrecision) ? { timePrecision: e.timePrecision } : {})
   })).filter(e => {
     const key = JSON.stringify([e.time, e.time ? '' : e.timeText, e.description, e.location]);
     if (!e.description || seen.has(key)) return false;
@@ -28,6 +30,33 @@ function logisticsData(input, old = {}) {
     logisticsDetailCheckedAt: Math.max(validTime(input.logisticsDetailCheckedAt), old.logisticsDetailCheckedAt || 0),
     logisticsUpdatedAt: Math.max(old.logisticsUpdatedAt || 0, state === 'ok' && supplied.some(e => e?.description) ? validTime(input.logisticsUpdatedAt) || checkedAt : 0),
     logisticsTruncated: !!(input.logisticsTruncated || old.logisticsTruncated || events.length > 100) };
+}
+function pickupData(input = {}, old = {}, events = []) {
+  if (input.logisticsCheckedAt && input.logisticsCheckedAt < (old.logisticsCheckedAt || 0)) return pickupData({}, old, old.logisticsEvents || []);
+  const source = value => ['platform_event', 'locker_arrival', 'locker_created'].includes(value) ? value : 'unknown';
+  const precision = value => ['second', 'minute'].includes(value) ? value : 'unknown';
+  const explicitArrival = validTime(input.arrivalAt) && source(input.arrivalAtSource) !== 'unknown';
+  const arrivalAt = explicitArrival ? validTime(input.arrivalAt) : validTime(old.arrivalAt) || validTime(input.arrivalAt);
+  const station = explicitArrival && Object.hasOwn(input, 'stationSource') ? shortText(input.station, 300)
+    : shortText(input.station, 300) || shortText(old.station, 300);
+  let result = { arrivalAt, arrivalAtSource: arrivalAt ? source(explicitArrival ? input.arrivalAtSource : old.arrivalAtSource) : 'unknown',
+    arrivalAtPrecision: arrivalAt ? precision(explicitArrival ? input.arrivalAtPrecision : old.arrivalAtPrecision) : 'unknown', station,
+    stationSource: station ? ['platform_event', 'locker'].includes(input.stationSource) && input.station ? input.stationSource
+      : station === old.station && ['platform_event', 'locker'].includes(old.stationSource) ? old.stationSource : 'unknown' : 'unknown' };
+  const evidence = pickupEvidence(events);
+  const reset = events.some(event => pickupCycleReset(event.description || '') && (!event.time || !arrivalAt || event.time >= arrivalAt));
+  const newCycle = events.some(event => pickupCycleReset(event.description || '') && (!event.time || event.time >= validTime(old.arrivalAt)));
+  const stationConflict = input.station && old.station && ['platform_event', 'locker'].includes(input.stationSource)
+    && input.station.replace(/[\s\p{P}]/gu, '') !== old.station.replace(/[\s\p{P}]/gu, '');
+  if (evidence.arrivalAt && (!explicitArrival || evidence.arrivalAt >= arrivalAt)) {
+    const keepSpecificStation = !newCycle && station && !genericPickupStation(station) && genericPickupStation(evidence.station);
+    const useEvidenceStation = evidence.station && !keepSpecificStation;
+    result = { ...evidence, station: useEvidenceStation ? evidence.station : newCycle ? '' : station,
+      stationSource: useEvidenceStation ? evidence.stationSource : newCycle ? 'unknown' : result.stationSource };
+  }
+  else if (reset || (!explicitArrival && stationConflict)) result = evidence;
+  // Legacy cache timestamps and station names carry no provenance on their own.
+  return result;
 }
 const carrierKey = value => {
   const name = String(value || '').toUpperCase().replace(/\s/g, '');
@@ -276,13 +305,14 @@ export class Store {
         const id = previous.length === 1 ? previous[0].id : stableId(accountId, account.platform, orderId, carrier, String(input.waybillNo));
         const old = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id));
         const status = ['transit', 'arrived', 'signed', 'unknown'].includes(input.status) ? input.status : 'unknown';
+        const logistics = logisticsData(input, old);
+        const pickup = pickupData(input, old || {}, logistics.logisticsEvents);
         const shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
           familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: String(input.waybillNo), carrier: input.carrier || old?.carrier || '', status,
-          pickupCode: input.pickupCode || old?.pickupCode || '', station: input.station || old?.station || '',
-          arrivalAt: old?.arrivalAt || (status === 'arrived' ? input.arrivalAt || this.now() : 0),
+          pickupCode: input.pickupCode || (!pickup.arrivalAt && (old?.arrivalAt || logistics.logisticsEvents.some(event => pickupCycleReset(event.description))) ? '' : old?.pickupCode) || '', ...pickup,
           updatedAt: input.updatedAt || this.now(), picked: old?.picked || false, hidden: old?.hidden || false,
           deleted: old?.deleted || false, manualAt: old?.manualAt || 0,
-          ...logisticsData(input, old) };
+          ...logistics };
         this.db.prepare('INSERT INTO shipments VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, accountId, JSON.stringify(shipment));
       }
       for (const failure of result.logisticsFailures || []) {
@@ -307,7 +337,11 @@ export class Store {
     const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(visible)
       .map(o => ({ ...o, familyId: o.familyId || '', familyName: o.familyName || '', orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
         dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '' }));
-    const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible).map(s => ({ ...s, familyId: s.familyId || '', familyName: s.familyName || '' }));
+    const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible).map(s => {
+      const pickup = pickupData({}, s, s.logisticsEvents || []);
+      return { ...s, ...pickup, pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
+        familyId: s.familyId || '', familyName: s.familyName || '' };
+    });
     const familyIds = device.familyIds || [];
     const families = this.families([...new Set([...familyIds, ...accounts.map(a => a.familyId), ...orders.map(o => o.familyId), ...shipments.map(s => s.familyId)].filter(Boolean))]);
     const histories = shipments.map(shipment => {
