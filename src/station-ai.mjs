@@ -1,12 +1,27 @@
 import { request as httpsRequest } from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fail } from './security.mjs';
+import { validateStationSuggestion } from './station-text.mjs';
 
 const TIMEOUT = 12000, RESPONSE_LIMIT = 65536;
-const safeError = error => ({ AI_DAILY_LIMIT: '今日AI调用已达上限', AI_INVALID_RESULT: 'AI结果未通过原文与格式校验，请人工核对',
-  AI_TIMEOUT: 'AI请求超时，请稍后重试', AI_ENDPOINT_BLOCKED: 'AI地址未通过公网HTTPS安全校验', AI_NOT_CONFIGURED: '请先完整配置AI渠道' })[error?.code] || 'AI请求未完成，请检查渠道配置后重试';
+const messages = {
+  AI_ACCEPTED: '已开始分析待处理站点片段，结果仍需人工确认', AI_RUNNING: 'AI正在分析，请稍后核对候选',
+  AI_NOT_CONFIGURED: '请先完整配置AI渠道、HTTPS地址、模型和API Key', AI_AUTOMATIC_DISABLED: '定期AI已关闭，可使用立即分析手动运行',
+  AI_DAILY_LIMIT: '今日AI调用已达上限，含连接测试和重试', AI_NO_PENDING: '没有待分析的站点片段，已有建议请人工核对',
+  AI_RETRY_COOLDOWN: '暂时失败的候选仍在重试等待期，请稍后再试', AI_NOT_DUE: '尚未到定期分析时间',
+  SERVICE_STOPPING: '服务正在停止，AI分析已停止', AI_CONFIG_CHANGED: 'AI配置或密钥已更改，本次分析已停止',
+  AI_INVALID_RESULT: 'AI结果未通过原文与格式校验，请人工核对', AI_TIMEOUT: 'AI请求超时，请稍后重试',
+  AI_ENDPOINT_BLOCKED: 'AI地址未通过公网HTTPS安全校验', AI_HTTP_ERROR: 'AI服务暂时不可用，请检查渠道配置后重试',
+  AI_RESPONSE_TOO_LARGE: 'AI返回超过大小限制，未采纳', AI_DETAIL_LIMIT: '分析详情超过大小限制，未采纳',
+  AI_REQUEST_FAILED: 'AI请求未完成，请检查渠道配置后重试',
+};
+const safeFailure = error => { const code = Object.hasOwn(messages, error?.code) ? error.code : 'AI_REQUEST_FAILED'; return { code, message: messages[code] }; };
+const safeError = error => safeFailure(error).message;
 const aiError = (code, retryable = false) => Object.assign(new Error(code), { code, retryable });
+const cancelled = error => ['AI_CONFIG_CHANGED', 'AI_NOT_CONFIGURED', 'AI_AUTOMATIC_DISABLED', 'SERVICE_STOPPING'].includes(error?.code);
+const retryAttempts = candidate => Math.max(0, (candidate.attempts || 0) - (candidate.cancelledAttempts || 0));
 
 export function publicAddress(address) {
   if (isIP(address) === 4) {
@@ -77,62 +92,120 @@ function contentJson(response) {
 
 export class StationAiJobs {
   constructor({ stations, now = Date.now, request = requestAiJson }) {
-    this.stations = stations; this.now = now; this.transport = request; this.running = null; this.controllers = new Set(); this.closed = false;
+    this.stations = stations; this.now = now; this.transport = request; this.running = null; this.controllers = new Map(); this.closed = false; this.cancelGeneration = 0; this.batch = null;
+    this.unsubscribe = stations.onAiConfigChange(({ credentialsChanged }) => {
+      if (credentialsChanged) this.cancelGeneration++;
+      const reason = aiError(credentialsChanged ? 'AI_CONFIG_CHANGED' : !this.ready(false) ? 'AI_NOT_CONFIGURED' : 'AI_AUTOMATIC_DISABLED');
+      if (this.batch && (credentialsChanged || !this.ready(this.batch.automatic))) this.batch.controller.abort(reason);
+      for (const [controller, context] of this.controllers) if (credentialsChanged || !this.ready(context.automatic)) controller.abort(reason);
+    });
   }
   ready(requireEnabled = true) {
     const config = this.stations.aiConfig();
-    return config.hasApiKey && config.baseUrl && config.model && (!requireEnabled || config.enabled);
+    return config.hasApiKey && config.channelName && config.baseUrl && config.model && (!requireEnabled || config.enabled);
   }
-  eligibleCandidate(c) { return (c.attempts || 0) < 3 && (c.status === 'pending' || c.status === 'failed' && c.retryAt > 0 && c.retryAt <= this.now()); }
+  assertActive(context) {
+    if (this.closed) throw aiError('SERVICE_STOPPING');
+    if (context.signal?.aborted) throw context.signal.reason;
+    if (context.generation !== this.cancelGeneration) throw aiError('AI_CONFIG_CHANGED');
+    if (!this.ready(false)) throw aiError('AI_NOT_CONFIGURED');
+    if (context.automatic && !this.ready(true)) throw aiError('AI_AUTOMATIC_DISABLED');
+  }
+  finishAnalysis(id, error) {
+    const candidate = this.stations.candidate(id);
+    if (!candidate.analysis || candidate.analysis.finishedAt) return;
+    this.stations.recordAnalysis(id, { ...candidate.analysis, finishedAt: this.now(), result: null, error: safeFailure(error) });
+    // Actual calls still count toward attempts and the daily quota; cancellations do not exhaust failure retries.
+    if (cancelled(error)) this.stations.updateCandidate(id, { cancelledAttempts: (candidate.cancelledAttempts || 0) + 1 });
+  }
+  eligibleCandidate(c) { return retryAttempts(c) < 3 && (c.status === 'pending' || c.status === 'failed' && c.retryAt > 0 && c.retryAt <= this.now()); }
   eligible() { return this.stations.candidates().filter(c => this.eligibleCandidate(c)); }
-  request() {
-    if (this.closed || this.running || !this.ready() || this.stations.aiConfig().usageToday >= this.stations.aiConfig().dailyLimit || !this.eligible().length) return { accepted: false, running: !!this.running };
+  request({ automatic = false } = {}) {
+    const response = (code, extra = {}) => ({ accepted: code === 'AI_ACCEPTED', running: !!this.running, code, message: messages[code], ...extra });
+    if (this.closed) return response('SERVICE_STOPPING');
+    if (this.running) return response('AI_RUNNING');
+    if (!this.ready(false)) return response('AI_NOT_CONFIGURED');
+    const config = this.stations.aiConfig();
+    if (automatic && !config.enabled) return response('AI_AUTOMATIC_DISABLED');
+    if (config.usageToday >= config.dailyLimit) return response('AI_DAILY_LIMIT');
+    if (!this.eligible().length) {
+      const retries = this.stations.candidates().filter(c => c.status === 'failed' && retryAttempts(c) < 3 && c.retryAt > this.now());
+      return retries.length ? response('AI_RETRY_COOLDOWN', { retryAt: Math.min(...retries.map(c => c.retryAt)) }) : response('AI_NO_PENDING');
+    }
+    if (automatic && config.nextRunAt > this.now()) return response('AI_NOT_DUE', { retryAt: config.nextRunAt });
     this.stations.markAiRun();
-    this.running = Promise.resolve().then(() => this.run()).catch(() => {}).finally(() => { this.running = null; });
-    return { accepted: true, running: true };
+    const controller = new AbortController(), context = { automatic, generation: this.cancelGeneration, signal: controller.signal };
+    this.batch = { ...context, controller };
+    this.running = Promise.resolve().then(() => this.run(context)).catch(() => {}).finally(() => { this.running = null; this.batch = null; });
+    return response('AI_ACCEPTED');
   }
   runDue() {
-    const config = this.stations.aiConfig();
-    if (config.nextRunAt > this.now()) return { accepted: false, running: !!this.running };
-    return this.request();
+    return this.request({ automatic: true });
   }
-  async call(messages, candidateId) {
+  async call(requestMessages, { candidateId, input, automatic = false, generation = this.cancelGeneration, signal } = {}) {
+    const context = { automatic, generation, signal }; this.assertActive(context);
     if (!this.stations.reserveAiCall()) throw aiError('AI_DAILY_LIMIT', true);
-    if (candidateId) this.stations.updateCandidate(candidateId, { attempts: (this.stations.candidate(candidateId).attempts || 0) + 1 });
-    const config = this.stations.aiCredentials(), controller = new AbortController(); this.controllers.add(controller);
+    const config = this.stations.aiCredentials(), controller = new AbortController(); this.controllers.set(controller, { automatic });
+    if (candidateId) {
+      this.stations.updateCandidate(candidateId, { attempts: (this.stations.candidate(candidateId).attempts || 0) + 1 });
+      this.stations.recordAnalysis(candidateId, { startedAt: this.now(), finishedAt: 0, input, result: null, error: null });
+    }
     let timer, onAbort;
-    const timeout = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(aiError('AI_TIMEOUT', true)); }, TIMEOUT); });
-    const aborted = new Promise((_, reject) => { onAbort = () => reject(aiError('AI_TIMEOUT', !this.closed)); controller.signal.addEventListener('abort', onAbort, { once: true }); });
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(aiError('AI_TIMEOUT', true)); reject(aiError('AI_TIMEOUT', true)); }, TIMEOUT); });
+    const aborted = new Promise((_, reject) => { onAbort = () => reject(controller.signal.reason || aiError('AI_CONFIG_CHANGED')); controller.signal.addEventListener('abort', onAbort, { once: true }); });
     try {
-      return await Promise.race([this.transport({ url: config.baseUrl, headers: { Authorization: `Bearer ${config.apiKey}` },
-        body: JSON.stringify({ model: config.model, stream: false, temperature: 0, max_tokens: 700, response_format: { type: 'json_object' }, messages }), signal: controller.signal }), timeout, aborted]);
+      const response = await Promise.race([this.transport({ url: config.baseUrl, headers: { Authorization: `Bearer ${config.apiKey}` },
+        body: JSON.stringify({ model: config.model, stream: false, temperature: 0, max_tokens: 700, response_format: { type: 'json_object' }, messages: requestMessages }), signal: controller.signal }), timeout, aborted]);
+      this.assertActive(context);
+      return response;
+    } catch (error) {
+      if (candidateId) this.finishAnalysis(candidateId, error);
+      throw error;
     } finally { clearTimeout(timer); controller.signal.removeEventListener('abort', onAbort); this.controllers.delete(controller); }
   }
-  async run() {
+  input(candidate) {
+    const input = { fragment: candidate.fragment, region: candidate.region, knownStations: [], knownStationsTruncated: false };
+    for (const station of this.stations.stationRules().stations) {
+      const entry = { id: station.id, name: station.name, region: station.region, aliases: station.aliases.map(a => a.name) };
+      input.knownStations.push(entry);
+      if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 16384) { input.knownStations.pop(); input.knownStationsTruncated = true; }
+    }
+    return input;
+  }
+  async run(context) {
     const pending = this.eligible().reverse();
     for (const candidate of pending) {
-      if (this.closed || !this.ready() || this.stations.aiConfig().usageToday >= this.stations.aiConfig().dailyLimit) break;
-      if (!this.eligibleCandidate(this.stations.candidate(candidate.id))) continue;
-      this.stations.updateCandidate(candidate.id, { status: 'pending', retryAt: 0, error: '' });
-      const messages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify({ fragment: candidate.fragment, region: candidate.region,
-        knownStations: this.stations.stationRules().stations.map(s => ({ id: s.id, name: s.name, region: s.region, aliases: s.aliases.map(a => a.name) })) }) }];
       try {
+        this.assertActive(context);
+        if (this.stations.aiConfig().usageToday >= this.stations.aiConfig().dailyLimit) break;
+        if (!this.eligibleCandidate(this.stations.candidate(candidate.id))) continue;
+        this.stations.updateCandidate(candidate.id, { status: 'pending', retryAt: 0, error: '' });
+        const input = this.input(candidate), requestMessages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(input) }];
         let response;
         for (let attempt = 0; attempt < 2; attempt++) {
-          if (this.closed || !this.ready() || this.stations.candidate(candidate.id).status !== 'pending') return;
-          try { response = await this.call(messages, candidate.id); break; }
+          this.assertActive(context);
+          if (this.stations.candidate(candidate.id).status !== 'pending') return;
+          try { response = await this.call(requestMessages, { candidateId: candidate.id, input, ...context }); break; }
           catch (error) {
-            if (!error.retryable || attempt || this.closed || this.stations.candidate(candidate.id).attempts >= 3) throw error;
-            await new Promise(resolve => setTimeout(resolve, 300));
+            if (!error.retryable || attempt || this.closed || retryAttempts(this.stations.candidate(candidate.id)) >= 3) throw error;
+            try { await delay(300, undefined, { signal: context.signal }); }
+            catch (error) { this.assertActive(context); throw error; }
           }
         }
-        if (!this.closed) this.stations.recordSuggestion(candidate.id, contentJson(response));
+        this.assertActive(context);
+        const result = validateStationSuggestion(this.stations.candidate(candidate.id), contentJson(response), this.stations.stations());
+        this.stations.recordAnalysis(candidate.id, { ...this.stations.candidate(candidate.id).analysis, finishedAt: this.now(), result, error: null });
+        this.stations.recordSuggestion(candidate.id, result);
       } catch (error) {
-        if (this.closed) break;
         // Never persist provider errors: they can echo API keys or private request data.
+        this.finishAnalysis(candidate.id, error);
         const current = this.stations.candidate(candidate.id);
+        if (cancelled(error)) {
+          if (current.status === 'pending') this.stations.updateCandidate(candidate.id, { error: safeError(error), retryAt: 0 });
+          break;
+        }
         if (current.status === 'pending') this.stations.updateCandidate(candidate.id, { status: 'failed', error: safeError(error),
-          retryAt: error.retryable && current.attempts < 3 ? this.now() + this.stations.aiConfig().intervalMinutes * 60000 : 0 });
+          retryAt: error.retryable && retryAttempts(current) < 3 ? this.now() + this.stations.aiConfig().intervalMinutes * 60000 : 0 });
       }
     }
   }
@@ -145,5 +218,5 @@ export class StationAiJobs {
       return { ok: true, message: 'AI连接正常' };
     } catch (error) { return { ok: false, message: safeError(error) }; }
   }
-  async close() { this.closed = true; for (const controller of this.controllers) controller.abort(); await this.running; }
+  async close() { this.closed = true; this.unsubscribe(); this.batch?.controller.abort(aiError('SERVICE_STOPPING')); for (const controller of this.controllers.keys()) controller.abort(aiError('SERVICE_STOPPING')); await this.running; }
 }

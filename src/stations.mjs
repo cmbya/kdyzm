@@ -12,6 +12,7 @@ const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.
 export class StationStore {
   constructor({ db, key, now = Date.now }) {
     this.db = db; this.key = key; this.now = now;
+    this.aiConfigListeners = new Set();
     db.exec(`CREATE TABLE IF NOT EXISTS station_meta (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
       INSERT OR IGNORE INTO station_meta VALUES(1,0);
       CREATE TABLE IF NOT EXISTS station_catalog (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -82,7 +83,7 @@ export class StationStore {
             this.updateCandidate(existing.id, { occurrences: Math.min(1000000, existing.occurrences + 1), updatedAt: this.now() }); result.duplicates++;
           } else {
             if (this.db.prepare('SELECT COUNT(*) AS count FROM station_candidates').get().count >= 2000) fail(429, 'STATION_QUEUE_FULL', '站点队列已满');
-            const id = randomUUID(), candidate = { id, stationName, fragment, source, region, status: 'pending', suggestion: null, evidence: [], occurrences: 1, attempts: 0, retryAt: 0, error: '', createdAt: this.now(), updatedAt: this.now() };
+            const id = randomUUID(), candidate = { id, stationName, fragment, source, region, status: 'pending', suggestion: null, evidence: [], occurrences: 1, attempts: 0, cancelledAttempts: 0, retryAt: 0, error: '', analysis: null, createdAt: this.now(), updatedAt: this.now() };
             this.db.prepare('INSERT INTO station_candidates VALUES(?,?,?)').run(id, fingerprint, JSON.stringify(candidate)); result.accepted++;
           }
           this.db.prepare('INSERT INTO station_candidate_receipts VALUES(?)').run(receipt);
@@ -99,6 +100,10 @@ export class StationStore {
   updateCandidate(id, fields) {
     const candidate = { ...this.candidate(id), ...fields, updatedAt: this.now() };
     this.db.prepare('UPDATE station_candidates SET data=? WHERE id=?').run(JSON.stringify(candidate), id); return candidate;
+  }
+  recordAnalysis(id, analysis) {
+    if (Buffer.byteLength(JSON.stringify(analysis), 'utf8') > 24576) fail(400, 'AI_DETAIL_LIMIT', '分析详情超过大小限制');
+    return this.updateCandidate(id, { analysis });
   }
   recordSuggestion(id, raw) {
     const candidate = this.candidate(id);
@@ -139,16 +144,19 @@ export class StationStore {
     const row = this.db.prepare('SELECT data,credential FROM station_ai_settings WHERE id=1').get(), old = { ...defaults, ...parse(row) };
     const config = { ...old, channelName: stationText(body.channelName ?? old.channelName, '渠道名称', 80, false),
       baseUrl: body.baseUrl === undefined ? old.baseUrl : body.baseUrl === '' ? '' : validateAiBaseUrl(body.baseUrl), model: stationText(body.model ?? old.model, '模型名称', 120, false),
-      enabled: body.enabled ?? old.enabled, intervalMinutes: body.intervalMinutes ?? old.intervalMinutes, dailyLimit: body.dailyLimit ?? old.dailyLimit };
-    if (typeof config.enabled !== 'boolean' || ![60, 1440].includes(config.intervalMinutes) || !Number.isInteger(config.dailyLimit) || config.dailyLimit < 1 || config.dailyLimit > 20 || body.clearApiKey !== undefined && typeof body.clearApiKey !== 'boolean') fail(400, 'INVALID_AI_CONFIG', 'AI频率须为每小时或每天，每日上限1到20条');
+      enabled: body.enabled ?? old.enabled, intervalMinutes: body.intervalMinutes ?? old.intervalMinutes, dailyLimit: body.dailyLimit === undefined ? old.dailyLimit : body.dailyLimit };
+    if (typeof config.enabled !== 'boolean' || ![60, 1440].includes(config.intervalMinutes) || !Number.isSafeInteger(config.dailyLimit) || config.dailyLimit < 1 || body.clearApiKey !== undefined && typeof body.clearApiKey !== 'boolean') fail(400, 'INVALID_AI_CONFIG', 'AI频率须为每小时或每天，每日上限须为正安全整数');
     let credential = row?.credential || '';
     if (body.apiKey !== undefined && (typeof body.apiKey !== 'string' || body.apiKey.length > 4096 || /\s/u.test(body.apiKey))) fail(400, 'INVALID_AI_CONFIG', 'API Key格式不正确');
     if (body.apiKey) credential = encryptCookie(body.apiKey, this.key, 'station-ai-key');
     if (body.clearApiKey) credential = '';
     if (config.enabled && (!config.channelName || !config.baseUrl || !config.model || !credential)) fail(400, 'AI_NOT_CONFIGURED', '请先配置渠道、HTTPS地址、模型和API Key');
     this.db.prepare('INSERT INTO station_ai_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,credential=excluded.credential').run(JSON.stringify(config), credential);
+    const credentialsChanged = config.baseUrl !== old.baseUrl || config.model !== old.model || credential !== (row?.credential || '');
+    for (const listener of this.aiConfigListeners) { try { listener({ credentialsChanged }); } catch { /* Configuration persists independently of workers. */ } }
     return this.aiConfig();
   }
+  onAiConfigChange(listener) { this.aiConfigListeners.add(listener); return () => this.aiConfigListeners.delete(listener); }
   aiCredentials() {
     const row = this.db.prepare('SELECT credential FROM station_ai_settings WHERE id=1').get();
     return { ...this.aiConfig(), apiKey: row?.credential ? decryptCookie(row.credential, this.key, 'station-ai-key') : '' };

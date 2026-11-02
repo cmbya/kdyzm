@@ -76,8 +76,13 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 - 管理员 `GET/POST /v1/admin/stations`，`PATCH /v1/admin/stations/:id`，字段 `name,region,enabled,aliases:[{id?,name,source,subLocation}]`，保存增加规则版本。
 - 管理员 `GET /v1/admin/station-candidates`，`POST /v1/admin/station-candidates/:id/approve`（`stationId?,alias?,subLocation?,name?,region?`）或 `/ignore`（空对象）。只有批准写规则。
-- 管理员 `GET/PATCH /v1/admin/station-ai`，设置 `channelName,baseUrl,model,apiKey?,clearApiKey?,enabled,intervalMinutes,dailyLimit`。密钥加密；GET 只返回 `hasApiKey/apiKeyMasked`，空值保留，清除须显式指定。`POST /test` 和 `/run` 均为空对象；测试计额度，运行返回202接受状态，结果通过候选队列查询。
+- 管理员 `GET/PATCH /v1/admin/station-ai`，设置 `channelName,baseUrl,model,apiKey?,clearApiKey?,enabled,intervalMinutes,dailyLimit`。密钥加密；GET 只返回 `hasApiKey/apiKeyMasked`，空值保留，清除须显式指定。`enabled`只控制定期分析，已完整配置时即使关闭定期也可手动分析。`dailyLimit`默认20，可调高，只接受正安全整数；`usageToday`为上海时区当天调用数，含连接测试和每次重试。上传每批20条、候选队列2000条的限制独立于每日额度。
+- 管理员 `POST /v1/admin/station-ai/test` 和 `/run` 均为空对象；测试只发固定无隐私JSON。运行返回202及 `{accepted,running,code,message,retryAt?}`。`code`包括 `AI_ACCEPTED/AI_NOT_CONFIGURED/AI_RUNNING/AI_DAILY_LIMIT/AI_NO_PENDING/AI_RETRY_COOLDOWN/SERVICE_STOPPING`；定时器还可能返回 `AI_AUTOMATIC_DISABLED/AI_NOT_DUE`。`retryAt`为等待截止毫秒。请求未接受时不调用模型、不扣额度。临时失败最多即时重试一次，每候选累计最多3次非取消尝试；`attempts`累计实际调用，`cancelledAttempts`单独记录取消的调用，取消仍扣每日额度，但不耗尽失败重试次数。其余结果仍需人工确认。
 - 设备 `POST /v1/station-candidates`，`{items:[{id,stationName,fragment,source:'sms'}]}`，最多20项，只允许脱敏站名，返回 `acceptedIds` 供客户端确认。
 - 设备 `POST /v1/station-proposals`，`{stationName,otherStationName,subLocation?}`，主动记忆名称关系；两个候选仍待管理员分别确认。设备不能直接写入共享别名、获取后台AI配置或其他人的候选。
 
 平台候选仅从有效末端已到站、非已取/隐藏/归档的近期记录收集；AI异步处理与订单采集隔离。短信端默认关闭，开启后本地仅保留7天/200项队列。候选和传输均不含完整短信、取件码、运单、Cookie。修改密码与撤权后接口沿用原认证边界。
+
+候选可附带 `analysis`，仅管理员读取；未曾调用时为null或缺席。结构为 `{startedAt,finishedAt,input,result,error}`，仅保留最近一次实际调用。`input`与本次发送给模型的user JSON完全相同，包含脱敏 `fragment,region,knownStations,knownStationsTruncated`；站点上下文超过16KiB时，发送前缩减整个站点条目并设置 `knownStationsTruncated:true`，详情不是完整原始HTTP请求。`result`只保存通过字段、站点ID及原文证据校验的结构；无有效返回时为null，不保存供应商原始内容。`error`只含本地白名单 `code,message`，不保存headers、API Key、供应商原文错误或完整短信。每条analysis最多24KiB，重试覆盖上一条记录，不累积请求日志；`finishedAt=0`表示尚未完成或中断，不能当成已返回结果。
+
+更换后台AI地址、模型或密钥会使整个旧批次失效，涵盖在途调用、重试等待与候选间隙；旧批次不能转用新渠道，须重新发起分析。清除密钥和服务关闭也会取消；晚到结果不采纳。取消记录本地安全原因，候选可重新分析，已确认或忽略的候选不会恢复待处理。关闭定期分析会取消该定期批次，手动批次不受自动开关影响。已有候选的人工审核与订单采集继续独立运行。所有实际网络请求沿用公网HTTPS、DNS解析校验并固定地址、禁止重定向、超时和响应大小边界。

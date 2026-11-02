@@ -80,6 +80,32 @@ export function compareStationNames(a, b, stations) {
   return { same: !!key(a) && (key(a) === key(b) || first.length === 1 && second.length === 1 && first[0].id === second[0].id), conflict: first.length === 1 && second.length === 1 && first[0].id !== second[0].id };
 }
 
+export function createAnalysisDetails(analysis, { running = false } = {}) {
+  const details = document.createElement('details'); details.className = 'analysis-details';
+  const summary = document.createElement('summary'); summary.textContent = '分析详情'; details.append(summary);
+  const note = value => { const row = document.createElement('p'); row.textContent = value; details.append(row); };
+  if (!analysis || typeof analysis !== 'object') { note('尚未分析（尚无实际 AI 输入或返回）。'); return details; }
+  const time = value => Number.isFinite(value) && value > 0 ? new Date(value).toLocaleString('zh-CN') : '';
+  const startedAt = time(analysis.startedAt), finishedAt = time(analysis.finishedAt);
+  if (startedAt) note(`最近调用：${startedAt}${finishedAt ? ` · 结束：${finishedAt}` : ''}`);
+  if (!finishedAt) note(running ? '尚未完成（后台任务仍在运行）。' : '未完成（任务已停止或中断）。');
+  const json = (label, value) => {
+    const heading = document.createElement('p'); heading.className = 'analysis-label'; heading.textContent = label;
+    const pre = document.createElement('pre'); pre.textContent = JSON.stringify(value, null, 2); details.append(heading, pre);
+  };
+  if (analysis.input && typeof analysis.input === 'object') {
+    const input = {};
+    for (const key of ['fragment', 'region', 'knownStations', 'knownStationsTruncated']) if (Object.prototype.hasOwnProperty.call(analysis.input, key)) input[key] = analysis.input[key];
+    json('实际脱敏输入', input);
+  } else note('没有已记录的实际脱敏输入。');
+  if (analysis.result !== null && analysis.result !== undefined) json('校验后的返回结构', analysis.result);
+  else note('尚无通过校验的返回结构。');
+  if (analysis.error && typeof analysis.error === 'object') {
+    const error = document.createElement('p'); error.className = 'analysis-error'; error.textContent = `安全错误：${text(analysis.error.message)}${analysis.error.code ? `（${text(analysis.error.code)}）` : ''}`; details.append(error);
+  }
+  return details;
+}
+
 export function initStationAdmin({ api, notice }) {
   if (!get('station-settings-view')) return;
 
@@ -100,6 +126,7 @@ export function initStationAdmin({ api, notice }) {
     aiPollTimer: null,
     aiPollStarted: 0,
     reviewCandidate: null,
+    analysisOpen: new Set(),
   };
 
   const setHidden = (id, hidden) => { get(id).hidden = hidden; };
@@ -205,6 +232,8 @@ export function initStationAdmin({ api, notice }) {
     article.append(path);
     const evidence = document.createElement('p'); evidence.className = 'evidence'; evidence.textContent = `证据：${candidate.evidence} · 出现 ${candidate.occurrenceCount} 次`; article.append(evidence);
     if (candidate.raw.error) { const error = document.createElement('p'); error.className = 'warning-note'; error.textContent = candidate.raw.error + (candidate.raw.retryAt ? ' · 下次重试：' + new Date(candidate.raw.retryAt).toLocaleString('zh-CN') : ''); article.append(error); }
+    const analysis = createAnalysisDetails(candidate.raw.analysis, { running: state.aiRunning }); analysis.open = state.analysisOpen.has(candidate.id);
+    analysis.addEventListener('toggle', () => { if (analysis.open) state.analysisOpen.add(candidate.id); else state.analysisOpen.delete(candidate.id); }); article.append(analysis);
     const actions = document.createElement('div'); actions.className = 'candidate-actions';
     actions.append(button('忽略', () => ignoreCandidate(candidate), 'textbtn'), button(candidate.suggestedStationId ? '核对并加入' : '核对并选择', () => openReview(candidate), 'primary')); article.append(actions);
     if (!candidate.suggestedStationId) { const warning = document.createElement('p'); warning.className = 'warning-note'; warning.textContent = '无法唯一确定时必须选择站点；住宅地址和物流中转站不会加入规则。'; article.append(warning); }
@@ -254,8 +283,10 @@ export function initStationAdmin({ api, notice }) {
     state.aiConfig = config || {};
     get('ai-enabled').setAttribute('aria-checked', String(Boolean(config?.enabled))); get('ai-enabled').classList.toggle('off', !config?.enabled);
     get('ai-channel-name').value = first(config?.channelName); get('ai-base-url').value = first(config?.baseUrl); get('ai-model').value = first(config?.model); get('ai-interval').value = String(config?.intervalMinutes === 1440 ? 1440 : 60); get('ai-limit').value = String(config?.dailyLimit || 20); get('ai-api-key').value = '';
-    setText('ai-key-state', config?.hasApiKey ? '已配置；输入框留空不会覆盖已保存密钥' : '未配置；输入框留空不会覆盖已保存密钥'); setText('ai-config-state', config?.hasApiKey ? '已配置' : '待配置');
-    setText('ai-frequency-label', config?.intervalMinutes === 1440 ? '每天' : '每小时'); state.aiDirty = false;
+    const configured = Boolean(config?.hasApiKey && config?.baseUrl && config?.model && config?.channelName);
+    setText('ai-key-state', config?.hasApiKey ? '已配置；输入框留空不会覆盖已保存密钥' : '未配置；输入框留空不会覆盖已保存密钥'); setText('ai-config-state', configured ? '已配置' : '待配置');
+    setText('ai-usage', Number.isSafeInteger(config?.usageToday) && config.usageToday >= 0 ? `今日已用 ${config.usageToday} 次 / ${config.dailyLimit || 20} 次` : '当日用量尚未读取');
+    setText('ai-frequency-label', !configured ? '尚未配置' : config?.enabled ? config?.intervalMinutes === 1440 ? '每天' : '每小时' : '定期已关闭 · 可手动分析'); state.aiDirty = false;
   }
 
   async function loadAiConfig() {
@@ -295,6 +326,7 @@ export function initStationAdmin({ api, notice }) {
   async function saveAi(event) {
     event.preventDefault(); const body = { channelName: get('ai-channel-name').value.trim(), baseUrl: get('ai-base-url').value.trim(), model: get('ai-model').value.trim(), enabled: get('ai-enabled').getAttribute('aria-checked') === 'true', intervalMinutes: Number(get('ai-interval').value), dailyLimit: Number(get('ai-limit').value) };
     if (!body.baseUrl || !body.model) throw new Error('请填写 AI Base URL 和模型。');
+    if (!Number.isSafeInteger(body.dailyLimit) || body.dailyLimit < 1) throw new Error('每日调用上限须为正安全整数。');
     const key = get('ai-api-key').value.trim(); if (key) body.apiKey = key;
     const data = await api('/v1/admin/station-ai', { method: 'PATCH', body: JSON.stringify(body) }); applyConfig(data.config || data); notice('AI 设置已保存。');
   }
@@ -306,12 +338,12 @@ export function initStationAdmin({ api, notice }) {
 
   async function testAi() {
     if (state.aiDirty) throw new Error('请先保存 AI 设置，再进行连接测试。');
-    const data = await api('/v1/admin/station-ai/test', { method: 'POST', body: '{}' }); if (!data.ok) throw new Error(data.message || '连接测试失败。'); notice(data.message || '连接测试成功。');
+    const data = await api('/v1/admin/station-ai/test', { method: 'POST', body: '{}' }); await loadAiConfig(); if (!data.ok) throw new Error(data.message || '连接测试失败。'); notice(data.message || '连接测试成功。');
   }
 
   async function runAi() {
     if (state.aiDirty) throw new Error('请先保存 AI 设置，再提交分析。');
-    const data = await api('/v1/admin/station-ai/run', { method: 'POST', body: '{}' }); state.aiRunning = Boolean(data.running ?? data.accepted); state.aiPollStarted = Date.now(); scheduleAiPoll(); notice(data.accepted ? '分析任务已提交，正在后台处理。' : (data.message || '分析任务未接受。'), !data.accepted);
+    const data = await api('/v1/admin/station-ai/run', { method: 'POST', body: '{}' }); state.aiRunning = Boolean(data.running ?? data.accepted); state.aiPollStarted = Date.now(); scheduleAiPoll(); notice(data.message || (data.accepted ? '分析任务已提交，正在后台处理。' : '分析任务未接受。'), !data.accepted);
   }
 
   async function approveCandidate(event) {
@@ -349,7 +381,7 @@ export function initStationAdmin({ api, notice }) {
   get('station-review-form').addEventListener('submit', event => approveCandidate(event).catch(error => notice(error.message || '候选未加入。', true)));
   get('ai-settings-form').addEventListener('submit', event => saveAi(event).catch(error => notice(error.message || 'AI 设置未保存。', true)));
   get('ai-settings-form').addEventListener('input', () => { state.aiDirty = true; });
-  get('ai-interval').addEventListener('change', () => { state.aiDirty = true; setText('ai-frequency-label', get('ai-interval').value === '1440' ? '每天' : '每小时'); });
+  get('ai-interval').addEventListener('change', () => { state.aiDirty = true; });
   get('ai-enabled').addEventListener('click', () => { const next = get('ai-enabled').getAttribute('aria-checked') !== 'true'; get('ai-enabled').setAttribute('aria-checked', String(next)); get('ai-enabled').classList.toggle('off', !next); state.aiDirty = true; });
   get('logout').addEventListener('click', () => { state.open = false; clearTimeout(state.aiPollTimer); state.aiPollTimer = null; });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(state.aiPollTimer); state.aiPollTimer = null; } else if (state.open) loadWorkspace(); });

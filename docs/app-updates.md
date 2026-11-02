@@ -2,11 +2,11 @@
 
 手机从本仓库的Latest Release读取 `app-update.json`，下载安装包后交给Android确认。更新不依赖Docker账号或Cookie。App 3.1.4首次需手动覆盖安装，后续使用「我的 → 检查更新」。旧私人版不要卸载；覆盖安装保留绑定、短信和领取记录。
 
-当前App版本标签为 `app-v3.1.16`，服务端为 `3.1.13`。站点管理与AI渠道独立设置、人工核对后生效；App同步别名并保留原界面。容器流水线不匹配app-v标签。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。固定下载入口：
+当前App版本标签为 `app-v3.1.17`，服务端为 `3.1.14`。后台手动AI可独立于定期开关执行，返回具体原因，可查看脱敏分析详情；每日额度默认20次且允许调高。App按已确认A排版统一标准站名，柜号标牌置于取件码前；复制纯码，冲突时不展示柜号，隐私模式同时隐藏柜号。AI建议继续人工核对后生效。容器流水线不匹配app-v标签。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。固定下载入口：
 
 `https://github.com/zsdd2/kdyzm/releases/latest/download/app-update.json`
 
-本轮App版本为 `3.1.16` / `30116`，沿用原签名，说明见 [站点与AI增强](station-ai-implementation.md)。按下方步骤发布为Latest后，旧App即可检查并下载更新。
+本轮App版本为 `3.1.17` / `30117`，沿用原签名，说明见 [站点与AI增强](station-ai-implementation.md)。按下方步骤发布为Latest后，旧App即可检查并下载更新。
 
 ## 后续发布
 

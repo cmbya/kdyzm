@@ -147,7 +147,9 @@ test('AI settings encrypt credentials, never echo key material, and require expl
   assert.throws(() => stations.saveAiConfig({ clearApiKey: true }), { code: 'AI_NOT_CONFIGURED' });
   config = stations.saveAiConfig({ enabled: false, clearApiKey: true });
   assert.equal(config.hasApiKey, false);
-  for (const body of [{ intervalMinutes: 1 }, { dailyLimit: 21 }, { baseUrl: 'http://api.example.com' }, { apiKey: 'bad\r\nkey' }]) assert.throws(() => stations.saveAiConfig(body));
+  assert.equal(stations.saveAiConfig({ dailyLimit: 200 }).dailyLimit, 200);
+  for (const dailyLimit of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '20', null]) assert.throws(() => stations.saveAiConfig({ dailyLimit }));
+  for (const body of [{ intervalMinutes: 1 }, { baseUrl: 'http://api.example.com' }, { apiKey: 'bad\r\nkey' }]) assert.throws(() => stations.saveAiConfig(body));
 });
 
 test('platform candidates require current pickup provenance and repeated snapshots do not inflate counts', t => {

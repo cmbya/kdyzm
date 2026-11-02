@@ -49,6 +49,22 @@ test('station HTTP endpoints isolate anonymous, device and administrator roles',
   assert.equal((await request(`/v1/admin/station-candidates/${candidateId}/ignore`, { method: 'POST', token: device.token, body: {} })).status, 401);
 });
 
+test('manual run HTTP responses explain rejection and permit configured AI while automatic analysis is off', async t => {
+  const { service, request, device } = await fixture(t, { aiRequest: async () => response({ kind: 'unknown', evidence: [] }) });
+  const run = () => request('/v1/admin/station-ai/run', { method: 'POST', admin: true, body: {} });
+  assert.equal((await run()).data.code, 'AI_NOT_CONFIGURED');
+  const saved = await request('/v1/admin/station-ai', { method: 'PATCH', admin: true, body: { ...aiConfig, enabled: false, dailyLimit: 60 } });
+  assert.equal(saved.status, 200); assert.equal(saved.data.config.dailyLimit, 60);
+  assert.equal((await run()).data.code, 'AI_NO_PENDING');
+  await request('/v1/station-candidates', { method: 'POST', token: device.token, body: { items: [{ id: 'manual-1', stationName: '4卡2号柜', fragment: '4卡2号柜', source: 'sms' }] } });
+  const started = await run(); assert.equal(started.status, 202); assert.equal(started.data.accepted, true); assert.equal(started.data.code, 'AI_ACCEPTED'); assert.ok(started.data.message);
+  await service.stationAi.running;
+  const candidates = (await request('/v1/admin/station-candidates', { admin: true })).data.candidates;
+  assert.equal(candidates[0].analysis.result.kind, 'unknown'); assert.equal(candidates[0].analysis.input.fragment, '4卡2号柜');
+  const denied = await request('/v1/admin/station-candidates', { token: device.token }); assert.equal(denied.status, 401);
+  const snapshot = await request('/v1/snapshot', { token: device.token }); assert.equal(snapshot.data.analysis, undefined); assert.ok(!snapshot.raw.includes('knownStations'));
+});
+
 test('AI settings encrypt the backend key and never expose it in HTTP settings, snapshots or errors', async t => {
   let sent;
   const { service, request, device } = await fixture(t, { aiRequest: async value => { sent = value; return response({ ok: true }); } });
