@@ -86,3 +86,16 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 候选可附带 `analysis`，仅管理员读取；未曾调用时为null或缺席。结构为 `{startedAt,finishedAt,input,result,error}`，仅保留最近一次实际调用。`input`与本次发送给模型的user JSON完全相同，包含脱敏 `fragment,region,knownStations,knownStationsTruncated`；站点上下文超过16KiB时，发送前缩减整个站点条目并设置 `knownStationsTruncated:true`，详情不是完整原始HTTP请求。`result`只保存通过字段、站点ID及原文证据校验的结构；无有效返回时为null，不保存供应商原始内容。`error`只含本地白名单 `code,message`，不保存headers、API Key、供应商原文错误或完整短信。每条analysis最多24KiB，重试覆盖上一条记录，不累积请求日志；`finishedAt=0`表示尚未完成或中断，不能当成已返回结果。
 
 更换后台AI地址、模型或密钥会使整个旧批次失效，涵盖在途调用、重试等待与候选间隙；旧批次不能转用新渠道，须重新发起分析。清除密钥和服务关闭也会取消；晚到结果不采纳。取消记录本地安全原因，候选可重新分析，已确认或忽略的候选不会恢复待处理。关闭定期分析会取消该定期批次，手动批次不受自动开关影响。已有候选的人工审核与订单采集继续独立运行。所有实际网络请求沿用公网HTTPS、DNS解析校验并固定地址、禁止重定向、超时和响应大小边界。
+
+## Docker 内置 App 更新包
+
+以下只读接口公开且无需凭证，初始化前也可使用：
+
+| 方法与路径 | 响应 |
+| --- | --- |
+| GET / HEAD /app-updates/app-update.json | 内置发布清单的原始字节；`application/json`、`Cache-Control: no-store` |
+| GET / HEAD /app-updates/PickCode-private-&lt;versionName&gt;.apk | 清单对应的唯一版本 APK；`application/vnd.android.package-archive`、`Cache-Control: public, max-age=31536000, immutable` |
+
+两者均返回 `Content-Length` 和以文件 SHA-256 为值的 `ETag`。HEAD 只返回头部，APK 下载流不会为 HEAD 打开。服务启动时校验服务根目录 `app-updates/`（镜像中为 `/app/app-updates`）的清单、APK 大小/流式 SHA-256 与 `SHA256SUMS`，请求时确认已校验文件未变化；缺失或损坏返回 404 / 503，App 可回退 GitHub。更新包校验失败不影响 `/health`、初始化或业务同步。
+
+清单保持现有发布格式与 GitHub 官方固定 `apkUrl`，不会按请求 Host 改写，不返回重定向。客户端可用已绑定后台 origin 加上述固定 APK 路径下载，并继续核对清单大小、摘要和安装签名。此接口无需管理或设备凭证，只公开精确清单和当前版本 APK；其他文件、目录、旧版本及路径穿越均不开放，`SHA256SUMS` 也不对外提供。账号、设备、凭证与业务数据继续使用原有接口鉴权。

@@ -4,13 +4,21 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Optional stable App release tag to bundle (app-vX.Y.Z)'
+        required: false
+        type: string
+  release:
+    types: [published]
 permissions:
   contents: read
 concurrency:
-  group: container-${{ github.ref }}
+  group: container-publish-${{ github.repository }}
   cancel-in-progress: false
 jobs:
   publish:
+    if: github.event_name != 'release' || (startsWith(github.event.release.tag_name, 'app-v') && !github.event.release.prerelease)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -18,53 +26,106 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Select current App release source
+        id: source
+        shell: bash
+        env:
+          APP_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.app_version }}
+        run: |
+          if [[ -n "$APP_VERSION" && ! "$APP_VERSION" =~ ^app-v(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$ ]]; then
+            echo 'Invalid App release tag' >&2
+            exit 1
+          fi
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          git fetch --no-tags origin main
+          CURRENT_MAIN="$(git rev-parse FETCH_HEAD)"
+          if [[ -n "$APP_VERSION" ]]; then
+            git fetch --no-tags origin "refs/tags/$APP_VERSION"
+            APP_TARGET="$(git rev-parse 'FETCH_HEAD^{commit}')"
+            if [[ "$APP_TARGET" != "$CURRENT_MAIN" || "$SOURCE_SHA" != "$CURRENT_MAIN" ]]; then
+              echo '::notice::App release does not target current main; container publication skipped'
+              echo 'proceed=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo 'proceed=true' >> "$GITHUB_OUTPUT"
+          echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        if: steps.source.outputs.proceed == 'true'
         with:
           node-version: 24.13.0
           cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm audit --omit=dev --audit-level=high
+      - if: steps.source.outputs.proceed == 'true'
+        run: npm ci
+      - if: steps.source.outputs.proceed == 'true'
+        run: npm test
+      - if: steps.source.outputs.proceed == 'true'
+        run: npm audit --omit=dev --audit-level=high
       - name: Validate deployment configuration
+        if: steps.source.outputs.proceed == 'true'
         shell: bash
         run: |
           unset PUBLIC_BASE_URL ADMIN_TOKEN COOKIE_ENCRYPTION_KEY
           docker compose config --quiet
+      - name: Bundle verified App release for offline updates
+        if: steps.source.outputs.proceed == 'true'
+        env:
+          APP_VERSION: ${{ steps.source.outputs.app_version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [[ -n "$APP_VERSION" ]]; then
+            node scripts/bundle-app-update.mjs --tag "$APP_VERSION"
+          else
+            node scripts/bundle-app-update.mjs
+          fi
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+        if: steps.source.outputs.proceed == 'true'
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        if: steps.source.outputs.proceed == 'true'
       - name: Build image for container acceptance
+        if: steps.source.outputs.proceed == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           load: true
           platforms: linux/amd64
           tags: kdyzm:smoke
-      - name: Verify container storage and restart
+      - name: Verify container storage, restart and bundled App update
+        if: steps.source.outputs.proceed == 'true'
         run: node scripts/docker-smoke.mjs kdyzm:smoke
       - name: Compute image tags
+        if: steps.source.outputs.proceed == 'true'
         id: image
         shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          git fetch --no-tags origin main
+          CURRENT_MAIN="$(git rev-parse FETCH_HEAD)"
           {
             echo 'tags<<EOF'
-            echo "$IMAGE:sha-$GITHUB_SHA"
+            echo "$IMAGE:sha-$SOURCE_SHA"
             if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
               VERSION="${GITHUB_REF_NAME#v}"
               test "$VERSION" = "$(node -p "require('./package.json').version")"
               echo "$IMAGE:$VERSION"
-            elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            elif [[ "$SOURCE_SHA" == "$CURRENT_MAIN" && ( "$GITHUB_REF" == refs/heads/main || "$GITHUB_EVENT_NAME" == release ) ]]; then
               echo "$IMAGE:latest"
               echo "$IMAGE:edge"
             fi
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        if: steps.source.outputs.proceed == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish amd64 and arm64
+        if: steps.source.outputs.proceed == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
@@ -73,4 +134,4 @@ jobs:
           tags: ${{ steps.image.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}

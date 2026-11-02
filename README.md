@@ -1,10 +1,12 @@
 # kdyzm · 私人取件助手服务端
 
-为私人取件助手提供线上订单、运单和取件码同步，推荐配套App 3.1.17，兼容旧版设备协议。Node 24 + SQLite，单容器运行，无需 Redis 或外部数据库。
+为私人取件助手提供线上订单、运单和取件码同步，推荐配套App 3.1.18，兼容旧版设备协议。Node 24 + SQLite，单容器运行，无需 Redis 或外部数据库。
 
 源码：https://github.com/zsdd2/kdyzm
 
-手机安装包：[最新App Release](https://github.com/zsdd2/kdyzm/releases/latest)。App 3.1.4起支持「我的 → 检查更新」；首次需覆盖安装启用该功能。App与Docker独立版本，发布APK无需重新部署Docker。维护者后续发布见 [App发布说明](docs/app-updates.md)。
+手机安装包：[最新App Release](https://github.com/zsdd2/kdyzm/releases/latest)。App 3.1.4起支持「我的 → 检查更新」；首次需覆盖安装启用该功能。App与Docker独立版本。发布稳定App会自动重建内置新版APK的Docker镜像；已有容器需拉取新镜像并重建才会更新内置包。维护者后续发布见 [App发布说明](docs/app-updates.md)。
+
+后台3.1.15内置稳定App升级清单和安装包，App3.1.18优先使用当前已绑定后台下载，后台缺包、不可用或没有更新版本时自动回退GitHub；下载失败清理部分文件后重下同一包，保留摘要和签名校验。域名在局域网内直连NAS时可加速。先覆盖安装App3.1.18，再拉取本轮后台镜像并重建容器，保留数据卷与密钥。见 [后台优先升级](docs/backend-app-updates-3.1.15.md)。
 
 后台3.1.14修复手动 AI 分析受定期开关限制的问题，提供配置、额度、空队列等具体反馈；每日默认20次可调高，候选可查看实际脱敏输入和校验后结果，建议仍由人工确认。App3.1.17按已确认A排版，在首页、记录、详情和桌面卡片以小标牌突出柜号，统一使用后台标准站名，复制纯码；冲突时隐藏柜号，隐私同时隐藏。先升级后台，再覆盖App并同步。见 [站点与AI增强说明](docs/station-ai-implementation.md)。
 
@@ -22,7 +24,7 @@ App 3.1.11 补齐京东账号名称与图标，进入线上账号页时读取后
 
 App 3.1.10 修复大号卡片路上区混入已签收、已归档订单的问题，并按已确认A稿校准原生上下比例、行距与刷新分隔线。保留3.1.9的记录页排版、四种架构及离线扫码/OCR。后台继续使用3.1.8，无需为本次App更新重建容器。见 [3.1.10说明与原生渲染图](docs/app-widget-3.1.10.md)。
 
-镜像：`ghcr.io/zsdd2/kdyzm:latest`（Linux amd64 / arm64）。当前服务端源码版本为 `3.1.14`；推送主分支后，GitHub Actions通过测试与容器验收才更新 `latest`。已有部署需重新拉取镜像并重建容器，修复才会生效。
+镜像：`ghcr.io/zsdd2/kdyzm:latest`（Linux amd64 / arm64）。当前服务端源码版本为 `3.1.15`；推送主分支后，GitHub Actions通过测试与容器验收才更新 `latest`。已有部署需重新拉取镜像并重建容器，修复才会生效。
 
 3.1.9 新增京东买家订单 Cookie 采集，复用家人持续整组授权、定时同步、单单刷新和多运单物流。已用真实登录会话验证 Node 直接读取订单和物流，无需增加浏览器容器或手机依赖。当前实测样本为已完成订单，活跃订单、拆包与失败边界另有模拟回归。支持范围与验证见 [京东接入说明](docs/jd-integration-3.1.9.md)。
 
@@ -144,6 +146,7 @@ Compose 默认使用 `latest` 和 `pull_policy: always`。每次执行 `docker c
 ```sh
 npm ci
 npm test
+node scripts/bundle-app-update.mjs
 docker build -t kdyzm:smoke .
 node scripts/docker-smoke.mjs kdyzm:smoke
 ```

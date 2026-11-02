@@ -9,6 +9,7 @@ import { createSyncJobs } from './sync-jobs.mjs';
 import { StationStore, enqueuePlatformCandidates, enqueueStationProposal } from './stations.mjs';
 import { StationAiJobs } from './station-ai.mjs';
 import { serverVersion } from './version.mjs';
+import { createAppUpdateHandler } from './app-updates.mjs';
 import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './security.mjs';
 
 const PUBLIC = new URL('../public/', import.meta.url);
@@ -27,7 +28,8 @@ function send(res, status, data, extra = {}) {
 }
 
 export function createService({ filename = ':memory:', encryptionKey, adminToken, baseUrl,
-  now = Date.now, collector = createCollector({ now }), fixture = false, scheduler = true, corsOrigins = [], log = console.log, aiRequest } = {}) {
+  now = Date.now, collector = createCollector({ now }), fixture = false, scheduler = true, corsOrigins = [], log = console.log, aiRequest, appUpdateDirectory } = {}) {
+  const appUpdates = createAppUpdateHandler({ directory: appUpdateDirectory });
   const origins = new Set(corsOrigins.map(publicUrl));
   const configuration = new AdminConfiguration({ filename, encryptionKey, adminToken, baseUrl, now, log });
   const store = new Store({ filename, key: configuration.key, now });
@@ -93,6 +95,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       const url = new URL(req.url, configuration.baseUrl || 'http://localhost');
       const path = url.pathname;
+      if (req.url.startsWith('/app-updates') && await appUpdates(req, res)) return;
       if (req.method === 'GET' && STATIC.has(path)) {
         const [file, type] = STATIC.get(path);
         res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });

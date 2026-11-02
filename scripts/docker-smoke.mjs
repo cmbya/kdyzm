@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { setTimeout } from 'node:timers/promises';
 
@@ -53,10 +53,44 @@ function savedState(container, accountId, password) {
       setupConsumed:config.setupCode === null, passwordHashed:!!config.password?.hash && !raw.includes(${JSON.stringify(password)}) }));
   `]));
 }
+async function bundledAppUpdate(base) {
+  const manifestResponse = await fetch(`${base}/app-updates/app-update.json`, { signal: AbortSignal.timeout(10000) });
+  assert.equal(manifestResponse.status, 200, 'Bundled App manifest must be public before setup');
+  const raw = await manifestResponse.text();
+  assert.ok(Buffer.byteLength(raw) <= 65536, 'Bundled App manifest is too large');
+  const manifest = JSON.parse(raw);
+  assert.equal(manifest.schemaVersion, 1);
+  assert.equal(manifest.packageName, 'local.pickcode.assistant');
+  assert.match(manifest.versionName, /^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/);
+  assert.equal(manifest.tag, `app-v${manifest.versionName}`);
+  const apkName = `PickCode-private-${manifest.versionName}.apk`;
+  assert.equal(manifest.apkUrl, `https://github.com/zsdd2/kdyzm/releases/download/${manifest.tag}/${apkName}`);
+  assert.match(manifest.sha256, /^[a-f0-9]{64}$/);
+  assert.ok(Number.isSafeInteger(manifest.size) && manifest.size > 0 && manifest.size <= 80 * 1024 * 1024);
+  const url = `${base}/app-updates/${apkName}`;
+  const head = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(10000) });
+  assert.equal(head.status, 200, 'Bundled APK HEAD must be public');
+  assert.equal(head.headers.get('content-length'), String(manifest.size));
+  assert.equal((await head.arrayBuffer()).byteLength, 0);
+  const apk = await fetch(url, { signal: AbortSignal.timeout(180000) });
+  assert.equal(apk.status, 200, 'Bundled APK GET must be public');
+  assert.equal(apk.headers.get('content-length'), String(manifest.size));
+  const hash = createHash('sha256');
+  let size = 0;
+  for await (const chunk of apk.body) {
+    size += chunk.length;
+    assert.ok(size <= manifest.size, 'Bundled APK response exceeds manifest size');
+    hash.update(chunk);
+  }
+  assert.equal(size, manifest.size, 'Bundled APK response is incomplete');
+  assert.equal(hash.digest('hex'), manifest.sha256, 'Bundled APK response differs from release manifest');
+  console.log(`PASS bundled App update: public manifest, HEAD, ${manifest.tag} APK size and SHA-256 before setup`);
+}
 async function managed(container, volume) {
   start(container, volume);
   let base = await healthy(container);
   assert.notEqual(docker(['exec', container, 'id', '-u']), '0');
+  await bundledAppUpdate(base);
   assert.equal((await request(base, '/v1/setup', 200)).initialized, false);
   await request(base, '/v1/snapshot', 409);
   const code = docker(['logs', container]).match(/^KDYZM_SETUP_CODE=([\w-]+)$/m)?.[1];

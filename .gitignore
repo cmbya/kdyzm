@@ -6,3 +6,4 @@ data/
 *.db-wal
 .qa/
 .gstack/
+/app-updates/
