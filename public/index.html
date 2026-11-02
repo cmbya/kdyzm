@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>取件助手 · 家人工作台</title><link rel="stylesheet" href="/admin.css"></head><body>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>取件助手 · 家人工作台</title><link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="/station-admin.css"></head><body>
 <div id="notice" role="status" aria-live="polite"></div><div id="auth-shell"><div class="auth-brand"><span class="mark">▱</span>取件助手 <small>__SERVER_VERSION__</small></div>    <section id="loading-panel" aria-busy="true"><h2>正在检查服务</h2><p id="loading-message" class="hint">正在读取初始化状态…</p><button id="retry-setup" class="secondary" hidden>重新连接</button></section>
     <section id="setup-panel" hidden><h2>首次使用设置</h2>
       <p class="hint" id="setup-code-hint">请从服务的容器日志中获取一次性初始化码。初始化后使用管理员密码登录。</p>
@@ -16,15 +16,62 @@
 <div id="workspace" hidden><div class="shell"><aside class="sidebar"><div class="brand"><span class="mark">▱</span><span>取件助手<small>PARCEL CONSOLE</small></span></div><p class="nav-label">工作空间</p><button class="nav active" id="nav-accounts" data-page="accounts">▣　账号授权</button><button class="nav" id="nav-devices" data-page="devices">▯　设备管理</button><button class="nav" id="nav-settings" data-page="settings">⚙　服务设置</button><div class="side-footer"><span class="avatar">管</span><div>管理员<p class="hint">私人工作空间</p></div><button id="logout" class="textbtn" hidden>退出</button></div></aside>
 <main class="main"><header class="topbar"><span>工作空间　/　<b id="breadcrumb">账号授权</b></span><span>取件助手 __SERVER_VERSION__</span></header><div class="content"><p id="fixture-notice" class="fixture" hidden>本机联调 · 全部为模拟包裹，未连接真实平台</p>
 <div id="page-accounts"><div class="heading"><div><p class="eyebrow">FAMILY WORKSPACE</p><h1>家人账号</h1><p class="subtitle">按家人管理平台账号，为设备整组授权。</p></div><button id="new-family">＋ 新增家人</button></div>
-<div class="metrics"><div class="metric"><span>家人</span><p id="metric-families">0</p></div><div class="metric"><span>平台账号</span><p id="metric-accounts">0</p></div><div class="metric"><span>已连接</span><p id="metric-connected">0</p></div><div class="metric warn"><span>需要处理</span><p id="metric-attention">0</p></div></div>
+<div class="metrics"><div class="metric"><span>家人</span><p id="metric-families">0</p></div><div class="metric"><span>平台账号</span><p id="metric-accounts">0</p></div><div class="metric"><span>最近采集成功</span><p id="metric-connected">0</p></div><div class="metric warn"><span>需要处理</span><p id="metric-attention">0</p></div></div>
 <div class="workbench"><aside class="people"><div class="people-head">家人分组</div><label class="search"><input id="family-search" placeholder="搜索家人" aria-label="搜索家人"></label><div id="families"></div></aside><section class="accounts-panel"><div class="panel-head"><div class="panel-title"><span class="avatar" id="family-avatar">人</span><div><h2 id="family-title">待归属</h2><p id="family-description" class="hint"></p></div></div><div class="actions"><button id="new-account" class="secondary">＋ 添加平台</button><button id="authorize-family">整组授权</button><button id="rename-family" class="textbtn" aria-label="重命名家人">⋯</button></div></div><div class="filter-tabs"><button id="filter-all" class="active textbtn">全部账号</button><button id="filter-attention" class="textbtn">需要处理</button><button id="refresh" class="textbtn">刷新状态</button></div><div class="account-head"><span>平台账号</span><span>登录与采集状态</span><span>最近成功采集</span><span>详情</span></div><div id="accounts"></div><p class="account-note hint">账号登录信息仅保存在后台，设备只接收已授权的包裹数据。</p></section></div></div>
 <div id="page-devices" hidden><div class="heading"><div><p class="eyebrow">DEVICE ACCESS</p><h1>设备管理</h1><p class="subtitle">家人整组授权持续生效，以后新增账号自动包含。</p></div><button id="bind-device">＋ 绑定设备</button></div><div id="devices"></div></div>
-<div id="page-settings" hidden><div class="heading"><div><p class="eyebrow">SERVICE SETTINGS</p><h1>服务设置</h1></div></div>      <section><h2>服务设置</h2><p id="configuration-hint" class="hint"></p><p>当前服务地址：<span id="configured-base-url"></span></p>
+<div id="page-settings" hidden><div class="heading"><div><p class="eyebrow">SERVICE SETTINGS</p><h1 id="settings-page-title">服务设置</h1></div></div>
+      <nav class="settings-tabs admin-settings-tabs" aria-label="服务设置"><button id="basic-settings-tab" class="active" type="button">基础设置</button><button id="station-settings-tab" type="button">站点管理</button></nav>
+      <div id="settings-basic-view"><section><h2>服务设置</h2><p id="configuration-hint" class="hint"></p><p>当前服务地址：<span id="configured-base-url"></span></p>
         <div id="managed-settings" hidden>
           <form id="settings-form"><label>HTTPS 服务地址<input id="settings-base-url" type="url" autocomplete="url" placeholder="https://pickcode.example.com" aria-describedby="settings-url-hint"></label><p id="settings-url-hint" class="hint">仅填写域名与可选端口。留空时无法生成设备绑定码；修改地址后需为设备重新生成绑定码。域名、证书和 HTTPS 代理需自行配置。</p><button>保存地址</button></form>
           <form id="password-form"><h3>修改管理员密码</h3><label>当前密码<input id="current-password" type="password" autocomplete="current-password" required></label><div class="row"><label>新密码<input id="new-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128" aria-describedby="change-password-hint"></label><label>确认新密码<input id="confirm-password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label></div><p id="change-password-hint" class="hint">新密码为 12–128 个字符。修改后其他管理页面需重新登录，已绑定设备不受影响。</p><button>修改密码</button></form>
         </div>
-      </section>
+      </section></div>
+      <div id="station-settings-view" hidden>
+        <div class="station-heading"><div><h2>站点管理</h2><p class="subtitle">统一管理物流与短信中的站点叫法，确认后供授权设备同步。</p></div><button id="station-add" type="button">＋ 新增站点</button></div>
+        <div class="station-layout">
+          <section class="panel station-directory" aria-label="站点目录">
+            <div class="directory-head"><div class="directory-title"><h2>站点目录</h2><span id="station-total">0 个</span></div><label class="station-search"><span aria-hidden="true">⌕</span><input id="station-search-input" type="search" placeholder="搜索站点或别名" aria-label="搜索站点或别名"></label></div>
+            <div class="station-list" id="station-list"></div>
+            <button class="queue-entry" id="station-queue-entry" type="button"><span><strong>AI 待核对</strong><small>候选别名待人工确认</small></span><b id="station-queue-count">0</b></button>
+            <p class="directory-foot">相同站点的不同写法统一管理</p>
+          </section>
+          <section class="panel station-detail" aria-label="站点详情">
+            <header class="detail-head"><div class="detail-title"><span class="station-symbol" aria-hidden="true">⌂</span><div><h2 id="station-detail-name">选择一个站点</h2><p id="station-detail-subtitle">从左侧目录选择，或新增站点</p></div></div><label class="station-switch"><span id="station-enabled-label">启用站点</span><button id="station-enabled" class="toggle" type="button" role="switch" aria-checked="true" aria-label="启用站点"></button></label></header>
+            <div id="station-detail-body" class="detail-body">
+              <form id="station-form">
+                <input id="station-id" type="hidden">
+                <div class="station-field-row"><label class="station-field">标准名称<span class="required">*</span><input id="station-name" required maxlength="160" autocomplete="off"></label><label class="station-field">所在地区<span class="required">*</span><input id="station-region" required maxlength="120" placeholder="例如：中山 · 石岐"></label></div>
+                <div class="alias-head"><h3>站点别名 <span id="alias-count">0 个名称</span></h3><button id="alias-add" class="textbtn" type="button">＋ 添加别名</button></div>
+                <p class="alias-help">别名保留平台或短信中的原名称；子位置如“2号柜”单独保存。</p>
+                <div class="alias-column-head"><span>来源</span><span>原始名称</span><span>子位置</span><span>操作</span></div>
+                <div id="alias-list" class="alias-list"></div>
+                <details class="matching" open><summary><span>匹配验证</span><span class="pill neutral">仅供核对</span></summary><div class="matching-fields"><label>物流站名<input id="verify-logistics" maxlength="200" placeholder="粘贴物流中的站点名"></label><label>短信站名<input id="verify-sms" maxlength="200" placeholder="粘贴短信中的站点名"></label></div><button id="verify-station" class="secondary" type="button">验证匹配</button><p id="verify-result" class="verify-result" role="status">验证会保留柜号与门店差异；实际关联仍由时间、唯一性和冲突规则共同决定。</p></details>
+                <footer class="detail-footer"><small>保存后供授权设备同步，重新核对未关联记录</small><button id="station-save" type="submit">保存更改</button></footer>
+              </form>
+            </div>
+            <div id="station-empty" class="station-empty" hidden>暂无站点，请先新增一个标准站点。</div>
+            <div id="station-queue-view" class="queue-view" hidden>
+              <header class="queue-head"><div><h3>建议候选 <span id="candidate-count" class="pill warning">0 条待核对</span></h3><p>AI 只读取站点相关片段，不会直接合并订单。</p></div><div class="queue-actions"><small id="ai-frequency-label">尚未配置</small><button id="ai-run" class="secondary" type="button">立即分析</button><button id="ai-open-settings" class="secondary" type="button">AI 设置</button></div></header>
+              <div class="ai-rule">人工确认后才会加入站点别名；住宅地址和物流中转站不会当作取件站。</div>
+              <div id="candidate-list" class="candidate-list"></div>
+              <details id="ai-settings-panel" class="ai-settings"><summary>定期 AI 设置 <span id="ai-config-state" class="pill neutral">未读取</span></summary><form id="ai-settings-form" class="settings-body">
+                <div class="setting-row"><label for="ai-enabled">启用定期 AI<small>只分析已收到的待识别片段</small></label><button id="ai-enabled" class="toggle ai-toggle" type="button" role="switch" aria-checked="false" aria-label="启用定期 AI"></button></div>
+                <div class="setting-row"><label for="ai-channel-name">渠道名称<small>用于识别后台 AI 服务</small></label><input id="ai-channel-name" maxlength="80" placeholder="例如：站点识别服务"></div>
+                <div class="setting-row"><label for="ai-base-url">Base URL<small>保存后再进行连接测试</small></label><input id="ai-base-url" type="url" maxlength="300" placeholder="https://api.example.com"></div>
+                <div class="setting-row"><label for="ai-model">模型</label><input id="ai-model" maxlength="120" placeholder="例如：deepseek-chat"></div>
+                <div class="setting-row"><label for="ai-api-key">API Key<small id="ai-key-state">未配置；输入框留空不会覆盖已保存密钥</small></label><input id="ai-api-key" type="password" autocomplete="new-password" maxlength="512" placeholder="输入新密钥，不会回显"></div>
+                <div class="setting-row"><span>清除已保存密钥<small>清除后需要重新配置才能分析</small></span><button id="ai-clear-key" class="danger secondary" type="button">清除 Key</button></div>
+                <div class="setting-row"><label for="ai-interval">分析频率</label><select id="ai-interval"><option value="60">每小时</option><option value="1440">每天</option></select></div>
+                <div class="setting-row"><label for="ai-limit">每日调用上限<small>含连接测试和重试，最多20次</small></label><input id="ai-limit" type="number" min="1" max="20" inputmode="numeric"></div>
+                <p class="upload-note">手机端需主动开启“站点片段增强”后才会上报脱敏片段；AI 不读取完整短信，且不会自动改变订单关联。</p>
+                <div class="settings-actions"><button id="ai-test" class="secondary" type="button">连接测试</button><button type="submit">保存 AI 设置</button></div>
+              </form></details>
+            </div>
+            <p id="station-page-note" class="page-note">仅显示当前私人后台的站点规则与待核对材料。</p>
+          </section>
+        </div>
+      </div>
 </div>
 </div></main></div></div>
 <dialog id="account-dialog" class="drawer"><div class="dialog-head"><h2 id="account-dialog-title"><span id="account-heading">添加平台账号</span></h2><button type="button" class="close secondary" data-close="account-dialog" aria-label="关闭">×</button></div><div class="dialog-body">        <form id="account-form">
@@ -38,4 +85,5 @@
 <dialog id="pair-dialog" class=""><div class="dialog-head"><h2 id="pair-dialog-title">选择家人，整组授权</h2><button type="button" class="close secondary" data-close="pair-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><p class="hint">选中家人，包含其当前及以后新增的平台账号。待归属账号须先分配家人。</p><p id="pair-hint" class="hint" role="status"></p><form id="pair-form"><fieldset id="scope"><legend>授权家人组</legend></fieldset><button id="generate-pair">生成绑定码</button></form><div id="pair-result" hidden><img id="pair-qr" width="256" height="256" alt="设备绑定二维码"><div><p>服务地址：<span id="pair-url"></span></p><p>一次性绑定码：<strong id="pair-code"></strong></p><p id="pair-expires" class="hint"></p></div></div></div></dialog>
 <dialog id="family-dialog" class=""><div class="dialog-head"><h2 id="family-dialog-title">新增家人</h2><button type="button" class="close secondary" data-close="family-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><form id="family-form"><input type="hidden" id="family-edit-id"><label>家人名称<input id="family-name" required maxlength="80" placeholder="例如：爸爸"></label><div class="actions"><button>保存家人</button></div></form></div></dialog>
 <dialog id="device-dialog" class=""><div class="dialog-head"><h2 id="device-dialog-title">管理家人授权</h2><button type="button" class="close secondary" data-close="device-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><form id="device-form"><input type="hidden" id="device-id"><fieldset id="device-scope"><legend>授权家人</legend></fieldset><p id="device-legacy" class="hint"></p><label class="checkbox"><input type="checkbox" id="clear-legacy">清除原有单账号授权</label><p class="hint">家人组内新增账号自动包含。清空全部家人可撤销整组权限。</p><button>保存授权</button></form></div></dialog>
+<dialog id="station-review-dialog"><div class="dialog-head"><div><h2>核对并加入站点</h2><p class="hint">确认前请检查原文与标准站点</p></div><button type="button" class="close secondary" id="station-review-close" aria-label="关闭">×</button></div><form id="station-review-form" class="dialog-body"><div id="review-evidence" class="review-evidence"></div><label>标准站点选择<span class="required">*</span><select id="review-station" required></select></label><div id="review-new-fields" hidden><label>新站点标准名称<input id="review-new-name" maxlength="160"></label><label>新站点地区<input id="review-new-region" maxlength="120" placeholder="例如：中山 · 石岐"></label></div><label>原文站点别名<input id="review-alias" required maxlength="120"></label><label>子位置<input id="review-sub-location" maxlength="120" placeholder="例如：2号柜"></label><div class="dialog-actions"><button id="review-cancel" class="secondary" type="button">取消</button><button type="submit">确认加入</button></div></form></dialog>
 <script type="module" src="/admin.js"></script></body></html>

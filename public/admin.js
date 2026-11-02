@@ -26,7 +26,7 @@ const platformMeta = {
   jd: { label: '京东', mark: '京', className: 'jd' },
 };
 const platformOf = platform => platformMeta[platform] || { label: platform || '未知平台', mark: '?', className: '' };
-const statusNames = { configured: '待首次采集', syncing: '同步中', ok: '已连接', expired: 'Cookie 已失效', error: '同步失败' };
+const statusNames = { configured: '待首次采集', syncing: '同步中', ok: '最近采集成功', expired: 'Cookie 已失效', error: '同步失败' };
 const date = value => value ? new Date(value).toLocaleString('zh-CN') : '尚无';
 function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
 function node(tag, content, className) { const el = document.createElement(tag); el.textContent = content; if (className) el.className = className; return el; }
@@ -454,3 +454,4 @@ submit('pair-form', async () => {
   notice('在 App 的“线上账号”页扫码，或输入服务地址与绑定码。');
 });
 run(checkSetup, $('retry-setup'));
+if (typeof window !== 'undefined') import('./station-admin.js').then(({ initStationAdmin }) => initStationAdmin({ api, notice }));

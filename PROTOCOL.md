@@ -30,8 +30,6 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 | GET /v1/snapshot | 设备；完整快照，支持ETag/If-None-Match/304 |
 | POST /v1/operations | 设备；批量幂等人工操作 |
 
-账号 `platform` 支持 `taobao`、`pdd`，服务端3.1.9起增加 `jd`。创建后不可改变平台；京东采用本人PC网页版会话 Cookie（需包含 `thor`），凭证仅由后台加密保存，不出现在设备快照中。订单与运单字段沿用协议v1。
-
 ## 服务端3.1.1初始化与管理会话
 
 新部署无须提供密钥环境变量。服务生成持久Cookie加密密钥，并在尚未初始化时将一次性初始化码写入容器日志。`POST /v1/setup`要求正确初始化码与12–128字符密码；`baseUrl`可暂为空，否则须为HTTPS origin。成功返回`{initialized:true}`，重复初始化返回409。初始化前业务接口返回409 `SETUP_REQUIRED`。初始化和登录共享限频；服务不会将密码或密钥返回网页。
@@ -71,3 +69,15 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 `logisticsDetailCheckedAt`为采集端内部公平轮询时间，旧客户端可忽略。新增字段不进入设备写操作白名单，仍不能通过App修改平台原始数据。
 
 账号status为expired表示后台更新Cookie，设备仍有效；设备401表示重新绑定。错误JSON形如`{error:{code,message}}`。分页缺失、网络失败和上游过期时保留历史，真实结果以账号状态与lastSuccessAt为准。
+
+## 站点别名扩展（3.1.13，兼容 v1）
+
+设备快照增加 `stationRulesVersion`（非负整数）和 `stationRules`（启用站点及名称/地区/别名/子位置）。capability 为 `station_aliases_v1`。ETag 同时覆盖站点规则版本。下发不含候选、证据和 AI 配置，未声明能力的旧后台继续使用原匹配。
+
+- 管理员 `GET/POST /v1/admin/stations`，`PATCH /v1/admin/stations/:id`，字段 `name,region,enabled,aliases:[{id?,name,source,subLocation}]`，保存增加规则版本。
+- 管理员 `GET /v1/admin/station-candidates`，`POST /v1/admin/station-candidates/:id/approve`（`stationId?,alias?,subLocation?,name?,region?`）或 `/ignore`（空对象）。只有批准写规则。
+- 管理员 `GET/PATCH /v1/admin/station-ai`，设置 `channelName,baseUrl,model,apiKey?,clearApiKey?,enabled,intervalMinutes,dailyLimit`。密钥加密；GET 只返回 `hasApiKey/apiKeyMasked`，空值保留，清除须显式指定。`POST /test` 和 `/run` 均为空对象；测试计额度，运行返回202接受状态，结果通过候选队列查询。
+- 设备 `POST /v1/station-candidates`，`{items:[{id,stationName,fragment,source:'sms'}]}`，最多20项，只允许脱敏站名，返回 `acceptedIds` 供客户端确认。
+- 设备 `POST /v1/station-proposals`，`{stationName,otherStationName,subLocation?}`，主动记忆名称关系；两个候选仍待管理员分别确认。设备不能直接写入共享别名、获取后台AI配置或其他人的候选。
+
+平台候选仅从有效末端已到站、非已取/隐藏/归档的近期记录收集；AI异步处理与订单采集隔离。短信端默认关闭，开启后本地仅保留7天/200项队列。候选和传输均不含完整短信、取件码、运单、Cookie。修改密码与撤权后接口沿用原认证边界。

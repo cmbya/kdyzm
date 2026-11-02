@@ -24,7 +24,7 @@ function fullResult(job, result) {
   }
 }
 
-export function createSyncJobs({ store, collector, now }) {
+export function createSyncJobs({ store, collector, now, onImported = () => {} }) {
   const records = new Map(), scopes = new Map(), queues = new Map(), timers = new Map(), running = new Map();
   let closed = false;
   const finish = record => { record.job.finishedAt = now(); record.resolve(record.job); };
@@ -68,6 +68,8 @@ export function createSyncJobs({ store, collector, now }) {
           for (const key of ['orders', 'orderUpdates', 'shipments', 'logisticsFailures']) result[key] = (result[key] || []).filter(matches);
         }
         store.importResult(accountId, result);
+        // Optional station enrichment cannot turn a successful platform import into a sync failure.
+        try { onImported(accountId); } catch { /* Retry with the next successful import. */ }
         if (result.refreshedCookie) store.refreshCookie(accountId, result.refreshedCookie);
         record.job.state = 'completed';
         if (record.job.orderId) {

@@ -6,11 +6,13 @@ import { Store } from './store.mjs';
 import { AdminConfiguration } from './configuration.mjs';
 import { createCollector } from './collectors.mjs';
 import { createSyncJobs } from './sync-jobs.mjs';
+import { StationStore, enqueuePlatformCandidates, enqueueStationProposal } from './stations.mjs';
+import { StationAiJobs } from './station-ai.mjs';
 import { serverVersion } from './version.mjs';
 import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './security.mjs';
 
 const PUBLIC = new URL('../public/', import.meta.url);
-const STATIC = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']], ['/sync-status.js', ['sync-status.js', 'text/javascript; charset=utf-8']], ['/admin.css', ['admin.css', 'text/css; charset=utf-8']]]);
+const STATIC = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']], ['/station-admin.js', ['station-admin.js', 'text/javascript; charset=utf-8']], ['/station-admin.css', ['station-admin.css', 'text/css; charset=utf-8']], ['/sync-status.js', ['sync-status.js', 'text/javascript; charset=utf-8']], ['/admin.css', ['admin.css', 'text/css; charset=utf-8']]]);
 
 async function bodyOf(req) {
   if (!(req.headers['content-type'] || '').startsWith('application/json')) fail(415, 'JSON_REQUIRED', '请使用 application/json');
@@ -25,12 +27,14 @@ function send(res, status, data, extra = {}) {
 }
 
 export function createService({ filename = ':memory:', encryptionKey, adminToken, baseUrl,
-  now = Date.now, collector = createCollector({ now }), fixture = false, scheduler = true, corsOrigins = [], log = console.log } = {}) {
+  now = Date.now, collector = createCollector({ now }), fixture = false, scheduler = true, corsOrigins = [], log = console.log, aiRequest } = {}) {
   const origins = new Set(corsOrigins.map(publicUrl));
   const configuration = new AdminConfiguration({ filename, encryptionKey, adminToken, baseUrl, now, log });
   const store = new Store({ filename, key: configuration.key, now });
+  const stations = new StationStore({ db: store.db, key: configuration.key, now });
+  const stationAi = new StationAiJobs({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
   const rate = new RateLimiter(now);
-  const jobs = createSyncJobs({ store, collector, now });
+  const jobs = createSyncJobs({ store, collector, now, onImported: accountId => enqueuePlatformCandidates(stations, store.snapshot([accountId]), now()) });
   const running = jobs.running;
   const allowed = (device, id) => { if (!device.accountIds.includes(id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); };
   const admin = req => {
@@ -55,6 +59,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const requestSync = id => jobs.request(id).done;
   const timer = scheduler ? setInterval(() => {
     for (const account of store.accounts()) if (account.enabled && account.nextSyncAt <= now()) void requestSync(account.id);
+    stationAi.runDue();
   }, 30000).unref() : null;
 
   const server = createServer(async (req, res) => {
@@ -138,6 +143,41 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
+        if (path === '/v1/admin/stations' && req.method === 'GET') { send(res, 200, { stations: stations.stations(), revision: stations.revision }); return; }
+        if (path === '/v1/admin/stations' && req.method === 'POST') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 201, { station: stations.saveStation(undefined, body) }); return;
+        }
+        const stationPath = path.match(/^\/v1\/admin\/stations\/([^/]+)$/);
+        if (stationPath && req.method === 'PATCH') {
+          if (!stations.station(stationPath[1])) fail(404, 'NOT_FOUND', '站点不存在');
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, { station: stations.saveStation(stationPath[1], body) }); return;
+        }
+        if (path === '/v1/admin/station-candidates' && req.method === 'GET') { send(res, 200, { candidates: stations.candidates(), running: !!stationAi.running }); return; }
+        const candidatePath = path.match(/^\/v1\/admin\/station-candidates\/([^/]+)\/(approve|ignore)$/);
+        if (candidatePath && req.method === 'POST') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          if (candidatePath[2] === 'ignore') { onlyKeys(body, []); send(res, 200, { candidate: stations.ignoreCandidate(candidatePath[1]) }); }
+          else send(res, 200, stations.approveCandidate(candidatePath[1], body));
+          return;
+        }
+        if (path === '/v1/admin/station-ai' && req.method === 'GET') { send(res, 200, { config: stations.aiConfig(), running: !!stationAi.running }); return; }
+        if (path === '/v1/admin/station-ai' && req.method === 'PATCH') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, { config: stations.saveAiConfig(body) }); return;
+        }
+        if (path === '/v1/admin/station-ai/test' && req.method === 'POST') {
+          onlyKeys(await bodyOf(req), []); configuration.authenticate(req.headers['x-admin-token']);
+          rate.check('station-ai:test', 5, 60000);
+          const result = await stationAi.testConnection(); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, result); return;
+        }
+        if (path === '/v1/admin/station-ai/run' && req.method === 'POST') {
+          onlyKeys(await bodyOf(req), []); configuration.authenticate(req.headers['x-admin-token']);
+          rate.check('station-ai:run', 10, 60000);
+          send(res, 202, stationAi.request()); return;
+        }
         if (path === '/v1/admin/families' && req.method === 'GET') { send(res, 200, { families: store.families() }); return; }
         if (path === '/v1/admin/families' && req.method === 'POST') {
           const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
@@ -196,6 +236,16 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         admin(req); send(res, 200, store.revoke(revokePath[1])); return;
       }
       const current = device(req);
+      if (path === '/v1/station-candidates' && req.method === 'POST') {
+        const body = await bodyOf(req); onlyKeys(body, ['items']);
+        const authorized = device(req); rate.check(`station-upload:${authorized.id}`, 12, 3600000);
+        send(res, 200, stations.enqueue(body.items, { deviceId: authorized.id, source: 'sms' })); return;
+      }
+      if (path === '/v1/station-proposals' && req.method === 'POST') {
+        const body = await bodyOf(req); const authorized = device(req);
+        rate.check(`station-proposal:${authorized.id}`, 20, 3600000);
+        send(res, 202, enqueueStationProposal(stations, body, authorized.id)); return;
+      }
       if (path === '/v1/devices/current' && req.method === 'DELETE') { send(res, 200, store.revoke(current.id)); return; }
       if (path === '/v1/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts(current.accountIds), familyIds: current.familyIds, legacyAccountIds: current.legacyAccountIds, families: store.families(current.familyIds) }); return; }
       if (path === '/v1/accounts/sync' && req.method === 'POST') {
@@ -226,6 +276,9 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         const requested = url.searchParams.getAll('accountId');
         requested.forEach(id => { if (!store.canFilterAccount(current, id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); });
         const snapshot = store.snapshot(current, requested.length ? requested : undefined);
+        const rules = stations.stationRules();
+        snapshot.stationRulesVersion = rules.revision;
+        snapshot.stationRules = rules.stations;
         const etag = `"${hash(JSON.stringify(snapshot))}"`;
         const matches = (req.headers['if-none-match'] || '').split(',').map(t => t.trim().replace(/^W\//, '')).includes(etag);
         send(res, matches ? 304 : 200, matches ? undefined : snapshot, { ETag: etag }); return;
@@ -245,11 +298,12 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running, jobs,
+  return { server, store, requestSync, fixture, running, jobs, stations, stationAi,
     async close() {
       if (timer) clearInterval(timer);
       await new Promise(resolve => server.close(resolve));
       await jobs.close();
+      await stationAi.close();
       store.close();
     } };
 }
