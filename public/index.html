@@ -20,7 +20,7 @@
 <div class="workbench"><aside class="people"><div class="people-head">家人分组</div><label class="search"><input id="family-search" placeholder="搜索家人" aria-label="搜索家人"></label><div id="families"></div></aside><section class="accounts-panel"><div class="panel-head"><div class="panel-title"><span class="avatar" id="family-avatar">人</span><div><h2 id="family-title">待归属</h2><p id="family-description" class="hint"></p></div></div><div class="actions"><button id="new-account" class="secondary">＋ 添加平台</button><button id="authorize-family">整组授权</button><button id="rename-family" class="textbtn" aria-label="重命名家人">⋯</button></div></div><div class="filter-tabs"><button id="filter-all" class="active textbtn">全部账号</button><button id="filter-attention" class="textbtn">需要处理</button><button id="refresh" class="textbtn">刷新状态</button></div><div class="account-head"><span>平台账号</span><span>登录与采集状态</span><span>最近成功采集</span><span>详情</span></div><div id="accounts"></div><p class="account-note hint">账号登录信息仅保存在后台，设备只接收已授权的包裹数据。</p></section></div></div>
 <div id="page-devices" hidden><div class="heading"><div><p class="eyebrow">DEVICE ACCESS</p><h1>设备管理</h1><p class="subtitle">家人整组授权持续生效，以后新增账号自动包含。</p></div><button id="bind-device">＋ 绑定设备</button></div><div id="devices"></div></div>
 <div id="page-settings" hidden><div class="heading"><div><p class="eyebrow">SERVICE SETTINGS</p><h1 id="settings-page-title">服务设置</h1></div></div>
-      <nav class="settings-tabs admin-settings-tabs" aria-label="服务设置"><button id="basic-settings-tab" class="active" type="button">基础设置</button><button id="station-settings-tab" type="button">站点管理</button></nav>
+      <nav class="settings-tabs admin-settings-tabs" aria-label="服务设置"><button id="basic-settings-tab" class="active" type="button">基础设置</button><button id="station-settings-tab" type="button">站点管理</button><button id="logistics-settings-tab" type="button">物流识别规则</button></nav>
       <div id="settings-basic-view"><section><h2>服务设置</h2><p id="configuration-hint" class="hint"></p><p>当前服务地址：<span id="configured-base-url"></span></p>
         <div id="managed-settings" hidden>
           <form id="settings-form"><label>HTTPS 服务地址<input id="settings-base-url" type="url" autocomplete="url" placeholder="https://pickcode.example.com" aria-describedby="settings-url-hint"></label><p id="settings-url-hint" class="hint">仅填写域名与可选端口。留空时无法生成设备绑定码；修改地址后需为设备重新生成绑定码。域名、证书和 HTTPS 代理需自行配置。</p><button>保存地址</button></form>
@@ -69,6 +69,30 @@
               </form></details>
             </div>
             <p id="station-page-note" class="page-note">仅显示当前私人后台的站点规则与待核对材料。</p>
+          </section>
+        </div>
+      </div>
+      <div id="logistics-settings-view" hidden>
+        <div class="station-heading"><div><h2>物流识别规则</h2><p class="subtitle">仅后台生效，下次采集/刷新物流使用；App 本机规则另行管理。</p></div><div class="actions"><button id="logistics-reload" class="secondary" type="button">重新读取</button><button id="logistics-save" type="button" disabled>保存规则</button></div></div>
+        <p class="ai-rule">安全防护固定生效：预计、未到达、中转、退回、催取不算新到站。模板按文字匹配，不支持脚本或正则表达式。</p>
+        <p id="logistics-status" class="hint logistics-status" role="status" aria-live="polite">尚未读取规则。</p>
+        <div class="station-layout logistics-layout">
+          <section class="station-directory logistics-directory" aria-label="物流规则列表">
+            <div class="directory-head"><div class="directory-title"><h2>识别规则</h2><span id="logistics-total">0 条</span></div><button id="logistics-add" class="secondary" type="button" disabled>＋ 新增规则</button></div>
+            <div id="logistics-list" class="station-list"></div>
+            <div class="logistics-defaults"><button id="logistics-restore" class="textbtn" type="button" disabled>恢复默认规则</button></div>
+          </section>
+          <section class="station-detail" aria-label="物流规则编辑">
+            <header class="detail-head"><div class="detail-title"><div><h2 id="logistics-detail-name">选择一条规则</h2><p id="logistics-detail-origin">编辑后保存整组规则</p></div></div><label class="station-switch"><span>启用规则</span><button id="logistics-enabled" class="toggle off" type="button" role="switch" aria-checked="false" aria-label="启用当前物流规则" disabled></button></label></header>
+            <form id="logistics-form" class="detail-body" hidden>
+              <div class="station-field-row"><label class="station-field">规则名称<span class="required">*</span><input id="logistics-name" required maxlength="80" autocomplete="off"></label><label class="station-field">识别用途<select id="logistics-kind"><option value="arrival">到站事件</option><option value="location">仅站点位置</option></select></label></div>
+              <p id="logistics-kind-hint" class="hint"></p>
+              <div class="station-field-row logistics-pattern-fields"><label class="station-field">站名前的文字<span class="required">*</span><textarea id="logistics-starts" rows="4" required maxlength="1620" placeholder="已暂存至\n已存放至" aria-describedby="logistics-starts-hint"></textarea><small id="logistics-starts-hint" class="hint">每行一种，最多 20 种，每种最多 80 字。</small></label><label class="station-field">站名后的文字<input id="logistics-end" maxlength="80" placeholder="例如：，请及时取件"><small class="hint">留空时按标点或文本末尾截取站名。</small></label></div>
+              <label class="station-field">需同时包含的关键词<textarea id="logistics-keywords" rows="2" maxlength="810" placeholder="可留空，每行一个关键词"></textarea><small class="hint">全部关键词都出现才匹配，最多 10 个，每个最多 80 字。</small></label>
+              <details class="matching" open><summary><span>样例验证</span><span class="pill neutral">保存前核对</span></summary><label>物流文字样例<textarea id="logistics-sample" rows="3" maxlength="600" placeholder="粘贴一条物流原文"></textarea></label><label>预期站名<input id="logistics-expected" maxlength="120" placeholder="例如：菜鸟驿站幸福小区店"></label><p class="hint">启用规则时，样例必须提取出完全一致的预期站名；到站规则还需通过到站事件校验。</p><button id="logistics-test" class="secondary" type="button">测试当前草稿</button><p id="logistics-test-result" class="verify-result" role="status" aria-live="polite">测试只使用当前草稿，不会保存或修改已有物流。</p></details>
+              <footer class="detail-footer"><small>更改统一点击上方“保存规则”后生效。</small><button id="logistics-delete" class="danger" type="button">删除规则</button></footer>
+            </form>
+            <p id="logistics-empty" class="station-empty">正在等待规则列表。</p>
           </section>
         </div>
       </div>

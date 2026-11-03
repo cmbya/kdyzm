@@ -115,9 +115,9 @@ function stageText(stage) {
   return Array.isArray(label?.richContent) ? label.richContent.map(r => r.text || '').join('') : typeof label === 'string' ? label : label?.text || stage.text || '';
 }
 function codeOf(value) { return value.match(/(?:取件码|取货码|提货码|自提码)\s*(?:是|为)?\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,15})/)?.[1] || ''; }
-function arrivalEvidence(value) { return eventStatus(value) === 'arrived'; }
-function applyTrackEvidence(parcel, events) {
-  const evidence = pickupEvidence(events);
+function arrivalEvidence(value, rules) { return eventStatus(value, 'unknown', rules) === 'arrived'; }
+function applyTrackEvidence(parcel, events, rules) {
+  const evidence = pickupEvidence(events, rules);
   const reset = events.some(event => pickupCycleReset(event.description) && (!event.time || !parcel.arrivalAt || event.time >= parcel.arrivalAt));
   const stationConflict = evidence.station && parcel.station
     && evidence.station.replace(/[\s\p{P}]/gu, '') !== parcel.station.replace(/[\s\p{P}]/gu, '');
@@ -153,7 +153,7 @@ function taobaoOrderKind({ tradeStatus, orderStatus }) {
   return 'skip';
 }
 
-export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
+export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules) {
   const packages = fields.multiPackages?.packages || [];
   const baseNo = asText(fields.mailNo || fields.logisticCompany?.mailNo);
   const sources = packages.length ? packages.filter(p => p?.mailNo).map(p => ({ ...p, mailNo: asText(p.mailNo) })) : baseNo ? [{ mailNo: baseNo }] : [];
@@ -169,7 +169,7 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
       const card = stage.cardDesc || {};
       const code = asText(card.custom?.expressCode?.code) || codeOf(content);
       pickupCode ||= code;
-      if (arrivalEvidence(`${stage.title || ''} ${content}`)) arrived = true;
+      if (arrivalEvidence(`${stage.title || ''} ${content}`, rules)) arrived = true;
     }
     if (!pickupCode && sources.length === 1 && !stages.some(stage => pickupCycleReset(`${stage.title || ''} ${stageText(stage)}`))) pickupCode = fallbackCode;
     // A current structured collection code is itself evidence that the parcel is at a pickup point.
@@ -181,7 +181,7 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
     const latestCard = stages[0]?.cardDesc || {};
     const latestCardText = `${latestCard.title || ''} ${latestCard.subTitle || ''}`;
     const latestStructuredPickup = !!latestCard.custom?.expressCode?.code || /驿站|代收点|代收|自提柜|快递柜|丰巢/.test(latestCardText);
-    const latestAtPickupPoint = latestStructuredPickup || arrivalEvidence(latest);
+    const latestAtPickupPoint = latestStructuredPickup || arrivalEvidence(latest, rules);
     const latestTitle = asText(stages[0]?.title).trim();
     const latestBody = stages[0] ? stageText(stages[0]) : '';
     const latestTransitTitle = /运输|发货|揽收|派送|派件中/.test(latestTitle);
@@ -195,15 +195,15 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '') {
       const rawTime = stage.time || stage.date || stage.occurTime || stage.subtitle;
       const description = `${stage.title || ''}：${stageText(stage)}`;
       return { time: logisticsTimestamp(rawTime, timestamp), timePrecision: logisticsTimePrecision(rawTime), description,
-        station: arrivalEvidence(description) ? [stage.cardDesc?.title, stage.cardDesc?.subTitle].filter(Boolean).join(' ') : '' };
-    }));
+        station: arrivalEvidence(description, rules) ? [stage.cardDesc?.title, stage.cardDesc?.subTitle].filter(Boolean).join(' ') : '' };
+    }), rules);
     return { platformOrderId, waybillNo: parcel.mailNo, carrier: asText(parcel.cpName || CARRIERS[parcel.cpCode] || selected.logisticCompany?.name || parcel.cpCode),
       pickupCode, ...evidence, status, logisticsEvents, logisticsTruncated,
       logisticsState: logisticsEvents.length ? 'ok' : specific || selected === fields ? 'empty' : 'unavailable' };
   });
 }
 
-async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds = [], knownOrders = [], targetOrder }) {
+async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds = [], knownOrders = [], targetOrder, rules }) {
   const session = { cookie, fetchImpl, now };
   const orders = [], shipments = [], orderUpdates = [], warnings = [], logisticsFailures = [];
   const seen = new Set();
@@ -242,7 +242,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       const result = await platformRequest(`https://pages-g.m.taobao.com/wow/z/app/mtb/logisticsV2/h5-detail?x-ssr=true&bizOrderId=${encodeURIComponent(platformOrderId)}`, session.cookie, { fetchImpl });
       const fields = extractSsrFields(result.text);
       if (!fields) warnings.push('部分订单暂无可解析物流，订单仍保留');
-      const parcels = taobaoParcels(fields || {}, platformOrderId, pickupCodes[platformOrderId]);
+      const parcels = taobaoParcels(fields || {}, platformOrderId, pickupCodes[platformOrderId], rules);
       // A partial split response must also record the attempt for known active
       // waybills it omits, without copying another parcel's events or pickup code.
       for (const parcel of knownParcels(platformOrderId)) {
@@ -357,9 +357,9 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
           parcel.logisticsError = '';
           // An undated SSR pickup notice can be newer than a dated PC event.
           // Only replace its current state when the two sources can be ordered.
-          if (canUpdateStatus) parcel.status = eventStatus(events[0].description, parcel.status);
+          if (canUpdateStatus) parcel.status = eventStatus(events[0].description, parcel.status, rules);
           parcel.carrier ||= asText(data.expressName);
-          if (canUpdateStatus) applyTrackEvidence(parcel, events);
+          if (canUpdateStatus) applyTrackEvidence(parcel, events, rules);
         }
         parcel.logisticsUpdatedAt = checkedAt;
         if (!events.length) { parcel.logisticsState = 'empty'; parcel.logisticsError = '平台本次未返回物流轨迹'; }
@@ -411,7 +411,7 @@ function pddOrderKind(order, type) {
   if (combined === '2' || TO_SHIP_STATUS_TEXT.test(status)) return 'to_ship';
   return type === 'unshipping' ? 'to_ship' : 'in_transit';
 }
-export function pddParcels(order, cabinet) {
+export function pddParcels(order, cabinet, rules) {
   const platformOrderId = asText(order.order_sn);
   const listed = order.shipping_list || order.express_list || order.package_list;
   const parcels = Array.isArray(listed) && listed.length ? listed : order.tracking_number ? [order] : [];
@@ -420,7 +420,7 @@ export function pddParcels(order, cabinet) {
     const cabinetMatches = parcels.length === 1 || asText(cabinet.tracking_number) === waybillNo;
     const code = cabinetMatches ? asText(cabinet.code).trim() : '';
     const statusText = asText(parcel.shipping_status_text || order.order_status_text || order.status_text);
-    const status = eventStatus(statusText, /交易成功|交易完成/.test(statusText) ? 'signed' : code || (cabinetMatches && cabinet.arrival_time) ? 'arrived' : 'transit');
+    const status = eventStatus(statusText, /交易成功|交易完成/.test(statusText) ? 'signed' : code || (cabinetMatches && cabinet.arrival_time) ? 'arrived' : 'transit', rules);
     const arrivalTime = cabinetMatches && status === 'arrived' ? cabinet.arrival_time || cabinet.create_time : 0;
     const arrivalAt = logisticsTimestamp(arrivalTime, timestamp);
     const station = cabinetMatches && status === 'arrived' ? asText(cabinet.address) : '';
@@ -430,7 +430,7 @@ export function pddParcels(order, cabinet) {
       arrivalAtPrecision: arrivalAt ? logisticsTimePrecision(arrivalTime) : 'unknown' };
   });
 }
-async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], targetOrder }) {
+async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], targetOrder, rules }) {
   const uid = cookie.match(/(?:^|;\s*)(?:pdd_user_id|pdduid)=([^;]+)/)?.[1];
   if (!uid) expired();
   const headers = { Referer: 'https://mobile.yangkeduo.com/orders.html' };
@@ -463,8 +463,8 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
         parcel.logisticsCheckedAt = checkedAt;
         parcel.logisticsUpdatedAt = checkedAt;
         if (events.length) {
-          parcel.status = eventStatus(events[0].description, parcel.status);
-          applyTrackEvidence(parcel, events);
+          parcel.status = eventStatus(events[0].description, parcel.status, rules);
+          applyTrackEvidence(parcel, events, rules);
         }
       }
     } catch (error) {
@@ -508,7 +508,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
         const useIncoming = !previous || ranks[kind] >= ranks[previous.kind];
         const merged = useIncoming ? { ...previous?.order, ...order } : { ...order, ...previous.order };
         const parcels = new Map((previous?.parcels || []).map(parcel => [parcel.waybillNo, parcel]));
-        for (const parcel of pddParcels(order, {})) {
+        for (const parcel of pddParcels(order, {}, rules)) {
           const prior = parcels.get(parcel.waybillNo);
           parcels.set(parcel.waybillNo, { ...parcel, carrier: parcel.carrier || prior?.carrier || '',
             status: parcel.status === 'signed' || prior?.status === 'signed' ? 'signed' : parcel.status });
@@ -540,7 +540,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
         const cabinet = pddCheck(json(response.text)).result || {};
         const enriched = pddParcels({ order_sn: platformOrderId, order_status_text: orderStatus,
           shipping_list: parcels.map(parcel => ({ tracking_number: parcel.waybillNo, shipping_name: parcel.carrier,
-            shipping_status_text: parcel.status === 'signed' ? '已签收' : parcel.status === 'arrived' ? '待取件' : '' })) }, cabinet);
+            shipping_status_text: parcel.status === 'signed' ? '已签收' : parcel.status === 'arrived' ? '待取件' : '' })) }, cabinet, rules);
         for (let i = 0; i < parcels.length; i++) Object.assign(parcels[i], enriched[i]);
       } catch (error) {
         if (error.code === 'ACCOUNT_EXPIRED') throw error;
@@ -593,7 +593,7 @@ function jdOrderKind(order) {
   return 'skip';
 }
 
-export function jdParcels(data, platformOrderId, checkedAt) {
+export function jdParcels(data, platformOrderId, checkedAt, rules) {
   if (!Array.isArray(data.multiPackageTrackInfoList)) throw new CollectorError('UPSTREAM_FORMAT', '京东物流字段已变化，已保留原轨迹');
   return data.multiPackageTrackInfoList.flatMap(item => {
     const group = item?.trackGroupInfo || {};
@@ -606,8 +606,8 @@ export function jdParcels(data, platformOrderId, checkedAt) {
     })), timestamp);
     const latest = events[0];
     const pickupCode = pickupCycleReset(latest?.description || '') ? '' : asText(group.checkCode).trim() || codeOf(latest?.description || '');
-    const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'transit');
-    const evidence = status === 'signed' ? pickupEvidence([]) : pickupEvidence(events);
+    const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'transit', rules);
+    const evidence = status === 'signed' ? pickupEvidence([], rules) : pickupEvidence(events, rules);
     return [{ platformOrderId, waybillNo, carrier: asText(carriage.carrier), status, pickupCode,
       ...evidence,
       logisticsEvents: events, logisticsTruncated: truncated, logisticsState: events.length ? 'ok' : 'empty',
@@ -615,7 +615,7 @@ export function jdParcels(data, platformOrderId, checkedAt) {
   });
 }
 
-async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], trackedOrderIds = [], targetOrder }) {
+async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], trackedOrderIds = [], targetOrder, rules }) {
   const orders = [], shipments = [], orderUpdates = [], logisticsFailures = [], warnings = [];
   const session = { cookie };
   const request = async (functionId, input, detail = false) => {
@@ -637,7 +637,7 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
     const checkedAt = now();
     try {
       const data = await request('pcdetail_traceMultiPackage', { orderId: platformOrderId }, true);
-      const returnedParcels = jdParcels(data, platformOrderId, checkedAt);
+      const returnedParcels = jdParcels(data, platformOrderId, checkedAt, rules);
       const known = knownOrders.find(order => asText(order.platformOrderId) === platformOrderId);
       const parcels = returnedParcels.filter(parcel => {
         if (!parcel.logisticsEvents.length && !parcel.pickupCode && known?.shipments?.some(old => asText(old.waybillNo) === parcel.waybillNo)) {
@@ -713,12 +713,15 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
   return { orders, shipments, orderUpdates, logisticsFailures, warnings: [...new Set(warnings)], refreshedCookie: session.cookie };
 }
 
-export function createCollector({ fetchImpl = fetch, now = Date.now, maxPages = 5 } = {}) {
+export function createCollector({ fetchImpl = fetch, now = Date.now, maxPages = 5, getLogisticsRules } = {}) {
   return async (account, cookie, { trackedOrderIds = [], knownOrders = [], targetOrder } = {}) => {
-    const options = { fetchImpl, now, maxPages, trackedOrderIds, knownOrders: targetOrder ? [targetOrder] : knownOrders, targetOrder };
-    if (account.platform === 'taobao') return collectTaobao(cookie, options);
-    if (account.platform === 'pdd') return collectPdd(cookie, options);
-    if (account.platform === 'jd') return collectJd(cookie, options);
-    throw new CollectorError('INVALID_PLATFORM', '不支持的授权平台');
+    const rules = getLogisticsRules ? JSON.parse(JSON.stringify(getLogisticsRules())) : undefined;
+    const options = { fetchImpl, now, maxPages, trackedOrderIds, knownOrders: targetOrder ? [targetOrder] : knownOrders, targetOrder, rules };
+    const collect = { taobao: collectTaobao, pdd: collectPdd, jd: collectJd }[account.platform];
+    if (!collect) throw new CollectorError('INVALID_PLATFORM', '不支持的授权平台');
+    const result = await collect(cookie, options);
+    // Keep the parser snapshot with this import, even if an administrator edits rules mid-request.
+    if (rules) result.logisticsRules = rules;
+    return result;
   };
 }

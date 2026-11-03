@@ -16,6 +16,7 @@ let pollTimer = null;
 let countdownTimer = null;
 let scopeKey = '';
 let pollingError = '';
+let logisticsAdmin;
 const serverClock = createServerClock();
 const syncSubmitting = new Map();
 const syncRows = new Map();
@@ -82,6 +83,7 @@ function showLogin() {
     : '输入初始化时设置的密码。登录凭证只在当前页面内存中保留，刷新页面后需重新登录。';
 }
 function clearSession() {
+  logisticsAdmin?.reset();
   stopPolling(); syncSubmitting.clear(); syncRows.clear(); scopeKey = ''; pollingError = '';
   token = ''; accounts = []; families = []; devices = []; selectedFamily = ''; baseUrl = ''; settingsDirty = false;
   for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog']) if ($(id).open) $(id).close();
@@ -454,4 +456,8 @@ submit('pair-form', async () => {
   notice('在 App 的“线上账号”页扫码，或输入服务地址与绑定码。');
 });
 run(checkSetup, $('retry-setup'));
-if (typeof window !== 'undefined') import('./station-admin.js').then(({ initStationAdmin }) => initStationAdmin({ api, notice }));
+if (typeof window !== 'undefined') import('./station-admin.js').then(async ({ initStationAdmin }) => {
+  initStationAdmin({ api, notice });
+  const { initLogisticsAdmin } = await import('./logistics-admin.js');
+  logisticsAdmin = initLogisticsAdmin({ api, notice });
+}).catch(error => notice(error.message || '设置页面未能加载，请刷新页面。', true));

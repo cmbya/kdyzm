@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { Store } from './store.mjs';
 import { AdminConfiguration } from './configuration.mjs';
 import { createCollector } from './collectors.mjs';
+import { LogisticsRuleStore } from './logistics-rule-store.mjs';
 import { createSyncJobs } from './sync-jobs.mjs';
 import { StationStore, enqueuePlatformCandidates, enqueueStationProposal } from './stations.mjs';
 import { StationAiJobs } from './station-ai.mjs';
@@ -14,6 +15,7 @@ import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './secur
 
 const PUBLIC = new URL('../public/', import.meta.url);
 const STATIC = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']], ['/station-admin.js', ['station-admin.js', 'text/javascript; charset=utf-8']], ['/station-admin.css', ['station-admin.css', 'text/css; charset=utf-8']], ['/sync-status.js', ['sync-status.js', 'text/javascript; charset=utf-8']], ['/admin.css', ['admin.css', 'text/css; charset=utf-8']]]);
+STATIC.set('/logistics-admin.js', ['logistics-admin.js', 'text/javascript; charset=utf-8']);
 
 async function bodyOf(req) {
   if (!(req.headers['content-type'] || '').startsWith('application/json')) fail(415, 'JSON_REQUIRED', '请使用 application/json');
@@ -28,15 +30,18 @@ function send(res, status, data, extra = {}) {
 }
 
 export function createService({ filename = ':memory:', encryptionKey, adminToken, baseUrl,
-  now = Date.now, collector = createCollector({ now }), fixture = false, scheduler = true, corsOrigins = [], log = console.log, aiRequest, appUpdateDirectory } = {}) {
+  now = Date.now, collector, fixture = false, scheduler = true, corsOrigins = [], log = console.log, aiRequest, appUpdateDirectory } = {}) {
   const appUpdates = createAppUpdateHandler({ directory: appUpdateDirectory });
   const origins = new Set(corsOrigins.map(publicUrl));
   const configuration = new AdminConfiguration({ filename, encryptionKey, adminToken, baseUrl, now, log });
-  const store = new Store({ filename, key: configuration.key, now });
+  let logisticsRules;
+  const getLogisticsRules = () => logisticsRules.read().rules;
+  const store = new Store({ filename, key: configuration.key, now, getLogisticsRules });
+  logisticsRules = new LogisticsRuleStore(store.db, now);
   const stations = new StationStore({ db: store.db, key: configuration.key, now });
   const stationAi = new StationAiJobs({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
   const rate = new RateLimiter(now);
-  const jobs = createSyncJobs({ store, collector, now, onImported: accountId => enqueuePlatformCandidates(stations, store.snapshot([accountId]), now()) });
+  const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now, onImported: accountId => enqueuePlatformCandidates(stations, store.snapshot([accountId]), now()) });
   const running = jobs.running;
   const allowed = (device, id) => { if (!device.accountIds.includes(id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); };
   const admin = req => {
@@ -146,6 +151,15 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
+        if (path === '/v1/admin/logistics-rules' && req.method === 'GET') { send(res, 200, logisticsRules.read()); return; }
+        if (path === '/v1/admin/logistics-rules' && req.method === 'PATCH') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, logisticsRules.save(body)); return;
+        }
+        if (path === '/v1/admin/logistics-rules/test' && req.method === 'POST') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, logisticsRules.test(body)); return;
+        }
         if (path === '/v1/admin/stations' && req.method === 'GET') { send(res, 200, { stations: stations.stations(), revision: stations.revision }); return; }
         if (path === '/v1/admin/stations' && req.method === 'POST') {
           const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
@@ -301,7 +315,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running, jobs, stations, stationAi,
+  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, logisticsRules,
     async close() {
       if (timer) clearInterval(timer);
       await new Promise(resolve => server.close(resolve));

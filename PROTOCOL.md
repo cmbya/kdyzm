@@ -87,6 +87,18 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 更换后台AI地址、模型或密钥会使整个旧批次失效，涵盖在途调用、重试等待与候选间隙；旧批次不能转用新渠道，须重新发起分析。清除密钥和服务关闭也会取消；晚到结果不采纳。取消记录本地安全原因，候选可重新分析，已确认或忽略的候选不会恢复待处理。关闭定期分析会取消该定期批次，手动批次不受自动开关影响。已有候选的人工审核与订单采集继续独立运行。所有实际网络请求沿用公网HTTPS、DNS解析校验并固定地址、禁止重定向、超时和响应大小边界。
 
+## 物流明文识别模板（兼容 v1，后台 3.1.16）
+
+后台模板与 App 本机模板独立保存，不通过设备快照同步。已有站点别名接口保持不变；模板负责从物流正文提取站点与到站证据，不直接确认同站别名或强制合并包裹。
+
+- 管理员 `GET /v1/admin/logistics-rules` 返回 `{revision,rules,defaults}`，初始 revision 为 1。
+- 管理员 `PATCH /v1/admin/logistics-rules` 接收 `{revision,rules}`，整体保存并增加版本；过期版本返回 `409 LOGISTICS_RULE_CONFLICT`，不覆盖较新规则。
+- 管理员 `POST /v1/admin/logistics-rules/test` 接收 `{rule,sample}`，返回 `{station,arrival,status,ruleId,reason}`。只预览，不保存、不发起采集或 AI。停用规则也可预览，新草稿可传空 ID。
+- 规则字段为 `{id,name,enabled,kind,starts,end,keywords,sample,expectedStation,origin}`。`kind=arrival/location`，`origin=builtin/manual`，starts 是 1–20 个字面前文、keywords 是最多 10 个同片段必须包含的关键词；end 为空按标点截断，也支持逗号等字面结束标记。启用前必须用样例准确提取预期站点，到站规则还须验证到站事件。仅支持明文，不接收正则或脚本。
+- 最多 100 条、60000 字符，HTTP 请求仍受原 64 KiB 限制；名称/前后文各最多 80 字符，样例 600 字符、站名 120 字符。无效输入返回 `400 INVALID_LOGISTICS_RULE`，保留原配置。
+
+接口沿用 `X-Admin-Token`、来源限制和管理员会话校验，设备 token 无写权限。保存后下一次成功采集或定向刷新按该次采集的模板快照处理；失败保留原证据。保存操作本身不访问平台、不更改旧记录。预计、否定、请求、退回、中转和催取保护固定生效；仅站点位置规则不会生成到站时间。
+
 ## Docker 内置 App 更新包
 
 以下只读接口公开且无需凭证，初始化前也可使用：
