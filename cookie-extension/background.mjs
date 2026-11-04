@@ -1,4 +1,4 @@
-import { PLATFORMS, baseOrigin, cookieHeader, platformForDomain, digest, apiRequest, problem, errorText } from './core.mjs';
+import { PLATFORMS, baseOrigin, readCookieHeader, platformForDomain, digest, apiRequest, problem, errorText } from './core.mjs';
 import { createFamilySync } from './family.mjs';
 
 const KEY = 'connections', PERIODIC = 'cookie-sync-periodic';
@@ -41,9 +41,10 @@ async function current(item) {
   return { account, connection };
 }
 async function readCookie(item) {
-  const profile = PLATFORMS[item.account.platform];
-  const cookies = (await Promise.all(profile.urls.map(url => chrome.cookies.getAll({ url, storeId: item.storeId })))).flat();
-  return cookieHeader(item.account.platform, cookies, item.storeId);
+  return readCookieHeader(item.account.platform, chrome.cookies, item.storeId, async () => {
+    const live = await find(item.id);
+    if (live.consent !== item.consent || (item.automatic && !live.auto)) throw problem('AUTO_PAUSED');
+  });
 }
 async function finish(item, cookie, version, confirmationToken) {
   // Re-check local consent after every await: removing/pausing must stop queued automatic uploads.

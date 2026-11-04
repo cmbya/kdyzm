@@ -1,4 +1,4 @@
-import { PLATFORMS, baseOrigin, cookieHeader, digest, apiRequest, problem, errorText } from './core.mjs';
+import { PLATFORMS, baseOrigin, readCookieHeader, digest, apiRequest, problem, errorText } from './core.mjs';
 
 const KEY = 'familyConnections', PENDING = 'familyRequest', API = '/v1/cookie-sync/families/';
 const safeId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -120,9 +120,8 @@ export function createFamilySync(initialized) {
     const { owner, record } = await allowed(ref, consent, automatic);
     await permissions(owner, record.account.platform);
     await allowed(ref, consent, automatic);
-    const profile = PLATFORMS[record.account.platform];
-    const cookies = (await Promise.all(profile.urls.map(url => chrome.cookies.getAll({ url, storeId: '0' })))).flat();
-    try { return cookieHeader(record.account.platform, cookies); } catch (error) { error.platform = record.account.platform; throw error; }
+    try { return await readCookieHeader(record.account.platform, chrome.cookies, '0', () => allowed(ref, consent, automatic)); }
+    catch (error) { error.platform = record.account.platform; throw error; }
   }
   async function preview(ref) {
     const { record } = await target(ref), consent = record.consent;
@@ -182,8 +181,9 @@ export function createFamilySync(initialized) {
         await permissions({ baseUrl });
         for (const platform of platforms) {
           await permissions({ baseUrl }, platform);
-          const cookies = (await Promise.all(PLATFORMS[platform].urls.map(url => chrome.cookies.getAll({ url, storeId: '0' })))).flat();
-          try { cookieHeader(platform, cookies); } catch (error) { error.platform = platform; throw error; }
+          try { await readCookieHeader(platform, chrome.cookies, '0', async () => {
+            if ((await pendingRequest())?.nonce !== nonce) throw problem('REQUEST_CANCELED');
+          }); } catch (error) { error.platform = platform; throw error; }
         }
         if ((await pendingRequest())?.nonce !== nonce) throw problem('REQUEST_CANCELED');
         const data = await apiRequest(baseUrl, API + 'requests', { body: { name: message.name, platforms } });

@@ -145,7 +145,7 @@ export class Store {
       const cookie = text(body.cookie, 'Cookie', 16384);
       if (/\r|\n/.test(cookie)) fail(400, 'INVALID_COOKIE', 'Cookie 不得包含换行');
       if (!fixture && platform === 'pdd' && (!/(?:^|;\s*)PDDAccessToken=/.test(cookie) || !/(?:^|;\s*)(?:pdd_user_id|pdduid)=/.test(cookie))) fail(400, 'INVALID_COOKIE', '缺少拼多多登录字段');
-      if (!fixture && platform === 'jd' && !/(?:^|;\s*)thor=[^;\s]+/.test(cookie)) fail(400, 'INVALID_COOKIE', '缺少京东网页版登录字段 thor，请从订单页复制完整 Cookie');
+      if (!fixture && platform === 'jd' && !/(?:^|;\s*)(?:thor|light_key)=[^;\s]+/.test(cookie)) fail(400, 'INVALID_COOKIE', '缺少京东网页版登录字段，请从订单页复制完整 Cookie');
       credential = encryptCookie(cookie, this.key, id);
     }
     const data = { id, platform, label, familyId, familyName: this.family(familyId)?.name || '',

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "取件助手 · 登录同步",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "将本人淘宝、拼多多、京东网页登录信息同步到已配对的取件助手账号。",
   "minimum_chrome_version": "120",
   "permissions": ["cookies", "storage", "alarms"],

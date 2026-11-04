@@ -39,8 +39,8 @@ export function cookieIdentity(platform, cookie, requireLogin = true) {
   });
   if (!values.length) fail(400, 'COOKIE_IDENTITY_REQUIRED', '未读取到平台账号标识，请先登录');
   if (new Set(values).size !== 1) fail(400, 'COOKIE_IDENTITY_AMBIGUOUS', '浏览器包含冲突的平台账号标识，请退出其他账号后重新登录');
-  const loginField = { taobao: 'cookie2', pdd: 'PDDAccessToken', jd: 'thor' }[platform];
-  if (requireLogin && (!fields.get(loginField) || /\s/.test(fields.get(loginField)))) fail(400, 'COOKIE_LOGIN_REQUIRED', '缺少平台登录字段，请重新登录');
+  const loginFields = { taobao: ['cookie2'], pdd: ['PDDAccessToken'], jd: ['thor', 'light_key'] }[platform];
+  if (requireLogin && !loginFields.some(name => fields.get(name) && !/\s/.test(fields.get(name)))) fail(400, 'COOKIE_LOGIN_REQUIRED', '缺少平台登录字段，请重新登录');
   return values[0];
 }
 

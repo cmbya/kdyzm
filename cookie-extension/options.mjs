@@ -6,6 +6,10 @@ const date = n => n ? new Date(n).toLocaleString('zh-CN') : '尚未同步';
 const platformName = platform => PLATFORMS[platform]?.name || platform;
 const target = a => `${a.familyName || '待归属'} · ${platformName(a.platform)} · ${a.label || '平台账号'}`;
 const message = error => error.code ? errorText(error) : error.message;
+const platformFailure = (platform, error) => {
+  const label = platformName(platform) + '：', detail = message(error);
+  return detail.startsWith(label) ? detail : label + detail;
+};
 const statuses = { configured: '等待采集验证', syncing: '正在采集验证', ok: '最近采集成功', expired: '平台登录已失效，请重新登录', error: '采集未完成，请查看后台详情' };
 function notice(value, failed = false) { $('notice').textContent = value; $('notice').className = failed ? 'error' : ''; }
 async function call(action, args = {}) {
@@ -143,7 +147,7 @@ function renderFamily(group) {
     for (const item of group.accounts.filter(account => account.selected)) {
       const args = { id: group.id, accountId: item.account.id };
       try { entries.push({ ...args, family: true, confirmation: await call('family:previewSync', args) }); }
-      catch (error) { failures.push(`${platformName(item.account.platform)}：${message(error)}`); }
+      catch (error) { failures.push(platformFailure(item.account.platform, error)); }
     }
     if (!entries.length) { await render(); notice(failures.length ? failures.join('\n') : '请先勾选要同步的平台。', !!failures.length); return; }
     showConfirmation(entries, { familyName: group.family.name, failures });

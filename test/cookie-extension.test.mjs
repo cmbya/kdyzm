@@ -28,6 +28,16 @@ test('three platforms require login and stable identity; ambiguity and header in
   assert.throws(() => cookieHeader('jd', [cookie('thor', 'synthetic', '.jd.com')]));
   assert.throws(() => cookieHeader('taobao', [cookie('unb', '123'), cookie('cookie2', 'bad\r\nCookie: injected')]));
 });
+
+test('JD desktop light_key sessions keep the same account identity and conflict checks', () => {
+  const pin = cookie('pin', 'synthetic-jd', '.jd.com');
+  const key = cookie('light_key', 'synthetic-light', '.jd.com', { httpOnly: true });
+  assert.match(cookieHeader('jd', [pin, key]), /light_key=synthetic-light/);
+  for (const rejected of [[pin], [key], [pin, cookie('flash', 'synthetic', '.jd.com')],
+    [pin, key, cookie('light_key', 'other', '.jd.com')], [pin, key, cookie('pt_pin', 'other', '.jd.com')]]) {
+    assert.throws(() => cookieHeader('jd', rejected));
+  }
+});
 test('requests reject redirects, omit browser credentials, cap responses and never display server-reflected secrets', async () => {
   let request;
   const result = await apiRequest('https://service.example', '/v1/cookie-sync/current', { token: 'fixture', fetchImpl: async (url, options) => {

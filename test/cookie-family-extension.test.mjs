@@ -78,6 +78,22 @@ test('one family code selects only PDD, stops reading when deselected and expose
   assert.ok(!visible.includes('cfg_')); assert.ok(!visible.includes('lastDigest'));
 });
 
+test('PDD preview recovers a missing URL-query identity from matching platform-domain cookies', async t => {
+  const s = await setup(t), account = s.account('pdd'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  const queries = [];
+  chrome.cookies.getAll = async query => {
+    queries.push(query);
+    return Object.entries(fields.pdd).filter(([name]) => query.domain || name === 'PDDAccessToken')
+      .map(([name, value]) => ({ name, value, domain: 'mobile.yangkeduo.com', hostOnly: true, path: '/', storeId: '0' }));
+  };
+  const confirmation = await s.call('previewSync', ref);
+  assert.ok(confirmation.token);
+  assert.ok(queries.some(query => query.domain === 'yangkeduo.com'));
+  await s.call('confirmSync', { ...ref, confirmation });
+  assert.match(s.service.store.cookie(account.id), /pdd_user_id=20002000/);
+});
+
 test('deselecting during cookie read prevents the queued preview upload', async t => {
   const s = await setup(t), account = s.account('pdd'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
   await s.call('select', { ...ref, enabled: true });
@@ -87,6 +103,30 @@ test('deselecting during cookie read prevents the queued preview upload', async 
   for (let n = 0; n < 100 && !s.reads.length; n++) await tick();
   assert.ok(s.reads.length); await s.call('select', { ...ref, enabled: false }); release(); await rejected;
   assert.equal(s.requests.filter(request => request.path.endsWith('/preview') && request.path.includes('/accounts/')).length, 0);
+});
+
+for (const action of ['deselect', 'cancel-request']) test(`${action} while URL read is pending prevents a new domain read`, async t => {
+  const s = await setup(t), queries = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  t.after(() => release());
+  chrome.cookies.getAll = async query => {
+    queries.push(query);
+    if (query.url) await gate;
+    return [{ name: 'PDDAccessToken', value: 'synthetic', domain: 'mobile.yangkeduo.com', path: '/', storeId: '0' }];
+  };
+  let pending, ref;
+  if (action === 'deselect') {
+    const account = s.account('pdd'), group = await s.bind(); ref = { id: group.id, accountId: account.id };
+    await s.call('select', { ...ref, enabled: true }); pending = s.call('previewSync', ref);
+  } else pending = s.call('startRequest', { baseUrl: s.base, name: '取消补查', platforms: ['pdd'] });
+  const rejected = assert.rejects(pending, { code: action === 'deselect' ? 'PLATFORM_NOT_SELECTED' : 'REQUEST_CANCELED' });
+  for (let n = 0; n < 100 && !queries.length; n++) await tick();
+  assert.ok(queries.length);
+  if (action === 'deselect') await s.call('select', { ...ref, enabled: false });
+  else await s.call('cancelRequest');
+  release(); await rejected;
+  assert.ok(queries.every(query => query.url));
 });
 
 test('reverse authorization for an empty role creates selected PDD only after first confirmation', async t => {

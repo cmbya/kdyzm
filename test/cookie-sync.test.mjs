@@ -16,6 +16,7 @@ const COOKIES = {
   pdd: 'pdd_user_id=200123456; pdduid=200123456; PDDAccessToken=SYNTHETIC-PDD-LOGIN',
   jd: 'pin=SYNTHETIC%5FJD%5F123456; pt_pin=SYNTHETIC_JD_123456; thor=SYNTHETIC-JD-LOGIN',
 };
+const JD_LIGHT_COOKIE = 'pin=SYNTHETIC%5FJD%5F123456; pt_pin=SYNTHETIC_JD_123456; light_key=SYNTHETIC-JD-LIGHT';
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 async function setup(t, options = {}) {
@@ -64,9 +65,19 @@ test('three platform identities are parsed from headers, reject ambiguity, and r
     ['taobao', 'unb=100; unb=100; cookie2=login'], ['taobao', 'Cookie: unb=100; cookie2=login'],
     ['pdd', 'pdd_user_id=1; pdduid=2; PDDAccessToken=login'], ['pdd', 'pdd_user_id=1; PDDAccessToken='],
     ['jd', 'pin=a; pt_pin=b; thor=login'], ['jd', 'pin=%FF; thor=login'], ['jd', 'pin=a; pt_key=mobile-only'],
+    ['jd', 'pin=a'], ['jd', 'pin=a; flash=desktop-session'],
     ['jd', 'pin=a%0D%0A; thor=login'], ['taobao', 'unb=100; cookie2=login\r\nX-Forged: yes'],
   ];
   for (const [platform, cookie] of invalid) assert.throws(() => cookieIdentity(platform, cookie), `${platform}: ${cookie}`);
+});
+
+test('JD desktop order-page cookies with light_key can preview and save without thor', async t => {
+  const s = await setup(t), account = s.account('jd', { cookie: JD_LIGHT_COOKIE }), grant = await s.bind(account.id);
+  const preview = await s.preview(grant.token, JD_LIGHT_COOKIE);
+  assert.equal(preview.status, 200, preview.raw);
+  const saved = await s.write(grant.token, JD_LIGHT_COOKIE, preview.data.account.credentialVersion, preview.data.confirmationToken);
+  assert.equal(saved.status, 200, saved.raw);
+  assert.equal(saved.data.connection.identityBound, true);
 });
 
 for (const platform of Object.keys(COOKIES)) test(`${platform}: explicit first confirmation, same identity refresh, no-op and encrypted storage`, async t => {

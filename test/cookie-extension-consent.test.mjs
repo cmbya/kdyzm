@@ -42,6 +42,24 @@ test('a pending enable cannot undo a later pause or removal, even when server re
       assert.equal(storage.connections[0]?.auto ?? false, false);
       if (action === 'remove') assert.equal(storage.connections.length, 0);
     }
+    storage = initial();
+    let releaseCookie, cookieReads = 0, domainReads = 0;
+    const cookieGate = new Promise(resolve => { releaseCookie = resolve; });
+    chrome.cookies.getAll = async query => {
+      cookieReads++; if (query.domain) domainReads++;
+      await cookieGate;
+      return [{ name: 'cookie2', value: 'synthetic', domain: '.taobao.com', path: '/', storeId: '0' }];
+    };
+    const preview = dispatch({ action: 'previewSync', id: 'c' });
+    (await request('GET')).resolve();
+    for (let n = 0; n < 100 && !cookieReads; n++) await new Promise(resolve => setImmediate(resolve));
+    assert.ok(cookieReads);
+    const removing = dispatch({ action: 'remove', id: 'c' });
+    const delayedDelete = await request('DELETE');
+    releaseCookie();
+    assert.equal((await preview).ok, false);
+    assert.equal(domainReads, 0, 'revoking consent blocks a new domain read even before DELETE completes');
+    delayedDelete.resolve(503); await removing;
     let called = false;
     assert.equal(listener({ action: 'list' }, { id: 'test', url: 'https://untrusted.example/' }, () => { called = true; }), false);
     assert.equal(called, false);
