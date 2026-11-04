@@ -122,3 +122,35 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 两者均返回 `Content-Length` 和以文件 SHA-256 为值的 `ETag`。HEAD 只返回头部，APK 下载流不会为 HEAD 打开。服务启动时校验服务根目录 `app-updates/`（镜像中为 `/app/app-updates`）的清单、APK 大小/流式 SHA-256 与 `SHA256SUMS`，请求时确认已校验文件未变化；缺失或损坏返回 404 / 503，App 可回退 GitHub。更新包校验失败不影响 `/health`、初始化或业务同步。
 
 清单保持现有发布格式与 GitHub 官方固定 `apkUrl`，不会按请求 Host 改写，不返回重定向。客户端可用已绑定后台 origin 加上述固定 APK 路径下载，并继续核对清单大小、摘要和安装签名。此接口无需管理或设备凭证，只公开精确清单和当前版本 APK；其他文件、目录、旧版本及路径穿越均不开放，`SHA256SUMS` 也不对外提供。账号、设备、凭证与业务数据继续使用原有接口鉴权。
+
+## 浏览器 Cookie 同步（兼容 v1）
+
+此授权独立于管理员会话和手机设备 token，只允许向一个既有的淘宝、拼多多或京东账号提交登录 Cookie。它没有订单读取、设备管理、角色整组或管理员权限；不能创建账号或更改平台、角色、名称、采集开关。服务须先初始化。
+
+| 方法与路径 | 权限与请求/响应 |
+| --- | --- |
+| POST /v1/admin/cookie-sync/pairing | 管理员；`{accountId}` → `{code,expiresAt,baseUrl}` |
+| GET /v1/admin/cookie-sync/connections?accountId=:id | 管理员；`{connections}` |
+| DELETE /v1/admin/cookie-sync/connections/:id | 管理员；`{revoked:true}` |
+| POST /v1/cookie-sync/pairing/preview | 公开限频；`{code}` → `{account,expiresAt,serviceId}`，不消耗配对码 |
+| POST /v1/cookie-sync/connections | 公开限频；`{code,name}` → `{token,connection,account,serviceId}` |
+| GET /v1/cookie-sync/current | 插件 Bearer token；`{connection,account,serviceId}` |
+| POST /v1/cookie-sync/current/preview | 插件；`{cookie}` → `{confirmationToken,identityHint,account,expiresAt}` |
+| POST /v1/cookie-sync/current/cookie | 插件；`{cookie,expectedCredentialVersion,confirmationToken?}` → `{changed,connection,account,serviceId,job?}` |
+| DELETE /v1/cookie-sync/current | 插件；`{revoked:true}` |
+
+`account` 仅含 `{id,platform,label,familyId,familyName,credentialVersion,status}`；`connection` 仅含 `{id,name,platform,accountId,createdAt,expiresAt,revokedAt,lastSyncAt,identityBound,identityHint}`。未撤权的 `revokedAt` 为 null、尚未同步的 `lastSyncAt` 为 0。所有响应 `Cache-Control:no-store`，不返回 Cookie、内部身份摘要或已签发的 token；只有兑换成功响应返回一次新 token。名称和角色显示文本不能作为平台账号身份依据。
+
+配对码为 `CS-` 加 43 个 base64url 字符（256 位随机量），有效十分钟，服务端只保存 SHA-256；同账号重新生成码使旧码失效。配对码绑定创建时账号、角色和凭据版本，兑换时重新校验并在事务内单次消耗。预检和兑换共享真实连接 IP 十分钟十次、全局一百次的限频，不信任 `X-Forwarded-For`。管理员每账号十分钟最多生成十次。未过期配对码最多一千条，过期即清理。
+
+插件 token 为 `csg_` 加 43 个 base64url 字符，仅保存 SHA-256，有效九十天。同一账号兑换新授权会立即撤销旧授权；不同账号互不影响。账号角色转移在数据库写入时撤销该账号所有插件授权和待用配对码，转回原角色也不恢复。角色重命名不改变授权。历史撤权/过期连接最多保留一千条，并清理到期三十天以上的记录；总连接数最多五千，达到上限时拒绝新增而不丢弃有效授权。重启保留授权、身份绑定与撤权状态。
+
+仅 `/v1/cookie-sync/` 命名空间接受 `chrome-extension://` 加 32 个 `a`–`p` 字符的来源和预检；其他接口不向扩展来源开放。来源允许不代替 token 鉴权。账号、Cookie 和确认字段均使用白名单，读取完整请求体后再次检查授权，确保在途上传不能越过撤权或转组。
+
+身份只从严格解析的 Cookie header 取得：淘宝 `unb`，拼多多 `pdd_user_id/pdduid`，京东 `pin/pt_pin`（按百分号解码）。同平台多个身份字段必须一致，重复 Cookie 名、缺失/空白身份、冲突、无效编码或控制字符均拒绝；登录字段还须分别包含非空 `cookie2`、`PDDAccessToken`、`thor`。不把移动端 `pt_key` 代替京东网页版登录态。上传最多 16384 字符，整个 JSON 请求仍受 64 KiB 限制。身份绑定保存带服务密钥的 HMAC-SHA-256，仅展示脱敏尾号。
+
+每个新授权首次上传必须先预览并由用户确认角色和平台账号。确认 token 有效五分钟，只存摘要，绑定授权、完整 Cookie 摘要及账号凭据版本；重新预览替代旧确认，成功上传后清除。已存在后台 Cookie 可解析身份时必须一致；旧凭据缺少身份允许首次明确确认，冲突或格式错误则请管理员先核对。绑定后只接受同一身份的自动续更；管理员换成另一平台身份时旧连接拒绝继续，需重新配对。
+
+`expectedCredentialVersion` 为必填正安全整数，过期版本返回 `409 COOKIE_CREDENTIAL_CONFLICT`，保留原凭据。首次无有效确认返回 `409 COOKIE_CONFIRMATION_REQUIRED`；身份不一致为 `409 COOKIE_IDENTITY_MISMATCH`，已有后台身份异常为 `409 COOKIE_BACKEND_IDENTITY_INVALID`；身份缺失、冲突和缺少登录字段分别为 `400 COOKIE_IDENTITY_REQUIRED/COOKIE_IDENTITY_AMBIGUOUS/COOKIE_LOGIN_REQUIRED`；授权过期或撤销为 `401 COOKIE_SYNC_UNAUTHORIZED`；码失效为 `400 COOKIE_PAIRING_INVALID`。
+
+完全相同的 Cookie 返回 `changed:false`，不增加凭据版本、不采集，可更新 `lastSyncAt`。变化则使用原 AES-GCM 加密存储，增加凭据版本使旧采集结果失效，保留原 `lastAttemptAt/nextSyncAt` 冷却与定时设置，并请求一次采集。已有运行采集时在其完成后再次核对授权与凭据版本再请求；期间更新、撤权、转组或关闭服务则取消该次后续请求。原已排队任务可复用并在启动时读新凭据。停用账号不会被启用，五分钟采集冷却仍生效。每授权一分钟最多六次变化写入、一百二十次接口请求，预览最多二十次；限频失败保留原 Cookie。

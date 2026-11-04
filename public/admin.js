@@ -17,6 +17,9 @@ let countdownTimer = null;
 let scopeKey = '';
 let pollingError = '';
 let logisticsAdmin;
+let cookieSyncGeneration = 0;
+let cookieSyncAccountId = '';
+let cookieSyncPairing = null;
 const serverClock = createServerClock();
 const syncSubmitting = new Map();
 const syncRows = new Map();
@@ -74,6 +77,62 @@ function clearPairResult() {
   $('pair-result').hidden = true; $('pair-code').textContent = ''; $('pair-url').textContent = '';
   $('pair-expires').textContent = ''; $('pair-qr').removeAttribute('src');
 }
+function clearCookieSync() {
+  cookieSyncGeneration += 1; cookieSyncAccountId = ''; cookieSyncPairing = null;
+  $('cookie-sync-panel').hidden = true; $('cookie-sync-pairing').hidden = true; $('cookie-sync-copy').hidden = true;
+  $('cookie-sync-code').textContent = ''; $('cookie-sync-base-url').textContent = ''; $('cookie-sync-expires').textContent = '';
+  $('cookie-sync-target').textContent = ''; $('cookie-sync-connections').replaceChildren();
+}
+function cookieSyncIsCurrent(generation, accountId) {
+  return token && generation === cookieSyncGeneration && accountId === cookieSyncAccountId && $('account-id').value === accountId && $('account-dialog').open;
+}
+function renderCookieConnections(connections = []) {
+  const container = $('cookie-sync-connections'); container.replaceChildren();
+  if (!connections.length) { container.append(node('p', '暂无浏览器授权。', 'empty')); return; }
+  for (const connection of connections) {
+    const generation = cookieSyncGeneration; const accountId = cookieSyncAccountId;
+    const item = node('div', '', 'item');
+    item.append(node('strong', connection.name || connection.identityHint || '浏览器授权'));
+    item.append(node('p', `${platformOf(connection.platform).label} · 最近同步 ${date(connection.lastSyncAt)} · 到期 ${date(connection.expiresAt)}`, 'hint'));
+    if (connection.identityHint) item.append(node('p', `身份：${connection.identityHint}`, 'hint'));
+    const revoke = action('撤销', async () => {
+      if (!confirm(`撤销“${connection.name || '此浏览器'}”的 Cookie 同步授权？`)) return;
+      await api(`/v1/admin/cookie-sync/connections/${encodeURIComponent(connection.id)}`, { method: 'DELETE' });
+      if (!cookieSyncIsCurrent(generation, accountId)) return;
+      await loadCookieConnections(accountId, generation); notice('浏览器 Cookie 同步授权已撤销。');
+    }, 'danger');
+    if (connection.revokedAt || connection.expiresAt <= Date.now()) item.append(node('p', connection.revokedAt ? '已撤销' : '已到期', 'hint'));
+    else { item.append(node('div', '', 'actions')); item.lastChild.append(revoke); }
+    container.append(item);
+  }
+}
+async function loadCookieConnections(accountId, generation = cookieSyncGeneration) {
+  const result = await api(`/v1/admin/cookie-sync/connections?accountId=${encodeURIComponent(accountId)}`);
+  if (cookieSyncIsCurrent(generation, accountId)) renderCookieConnections(result.connections || []);
+}
+function openCookieSync(account) {
+  cookieSyncGeneration += 1; cookieSyncAccountId = account.id; cookieSyncPairing = null;
+  const generation = cookieSyncGeneration;
+  $('cookie-sync-panel').hidden = false; $('cookie-sync-pairing').hidden = true; $('cookie-sync-copy').hidden = true;
+  $('cookie-sync-code').textContent = ''; $('cookie-sync-base-url').textContent = '';
+  $('cookie-sync-target').textContent = `目标：${familyName(account.familyId || '')} · ${platformOf(account.platform).label} · ${account.label}`;
+  $('cookie-sync-connections').replaceChildren(node('p', '正在读取当前授权…', 'hint'));
+  loadCookieConnections(account.id, generation).catch(error => {
+    if (cookieSyncIsCurrent(generation, account.id)) { $('cookie-sync-connections').replaceChildren(node('p', error.message, 'account-error')); }
+  });
+}
+async function generateCookiePairing() {
+  const accountId = cookieSyncAccountId; const generation = cookieSyncGeneration;
+  if (!accountId) return;
+  $('cookie-sync-pairing').hidden = true; $('cookie-sync-copy').hidden = true; cookieSyncPairing = null;
+  const result = await api('/v1/admin/cookie-sync/pairing', { method: 'POST', body: JSON.stringify({ accountId }) });
+  if (!cookieSyncIsCurrent(generation, accountId)) return;
+  cookieSyncPairing = { schemaVersion: 1, kind: 'cookie-sync', baseUrl: result.baseUrl, code: result.code };
+  $('cookie-sync-base-url').textContent = result.baseUrl || '';
+  $('cookie-sync-code').textContent = result.code || '';
+  $('cookie-sync-expires').textContent = `有效至 ${date(result.expiresAt)}；使用一次后失效。`;
+  $('cookie-sync-pairing').hidden = false; $('cookie-sync-copy').hidden = false;
+}
 function showLogin() {
   $('auth-shell').hidden = false;
   $('loading-panel').hidden = true; $('setup-panel').hidden = true; $('login-panel').hidden = false;
@@ -83,6 +142,7 @@ function showLogin() {
     : '输入初始化时设置的密码。登录凭证只在当前页面内存中保留，刷新页面后需重新登录。';
 }
 function clearSession() {
+  clearCookieSync();
   logisticsAdmin?.reset();
   stopPolling(); syncSubmitting.clear(); syncRows.clear(); scopeKey = ''; pollingError = '';
   token = ''; accounts = []; families = []; devices = []; selectedFamily = ''; baseUrl = ''; settingsDirty = false;
@@ -287,9 +347,9 @@ function edit(account) {
   $('platform').disabled = true; $('cookie').value = ''; $('interval').value = account.intervalMinutes; $('enabled').checked = account.enabled;
   $('account-heading').textContent = '账号详情与设置';
   $('account-collect').hidden = false; $('account-collect').onclick = () => run(() => requestSync(account.id), $('account-collect'));
-  $('account-dialog').showModal();
+  $('account-dialog').showModal(); openCookieSync(account);
 }
-function resetForm() { $('account-form').reset(); $('account-id').value = ''; $('platform').disabled = false; $('account-heading').textContent = '添加平台账号'; }
+function resetForm() { clearCookieSync(); $('account-form').reset(); $('account-id').value = ''; $('platform').disabled = false; $('account-heading').textContent = '添加平台账号'; }
 const familyName = id => families.find(f => f.id === id)?.name || '待归属';
 const needsAttention = account => ['expired', 'error'].includes(account.status) || !!account.error;
 function renderFamilies() {
@@ -361,7 +421,7 @@ function showPage(page) {
 for (const id of ['accounts', 'devices', 'settings']) $(`nav-${id}`).addEventListener('click', () => showPage(id));
 for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog']) {
   document.querySelector(`[data-close="${id}"]`)?.addEventListener('click', () => $(id).close());
-  $(id).addEventListener('close', () => { if (id === 'account-dialog') $('cookie').value = ''; });
+  $(id).addEventListener('close', () => { if (id === 'account-dialog') { $('cookie').value = ''; clearCookieSync(); } });
 }
 $('new-account').addEventListener('click', () => {
   resetForm(); fillAccountFamilies(selectedFamily); $('account-collect').hidden = true; $('account-dialog').showModal();
@@ -439,6 +499,11 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && token) run(() => refresh(false));
 });
 $('cancel-edit').addEventListener('click', () => { resetForm(); $('account-dialog').close(); });
+$('cookie-sync-generate').addEventListener('click', event => run(generateCookiePairing, event.currentTarget));
+$('cookie-sync-copy').addEventListener('click', event => run(async () => {
+  if (!cookieSyncPairing) return;
+  await navigator.clipboard.writeText(JSON.stringify(cookieSyncPairing)); notice('插件配对信息已复制。');
+}, event.currentTarget));
 submit('account-form', async () => {
   const id = $('account-id').value;
   const body = { platform: $('platform').value, familyId: $('account-family').value, label: $('label').value, intervalMinutes: Number($('interval').value), enabled: $('enabled').checked };

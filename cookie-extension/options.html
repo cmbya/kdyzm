@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>取件助手 · 登录同步</title><link rel="stylesheet" href="options.css"></head>
+<body><main>
+  <header><div><h1>登录同步</h1><p class="hint">取件助手 · 淘宝 / 拼多多 / 京东</p></div><button id="refresh" class="secondary" type="button">刷新状态</button></header>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <section aria-labelledby="connected-title"><h2 id="connected-title">已配对账号</h2><p id="empty" class="hint">正在读取本机配对…</p><div id="connections"></div></section>
+  <section aria-labelledby="pair-title"><h2 id="pair-title">添加配对</h2><p class="hint">在后台“账号授权 → 账号详情 → 浏览器 Cookie 同步”生成配对信息。</p>
+    <form id="pair-form">
+      <label for="pair-info">配对信息或一次性配对码</label><textarea id="pair-info" rows="3" required autocomplete="off" spellcheck="false" maxlength="2048" placeholder="粘贴后台复制的配对信息"></textarea>
+      <label for="base-url">后台地址（只粘贴配对码时填写）</label><input id="base-url" type="url" autocomplete="off" placeholder="https://你的后台地址">
+      <button type="submit">读取配对目标</button>
+    </form>
+    <div id="pair-confirm" hidden><p id="pair-target"></p><p id="pair-origin" class="hint"></p><label for="browser-name">此浏览器名称</label><input id="browser-name" value="我的 Chrome" maxlength="80" autocomplete="off"><div class="actions"><button id="pair-accept" type="button">确认配对并授权平台</button><button id="pair-cancel" type="button" class="secondary">取消</button></div></div>
+  </section>
+  <p class="hint footer">只同步已授权账号的网页登录信息，不保存平台密码。浏览器运行且登录有效时可自动同步；验证码、扫码或登录失效时仍需本人重新登录。</p>
+</main>
+<dialog id="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">核对首次同步</h2><p id="confirm-target"></p><p id="confirm-identity" class="hint"></p><p class="hint">请确认浏览器登录的是这位家人的账号。同步会替换该账号的后台登录信息。</p><div class="actions"><button id="sync-accept" type="button">确认同步</button><button id="sync-cancel" class="secondary" type="button">取消</button></div></dialog>
+<script type="module" src="options.mjs"></script></body></html>

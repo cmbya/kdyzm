@@ -105,7 +105,21 @@
           <div class="row"><label>采集间隔<select id="interval"><option value="60">60 分钟</option><option value="30">30 分钟</option></select></label><label class="checkbox"><input id="enabled" type="checkbox" checked>启用自动同步</label></div>
           <p class="hint">更新已有账号时，留空保留原 Cookie。保存不会立刻访问平台，可点击账号的“立即采集”。</p>
           <div class="actions"><button>保存账号</button><button id="account-collect" type="button" class="secondary" hidden>立即采集</button><button id="cancel-edit" type="button" class="secondary">取消编辑</button></div>
-        </form></div></dialog>
+        </form>
+        <section id="cookie-sync-panel" hidden aria-labelledby="cookie-sync-title">
+          <h3 id="cookie-sync-title">浏览器 Cookie 同步</h3>
+          <p id="cookie-sync-hint" class="hint">保存账号后可生成一次性配对信息。后台不会显示原始 Cookie 或令牌。</p>
+          <div id="cookie-sync-target" class="hint"></div>
+          <div class="actions"><button id="cookie-sync-generate" type="button">生成一次性配对</button><button id="cookie-sync-copy" type="button" class="secondary" hidden>复制插件配对信息</button></div>
+          <div id="cookie-sync-pairing" hidden>
+            <p>后台地址：<span id="cookie-sync-base-url"></span></p>
+            <p>一次性配对码：<strong id="cookie-sync-code"></strong></p>
+            <p id="cookie-sync-expires" class="hint"></p>
+          </div>
+          <div class="cookie-sync-connections"><h4>当前授权</h4><div id="cookie-sync-connections"></div></div>
+        </section>
+        </div>
+        </div></dialog>
 <dialog id="pair-dialog" class=""><div class="dialog-head"><h2 id="pair-dialog-title">选择家人，整组授权</h2><button type="button" class="close secondary" data-close="pair-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><p class="hint">选中家人，包含其当前及以后新增的平台账号。待归属账号须先分配家人。</p><p id="pair-hint" class="hint" role="status"></p><form id="pair-form"><fieldset id="scope"><legend>授权家人组</legend></fieldset><button id="generate-pair">生成绑定码</button></form><div id="pair-result" hidden><img id="pair-qr" width="256" height="256" alt="设备绑定二维码"><div><p>服务地址：<span id="pair-url"></span></p><p>一次性绑定码：<strong id="pair-code"></strong></p><p id="pair-expires" class="hint"></p></div></div></div></dialog>
 <dialog id="family-dialog" class=""><div class="dialog-head"><h2 id="family-dialog-title">新增家人</h2><button type="button" class="close secondary" data-close="family-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><form id="family-form"><input type="hidden" id="family-edit-id"><label>家人名称<input id="family-name" required maxlength="80" placeholder="例如：爸爸"></label><div class="actions"><button>保存家人</button></div></form></div></dialog>
 <dialog id="device-dialog" class=""><div class="dialog-head"><h2 id="device-dialog-title">管理家人授权</h2><button type="button" class="close secondary" data-close="device-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><form id="device-form"><input type="hidden" id="device-id"><fieldset id="device-scope"><legend>授权家人</legend></fieldset><p id="device-legacy" class="hint"></p><label class="checkbox"><input type="checkbox" id="clear-legacy">清除原有单账号授权</label><p class="hint">家人组内新增账号自动包含。清空全部家人可撤销整组权限。</p><button>保存授权</button></form></div></dialog>

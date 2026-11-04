@@ -128,7 +128,7 @@ export class Store {
     const allowed = ids && new Set(ids);
     return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !allowed || allowed.has(a.id)).map(a => this.accountFamily(a));
   }
-  saveAccount(body, id = randomUUID(), fixture = false) {
+  saveAccount(body, id = randomUUID(), fixture = false, { preserveSyncSchedule = false } = {}) {
     onlyKeys(body, ['platform', 'label', 'cookie', 'enabled', 'intervalMinutes', 'familyId']);
     const old = this.account(id);
     const familyId = body.familyId === undefined ? old?.familyId || '' : text(body.familyId, '家人ID', 128, false);
@@ -150,7 +150,8 @@ export class Store {
     const data = { id, platform, label, familyId, familyName: this.family(familyId)?.name || '',
       familyAssigned: !!(familyId || old?.familyAssigned || old?.familyId), enabled: body.enabled ?? old?.enabled ?? true, intervalMinutes,
       status: body.cookie !== undefined || !old ? 'configured' : old.status, lastSuccessAt: old?.lastSuccessAt || 0,
-      lastAttemptAt: body.cookie !== undefined ? 0 : old?.lastAttemptAt || 0, nextSyncAt: body.cookie !== undefined || !old ? this.now() + intervalMinutes * 60000 : old.nextSyncAt,
+      lastAttemptAt: body.cookie !== undefined && !preserveSyncSchedule ? 0 : old?.lastAttemptAt || 0,
+      nextSyncAt: !old || (body.cookie !== undefined && !preserveSyncSchedule) ? this.now() + intervalMinutes * 60000 : old.nextSyncAt,
       error: body.cookie !== undefined ? '' : old?.error || '', revision: this.revision(), fixture,
       // Ownership changes also invalidate results collected under the previous scope.
       credentialVersion: (old?.credentialVersion || 0) + (body.cookie !== undefined || !old || familyId !== old.familyId ? 1 : 0),

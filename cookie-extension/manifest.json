@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "取件助手 · 登录同步",
+  "version": "1.0.0",
+  "description": "将本人淘宝、拼多多、京东网页登录信息同步到已配对的取件助手账号。",
+  "minimum_chrome_version": "120",
+  "permissions": ["cookies", "storage", "alarms"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.mjs", "type": "module" },
+  "action": { "default_title": "取件助手登录同步" },
+  "options_page": "options.html",
+  "incognito": "not_allowed",
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'" }
+}

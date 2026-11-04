@@ -11,6 +11,7 @@ import { StationStore, enqueuePlatformCandidates, enqueueStationProposal } from 
 import { StationAiJobs } from './station-ai.mjs';
 import { serverVersion } from './version.mjs';
 import { createAppUpdateHandler } from './app-updates.mjs';
+import { createCookieSyncHandler } from './cookie-sync.mjs';
 import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './security.mjs';
 
 const PUBLIC = new URL('../public/', import.meta.url);
@@ -64,6 +65,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
     return current;
   };
   const requestSync = id => jobs.request(id).done;
+  const cookieSync = createCookieSyncHandler({ store, jobs, configuration, now, rate, fixture, bodyOf, send, admin });
   const timer = scheduler ? setInterval(() => {
     for (const account of store.accounts()) if (account.enabled && account.nextSyncAt <= now()) void requestSync(account.id);
     stationAi.runDue();
@@ -75,12 +77,16 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
+      const url = new URL(req.url, configuration.baseUrl || 'http://localhost');
+      const path = url.pathname;
       const origin = req.headers.origin;
       let localFixtureOrigin = false;
       if (fixture && origin) {
         try { const source = new URL(origin); localFixtureOrigin = source.origin === origin && source.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(source.hostname); } catch { /* Invalid Origin is rejected below. */ }
       }
-      const corsAllowed = origins.has(origin) || localFixtureOrigin;
+      const chromeOrigin = typeof origin === 'string' && /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
+      const extensionOrigin = chromeOrigin && path.startsWith('/v1/cookie-sync/');
+      const corsAllowed = origins.has(origin) || localFixtureOrigin || extensionOrigin;
       let sameHost = false;
       if (origin && req.headers.host) {
         try {
@@ -89,6 +95,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         } catch { /* Invalid Origin or Host is rejected below. */ }
       }
       if (origin && origin !== configuration.baseUrl && !sameHost && !corsAllowed) fail(403, 'ORIGIN_FORBIDDEN', '来源不允许');
+      if (chromeOrigin && !extensionOrigin) fail(403, 'ORIGIN_FORBIDDEN', '插件只能访问 Cookie 同步接口');
       if (origin && corsAllowed) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary', 'Origin');
@@ -98,8 +105,6 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         res.writeHead(204, { 'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-None-Match, X-Admin-Token', 'Access-Control-Max-Age': '600' });
         res.end(); return;
       }
-      const url = new URL(req.url, configuration.baseUrl || 'http://localhost');
-      const path = url.pathname;
       if (req.url.startsWith('/app-updates') && await appUpdates(req, res)) return;
       if (req.method === 'GET' && STATIC.has(path)) {
         const [file, type] = STATIC.get(path);
@@ -118,6 +123,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         send(res, 200, await configuration.setup(body)); return;
       }
       configuration.requireInitialized();
+      if ((path.startsWith('/v1/cookie-sync/') || path.startsWith('/v1/admin/cookie-sync/')) && await cookieSync(req, res, url)) return;
       if (path === '/v1/admin/login' && req.method === 'POST') {
         credentialLimit(req);
         const body = await bodyOf(req); onlyKeys(body, ['password']);
@@ -321,6 +327,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.maxHeadersCount = 60;
   return { server, store, requestSync, fixture, running, jobs, stations, stationAi, logisticsRules,
     async close() {
+      cookieSync.close();
       if (timer) clearInterval(timer);
       await new Promise(resolve => server.close(resolve));
       await jobs.close();

@@ -1,0 +1,113 @@
+export const PLATFORMS = {
+  taobao: { name: '淘宝', origins: ['https://*.taobao.com/*'], domains: ['taobao.com'],
+    urls: ['https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm', 'https://h5api.m.taobao.com/h5/'],
+    login: 'https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm', identity: ['unb'], required: ['unb', 'cookie2'] },
+  pdd: { name: '拼多多', origins: ['https://*.yangkeduo.com/*'], domains: ['yangkeduo.com'],
+    urls: ['https://mobile.yangkeduo.com/proxy/api/api/aristotle/order_list_v4'],
+    login: 'https://mobile.yangkeduo.com/orders.html', identity: ['pdd_user_id', 'pdduid'], required: ['PDDAccessToken'] },
+  jd: { name: '京东', origins: ['https://*.jd.com/*'], domains: ['jd.com'],
+    urls: ['https://api.m.jd.com/api', 'https://order.jd.com/center/list.action'],
+    login: 'https://order.jd.com/center/list.action', identity: ['pin', 'pt_pin'], required: ['thor'] }
+};
+
+export function problem(code) { return Object.assign(new Error(code), { code }); }
+export function baseOrigin(input) {
+  if (typeof input !== 'string' || !input.trim() || /[\\\s]/u.test(input.trim())) throw problem('INVALID_BASE_URL');
+  let url;
+  try { url = new URL(input.trim()); } catch { throw problem('INVALID_BASE_URL'); }
+  if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || url.port === '0'
+    || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname)))) throw problem('INVALID_BASE_URL');
+  return url.origin;
+}
+export function pairingInput(input, address = '') {
+  let code = input.trim(), baseUrl = address;
+  if (code.startsWith('{')) {
+    let parsed;
+    try { parsed = JSON.parse(code); } catch { throw problem('INVALID_PAIRING'); }
+    if (parsed.kind !== 'cookie-sync' || parsed.schemaVersion !== 1) throw problem('INVALID_PAIRING');
+    baseUrl = parsed.baseUrl; code = parsed.code;
+  }
+  if (typeof code !== 'string' || !/^CS-[A-Za-z0-9_-]{43}$/.test(code)) throw problem('INVALID_PAIRING');
+  return { baseUrl: baseOrigin(baseUrl), code };
+}
+export function platformForDomain(domain) {
+  const host = domain.replace(/^\./, '').toLowerCase();
+  return Object.keys(PLATFORMS).filter(key => PLATFORMS[key].domains.some(d => host === d || host.endsWith('.' + d)));
+}
+export function cookieHeader(platform, cookies, storeId = '0', now = Date.now()) {
+  const profile = PLATFORMS[platform];
+  if (!profile) throw problem('INVALID_PLATFORM');
+  const values = new Map();
+  const guarded = new Set([...profile.identity, ...profile.required]);
+  // Input comes from getAll(url), so Chrome has already applied domain/path rules.
+  for (const cookie of cookies) {
+    if (cookie.storeId !== storeId || cookie.partitionKey || (cookie.expirationDate && cookie.expirationDate * 1000 <= now)) continue;
+    if (!platformForDomain(cookie.domain).includes(platform)) continue;
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(cookie.name) || /[;\r\n\x00-\x1f\x7f]/.test(cookie.value)) throw problem('INVALID_COOKIE');
+    if (!cookie.value) continue;
+    if (values.has(cookie.name) && values.get(cookie.name) !== cookie.value && guarded.has(cookie.name)) throw problem('IDENTITY_CONFLICT');
+    if (!values.has(cookie.name)) values.set(cookie.name, cookie.value);
+  }
+  for (const name of profile.required) if (!values.get(name)) throw problem('LOGIN_REQUIRED');
+  const identities = profile.identity.map(name => values.get(name)).filter(Boolean).map(value => {
+    try { return platform === 'jd' ? decodeURIComponent(value) : value; } catch { throw problem('IDENTITY_CONFLICT'); }
+  });
+  if (!identities.length || identities.some(value => !value || value.length > 256 || /[\s\x00-\x1f\x7f;=]/u.test(value) || value !== identities[0])) throw problem('IDENTITY_CONFLICT');
+  const header = [...values].sort(([a], [b]) => a.localeCompare(b, 'en')).map(([key, value]) => `${key}=${value}`).join('; ');
+  if (header.length > 16384) throw problem('COOKIE_TOO_LARGE');
+  return header;
+}
+export async function digest(value) {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)))].map(n => n.toString(16).padStart(2, '0')).join('');
+}
+const errors = {
+  INVALID_BASE_URL: '请输入完整 HTTPS 后台地址，不要包含路径、账号或密码。', INVALID_PAIRING: '请复制后台生成的插件配对信息或有效配对码。',
+  INVALID_PLATFORM: '此平台暂不支持。', PERMISSION_REQUIRED: '尚未授权访问后台或平台，请点击授权后重试。',
+  LOGIN_REQUIRED: '未读到完整网页登录信息，请打开平台订单页登录后重试。', IDENTITY_CONFLICT: '无法确认唯一的平台账号，请退出混用的账号并重新登录。',
+  INVALID_COOKIE: '网页登录信息格式异常，请重新登录。', COOKIE_TOO_LARGE: '网页登录信息超过后台大小限制。',
+  COOKIE_CHANGED: '登录信息在核对期间已变化，请重新读取后确认。', PREVIEW_EXPIRED: '核对已过期，请重新读取登录信息。',
+  CONNECTION_MISSING: '此配对已移除，请重新配对。', SERVICE_CHANGED: '后台身份或目标账号已变化，请检查地址并重新配对。',
+  NETWORK_ERROR: '无法连接后台，请检查网络、地址和 HTTPS 证书后重试。', INVALID_RESPONSE: '后台响应不兼容，请先更新配套后台。',
+  HTTP_404: '后台尚未支持插件同步，请先更新配套后台。', HTTP_401: '授权已失效，请在后台重新生成插件配对码。',
+  HTTP_403: '此同步操作未获授权，请检查配对和账号归属。', HTTP_409: '账号或登录信息已变化，请刷新状态后重新核对。',
+  HTTP_429: '同步过于频繁，稍后会自动重试。', NOT_CONFIRMED: '请先读取登录信息并确认首次同步。',
+  AUTO_PAUSED: '自动同步已暂停。', BAD_MESSAGE: '不支持的插件操作。'
+};
+Object.assign(errors, {
+  COOKIE_PAIRING_INVALID: '配对码无效、已使用或已过期，请在后台重新生成。',
+  COOKIE_SYNC_UNAUTHORIZED: errors.HTTP_401,
+  COOKIE_IDENTITY_REQUIRED: '缺少稳定的平台账号标识，请打开网页版订单页重新登录。',
+  COOKIE_IDENTITY_AMBIGUOUS: errors.IDENTITY_CONFLICT, COOKIE_LOGIN_REQUIRED: errors.LOGIN_REQUIRED,
+  COOKIE_IDENTITY_MISMATCH: '浏览器登录的账号与后台授权账号不一致，已停止上传。请切回对应账号。',
+  COOKIE_BACKEND_IDENTITY_INVALID: '后台原登录信息的账号标识异常，请管理员核对后重新配对。',
+  COOKIE_CONFIRMATION_REQUIRED: '首次核对已过期或登录信息变化，请重新读取后确认。',
+  COOKIE_CREDENTIAL_CONFLICT: '后台登录信息已被更新，本次未覆盖，请重新同步。'
+});
+export function errorText(error) { return errors[error?.code] || errors[`HTTP_${error?.status}`] || '操作未完成，请刷新状态后重试。'; }
+
+export async function apiRequest(baseUrl, path, { token, body, method = body === undefined ? 'GET' : 'POST', fetchImpl = fetch } = {}) {
+  if (!/^\/v1\/cookie-sync\/(?:pairing\/preview|connections|current(?:\/preview|\/cookie)?)$/.test(path)) throw problem('BAD_MESSAGE');
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
+  try {
+    const response = await fetchImpl(baseOrigin(baseUrl) + path, { method, signal: controller.signal, redirect: 'error', credentials: 'omit', cache: 'no-store',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+    let length = 0, raw = '';
+    const reader = response.body?.getReader(), decoder = new TextDecoder();
+    if (!reader) throw problem('INVALID_RESPONSE');
+    try {
+      while (true) {
+        const { value, done } = await reader.read(); if (done) break;
+        length += value.length; if (length > 65536) throw problem('INVALID_RESPONSE');
+        raw += decoder.decode(value, { stream: true });
+      }
+      raw += decoder.decode();
+    } finally { await reader.cancel().catch(() => {}); }
+    let data;
+    try { data = JSON.parse(raw); } catch { throw problem('INVALID_RESPONSE'); }
+    if (!response.ok) throw Object.assign(problem(Object.hasOwn(errors, data?.error?.code) ? data.error.code : `HTTP_${response.status}`), { status: response.status });
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw problem('INVALID_RESPONSE');
+    return data;
+  } catch (error) { if (error.code) throw error; throw problem('NETWORK_ERROR'); }
+  finally { clearTimeout(timer); }
+}
