@@ -1,9 +1,11 @@
 import { PLATFORMS, baseOrigin, cookieHeader, platformForDomain, digest, apiRequest, problem, errorText } from './core.mjs';
+import { createFamilySync } from './family.mjs';
 
 const KEY = 'connections', PERIODIC = 'cookie-sync-periodic';
 const locks = new Set();
 let writes = Promise.resolve();
 const initialized = chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+const familySync = createFamilySync(initialized);
 async function all() { await initialized; return (await chrome.storage.local.get(KEY))[KEY] || []; }
 function mutate(fn) {
   const task = writes.then(async () => { const items = await all(); const result = fn(items); await chrome.storage.local.set({ [KEY]: items }); return result; });
@@ -81,6 +83,7 @@ async function previewSync(id) {
     version: account.credentialVersion, digest: await digest(cookie), account };
 }
 async function dispatch(message) {
+  if (typeof message?.action === 'string' && message.action.startsWith('family:')) return familySync.dispatch(message);
   switch (message?.action) {
     case 'list': return (await all()).map(visible);
     case 'previewPair': {
@@ -142,6 +145,7 @@ chrome.runtime.onStartup.addListener(ensureAlarm);
 void ensureAlarm();
 chrome.cookies.onChanged.addListener(({ cookie }) => {
   if (cookie.storeId !== '0' || cookie.partitionKey) return;
+  void familySync.onCookie(platformForDomain(cookie.domain)).catch(() => {});
   void (async () => {
     for (const platform of platformForDomain(cookie.domain)) {
       if (!(await all()).some(item => item.auto && item.account.platform === platform)) continue;
@@ -152,6 +156,7 @@ chrome.cookies.onChanged.addListener(({ cookie }) => {
 });
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name !== PERIODIC && !alarm.name.startsWith('cookie-sync-change-')) return;
+  void familySync.onAlarm(alarm.name).catch(() => {});
   void (async () => {
     for (const item of await all()) {
       if (!item.auto || (alarm.name !== PERIODIC && alarm.name !== 'cookie-sync-change-' + item.account.platform)) continue;

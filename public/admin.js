@@ -20,6 +20,21 @@ let logisticsAdmin;
 let cookieSyncGeneration = 0;
 let cookieSyncAccountId = '';
 let cookieSyncPairing = null;
+let familyCookieSyncGeneration = 0;
+let familyCookieSyncId = '';
+let familyCookieSyncPairing = null;
+let cookieSyncRequestCode = (() => {
+  const hash = typeof location === 'undefined' ? '' : location.hash;
+  const match = hash.match(/(?:^|[#&])cookie-sync-request=([^&]*)/);
+  let value = '';
+  try { value = match ? decodeURIComponent(match[1]) : ''; } catch { value = ''; }
+  if (match && typeof history !== 'undefined') history.replaceState(null, '', location.pathname + location.search);
+  return /^CR-[A-Za-z0-9_-]{43}$/.test(value) ? value : '';
+})();
+let cookieSyncRequestGeneration = 0;
+let cookieSyncRequest = null;
+let cookieSyncRequestState = 'pending';
+let preserveCookieSyncRequestOnClose = false;
 const serverClock = createServerClock();
 const syncSubmitting = new Map();
 const syncRows = new Map();
@@ -52,6 +67,7 @@ async function run(fn, owner) {
     controls.forEach((control, index) => { control.disabled = disabled[index]; });
     if (button) button.textContent = label;
     if (owner) { busy.delete(owner); owner.removeAttribute('aria-busy'); }
+    if (owner === $('cookie-sync-request-approve') && cookieSyncRequestState === 'approved') owner.disabled = true;
     if (owner === $('account-form')) $('platform').disabled = Boolean($('account-id').value);
     updatePairAvailability();
     renderSyncStates();
@@ -133,6 +149,90 @@ async function generateCookiePairing() {
   $('cookie-sync-expires').textContent = `有效至 ${date(result.expiresAt)}；使用一次后失效。`;
   $('cookie-sync-pairing').hidden = false; $('cookie-sync-copy').hidden = false;
 }
+function clearFamilyCookieSync() {
+  familyCookieSyncGeneration += 1; familyCookieSyncId = ''; familyCookieSyncPairing = null;
+  $('family-cookie-sync-pairing').hidden = true; $('family-cookie-sync-copy').hidden = true;
+  $('family-cookie-sync-code').textContent = ''; $('family-cookie-sync-base-url').textContent = ''; $('family-cookie-sync-expires').textContent = '';
+  $('family-cookie-sync-summary').textContent = ''; $('family-cookie-sync-accounts').replaceChildren(); $('family-cookie-sync-connections').replaceChildren();
+}
+function familyCookieSyncIsCurrent(generation, familyId) {
+  return token && generation === familyCookieSyncGeneration && familyId === familyCookieSyncId && selectedFamily === familyId && $('family-cookie-sync-dialog').open;
+}
+function renderFamilyCookieConnections(connections = []) {
+  const container = $('family-cookie-sync-connections'); container.replaceChildren();
+  if (!connections.length) { container.append(node('p', '暂无浏览器授权。', 'empty')); return; }
+  for (const connection of connections) {
+    const generation = familyCookieSyncGeneration; const familyId = familyCookieSyncId;
+    const item = node('div', '', 'item'); item.append(node('strong', connection.name || '浏览器授权'), node('p', `创建于 ${date(connection.createdAt)} · 到期 ${date(connection.expiresAt)}`, 'hint'));
+    if (connection.revokedAt) item.append(node('p', `已撤销 ${date(connection.revokedAt)}`, 'hint'));
+    else item.append(action('撤销', async () => {
+      if (!confirm(`撤销“${connection.name || '此浏览器'}”的 Cookie 同步授权？`)) return;
+      await api(`/v1/admin/cookie-sync/families/connections/${encodeURIComponent(connection.id)}`, { method: 'DELETE' });
+      if (!familyCookieSyncIsCurrent(generation, familyId)) return;
+      await loadFamilyCookieConnections(familyId, generation); notice('角色 Cookie 同步授权已撤销。');
+    }, 'danger'));
+    container.append(item);
+  }
+}
+async function loadFamilyCookieConnections(familyId, generation = familyCookieSyncGeneration) {
+  const result = await api(`/v1/admin/cookie-sync/families/connections?familyId=${encodeURIComponent(familyId)}`);
+  if (familyCookieSyncIsCurrent(generation, familyId)) renderFamilyCookieConnections(result.connections || []);
+}
+function openFamilyCookieSync() {
+  const family = families.find(value => value.id === selectedFamily); if (!family) return;
+  familyCookieSyncGeneration += 1; familyCookieSyncId = family.id; familyCookieSyncPairing = null;
+  const generation = familyCookieSyncGeneration;
+  $('family-cookie-sync-summary').textContent = `${family.name} · 当前 ${accounts.filter(account => account.familyId === family.id).map(account => `${platformOf(account.platform).label} · ${account.label}`).join('、') || '暂无账号，以后新增账号可用'}`;
+  $('family-cookie-sync-accounts').replaceChildren(...accounts.filter(account => account.familyId === family.id).map(account => node('p', `${platformOf(account.platform).label} · ${account.label}`, 'hint')));
+  $('family-cookie-sync-pairing').hidden = true; $('family-cookie-sync-copy').hidden = true; $('family-cookie-sync-code').textContent = ''; $('family-cookie-sync-base-url').textContent = '';
+  $('family-cookie-sync-connections').replaceChildren(node('p', '正在读取当前授权…', 'hint')); $('family-cookie-sync-dialog').showModal();
+  loadFamilyCookieConnections(family.id, generation).catch(error => { if (familyCookieSyncIsCurrent(generation, family.id)) $('family-cookie-sync-connections').replaceChildren(node('p', error.message, 'account-error')); });
+}
+async function generateFamilyCookiePairing() {
+  const familyId = familyCookieSyncId; const generation = familyCookieSyncGeneration; if (!familyId) return;
+  const result = await api('/v1/admin/cookie-sync/families/pairing', { method: 'POST', body: JSON.stringify({ familyId }) });
+  if (!familyCookieSyncIsCurrent(generation, familyId)) return;
+  familyCookieSyncPairing = { schemaVersion: 1, kind: 'cookie-sync-family', baseUrl: result.baseUrl, code: result.code };
+  $('family-cookie-sync-base-url').textContent = result.baseUrl || ''; $('family-cookie-sync-code').textContent = result.code || '';
+  $('family-cookie-sync-expires').textContent = `有效至 ${date(result.expiresAt)}；使用一次后失效。`; $('family-cookie-sync-pairing').hidden = false; $('family-cookie-sync-copy').hidden = false;
+}
+function clearCookieSyncRequest() {
+  cookieSyncRequestGeneration += 1; cookieSyncRequestCode = ''; cookieSyncRequest = null;
+  cookieSyncRequestState = 'approved';
+}
+function renderCookieSyncRequest() {
+  if (!cookieSyncRequest || !token || cookieSyncRequestState === 'approved') return;
+  const dialog = $('cookie-sync-request-dialog'); cookieSyncRequestGeneration += 1;
+  $('cookie-sync-request-summary').textContent = `浏览器：${cookieSyncRequest.name || '未命名浏览器'} · 有效至 ${date(cookieSyncRequest.expiresAt)}`;
+  $('cookie-sync-request-platforms').replaceChildren(...(cookieSyncRequest.platforms || []).map(platform => node('p', platformOf(platform).label, 'hint')));
+  const select = $('cookie-sync-request-family'); const placeholder = node('option', '请选择角色'); placeholder.value = ''; placeholder.disabled = true; placeholder.selected = true;
+  select.replaceChildren(placeholder, ...families.map(family => node('option', family.name))); families.forEach((family, index) => { select.options[index + 1].value = family.id; }); select.value = '';
+  const hasFamilies = families.length > 0; const actionable = hasFamilies && !!select.value && (!cookieSyncRequest.status || cookieSyncRequest.status === 'pending'); select.hidden = !hasFamilies; $('cookie-sync-request-approve').disabled = !actionable;
+  $('cookie-sync-request-create').hidden = hasFamilies; $('cookie-sync-request-create-button').hidden = hasFamilies ? true : false;
+  $('cookie-sync-request-status').textContent = cookieSyncRequest.status && cookieSyncRequest.status !== 'pending' ? `此请求当前状态：${cookieSyncRequest.status}。` : '';
+  if (!dialog.open) dialog.showModal();
+}
+async function loadCookieSyncRequest() {
+  if (!token || !cookieSyncRequestCode || cookieSyncRequestState !== 'pending') return;
+  cookieSyncRequestState = 'loading'; const requestToken = token; const generation = ++cookieSyncRequestGeneration;
+  try {
+    const result = await api(`/v1/admin/cookie-sync/families/requests/${encodeURIComponent(cookieSyncRequestCode)}`);
+    if (!token || token !== requestToken || generation !== cookieSyncRequestGeneration || cookieSyncRequestState !== 'loading') return;
+    cookieSyncRequest = result; cookieSyncRequestState = 'pending'; renderCookieSyncRequest();
+  } catch (error) {
+    if (token === requestToken && generation === cookieSyncRequestGeneration) { cookieSyncRequestState = 'approved'; notice(error.message, true); }
+  }
+}
+async function approveCookieSyncRequest() {
+  const familyId = $('cookie-sync-request-family').value; const code = cookieSyncRequestCode; const requestToken = token; const generation = cookieSyncRequestGeneration;
+  if (!families.some(family => family.id === familyId) || !code || !cookieSyncRequest || cookieSyncRequestState !== 'pending') return;
+  cookieSyncRequestState = 'approving'; $('cookie-sync-request-approve').disabled = true;
+  try {
+    await api(`/v1/admin/cookie-sync/families/requests/${encodeURIComponent(code)}/approve`, { method: 'POST', body: JSON.stringify({ familyId }) });
+    if (!token || token !== requestToken || generation !== cookieSyncRequestGeneration || !$('cookie-sync-request-dialog').open) return;
+    clearCookieSyncRequest(); $('cookie-sync-request-status').textContent = '已授权。请返回插件继续选择要同步的平台账号。'; $('cookie-sync-request-create-button').hidden = true;
+  } finally { if (cookieSyncRequestState === 'approving') cookieSyncRequestState = 'pending'; }
+}
 function showLogin() {
   $('auth-shell').hidden = false;
   $('loading-panel').hidden = true; $('setup-panel').hidden = true; $('login-panel').hidden = false;
@@ -143,6 +243,7 @@ function showLogin() {
 }
 function clearSession() {
   clearCookieSync();
+  clearFamilyCookieSync();
   logisticsAdmin?.reset();
   stopPolling(); syncSubmitting.clear(); syncRows.clear(); scopeKey = ''; pollingError = '';
   token = ''; accounts = []; families = []; devices = []; selectedFamily = ''; baseUrl = ''; settingsDirty = false;
@@ -377,6 +478,7 @@ function renderFamilies() {
   $('family-avatar').textContent = selectedFamily ? familyName(selectedFamily).slice(0, 1) : '?';
   $('family-description').textContent = selectedFamily ? `${accounts.filter(a => a.familyId === selectedFamily).length} 个平台账号 · 新增账号自动纳入整组授权` : '先分配所属家人，再进行整组授权';
   $('authorize-family').disabled = !selectedFamily;
+  $('family-cookie-sync').disabled = !selectedFamily;
   $('rename-family').hidden = !selectedFamily;
 }
 function fillFamilyChoices(container, selected = new Set()) {
@@ -419,9 +521,9 @@ function showPage(page) {
   $('breadcrumb').textContent = { accounts: '账号授权', devices: '设备管理', settings: '服务设置' }[page];
 }
 for (const id of ['accounts', 'devices', 'settings']) $(`nav-${id}`).addEventListener('click', () => showPage(id));
-for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog']) {
+for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog', 'family-cookie-sync-dialog', 'cookie-sync-request-dialog']) {
   document.querySelector(`[data-close="${id}"]`)?.addEventListener('click', () => $(id).close());
-  $(id).addEventListener('close', () => { if (id === 'account-dialog') { $('cookie').value = ''; clearCookieSync(); } });
+  $(id).addEventListener('close', () => { if (id === 'account-dialog') { $('cookie').value = ''; clearCookieSync(); } if (id === 'family-cookie-sync-dialog') clearFamilyCookieSync(); });
 }
 $('new-account').addEventListener('click', () => {
   resetForm(); fillAccountFamilies(selectedFamily); $('account-collect').hidden = true; $('account-dialog').showModal();
@@ -431,6 +533,22 @@ $('filter-all').addEventListener('click', () => { attentionOnly = false; $('filt
 $('filter-attention').addEventListener('click', () => { attentionOnly = true; $('filter-all').classList.toggle('active', false); $('filter-attention').classList.toggle('active', true); renderAccounts(); });
 $('bind-device').addEventListener('click', () => openPair());
 $('authorize-family').addEventListener('click', () => openPair([selectedFamily]));
+$('family-cookie-sync').addEventListener('click', openFamilyCookieSync);
+$('family-cookie-sync-generate').addEventListener('click', event => run(generateFamilyCookiePairing, event.currentTarget));
+$('family-cookie-sync-copy').addEventListener('click', event => run(async () => {
+  if (!familyCookieSyncPairing) return;
+  await navigator.clipboard.writeText(JSON.stringify(familyCookieSyncPairing)); notice('插件配对 JSON 已复制。');
+}, event.currentTarget));
+$('cookie-sync-request-dialog').addEventListener('close', () => {
+  if (preserveCookieSyncRequestOnClose) { preserveCookieSyncRequestOnClose = false; cookieSyncRequestGeneration += 1; return; }
+  clearCookieSyncRequest();
+});
+$('cookie-sync-request-family').addEventListener('change', () => {
+  const selected = $('cookie-sync-request-family').value;
+  $('cookie-sync-request-approve').disabled = !families.some(family => family.id === selected) || !cookieSyncRequest || cookieSyncRequestState !== 'pending';
+});
+$('cookie-sync-request-approve').addEventListener('click', event => run(approveCookieSyncRequest, event.currentTarget));
+$('cookie-sync-request-create-button').addEventListener('click', () => { preserveCookieSyncRequestOnClose = true; $('cookie-sync-request-dialog').close(); openFamily(); });
 $('scope').addEventListener('change', clearPairResult);
 function openFamily(id = '') {
   $('family-edit-id').value = id; $('family-name').value = id ? familyName(id) : '';
@@ -450,7 +568,7 @@ confirmPassword('new-password', 'confirm-password');
 submit('family-form', async () => {
   const id = $('family-edit-id').value;
   const result = await api(id ? `/v1/admin/families/${encodeURIComponent(id)}` : '/v1/admin/families', { method: id ? 'PATCH' : 'POST', body: JSON.stringify({ name: $('family-name').value.trim() }) });
-  selectedFamily = result.family.id; $('family-dialog').close(); await refreshAfterChange(); notice('家人已保存。');
+  selectedFamily = result.family.id; $('family-dialog').close(); await refreshAfterChange(); renderCookieSyncRequest(); notice('家人已保存。');
 });
 submit('device-form', async () => {
   const familyIds = [...$('device-scope').querySelectorAll('input:checked')].map(el => el.value);
@@ -474,7 +592,7 @@ submit('login-form', async () => {
     const session = await api('/v1/admin/login', { method: 'POST', body: JSON.stringify({ password: $('admin-token').value }) }, false);
     token = session.token; await refresh();
     if (!token) return;
-    $('login-panel').hidden = true; $('workspace').hidden = false; $('logout').hidden = false; notice('');
+    $('login-panel').hidden = true; $('workspace').hidden = false; $('logout').hidden = false; notice(''); await loadCookieSyncRequest();
     $('auth-shell').hidden = true;
   } catch (error) { clearSession(); throw error; }
   finally { $('admin-token').value = ''; }

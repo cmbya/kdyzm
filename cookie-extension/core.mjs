@@ -20,15 +20,17 @@ export function baseOrigin(input) {
   return url.origin;
 }
 export function pairingInput(input, address = '') {
-  let code = input.trim(), baseUrl = address;
+  let code = input.trim(), baseUrl = address, kind;
   if (code.startsWith('{')) {
     let parsed;
     try { parsed = JSON.parse(code); } catch { throw problem('INVALID_PAIRING'); }
-    if (parsed.kind !== 'cookie-sync' || parsed.schemaVersion !== 1) throw problem('INVALID_PAIRING');
-    baseUrl = parsed.baseUrl; code = parsed.code;
+    if (!['cookie-sync', 'cookie-sync-family'].includes(parsed.kind) || parsed.schemaVersion !== 1) throw problem('INVALID_PAIRING');
+    baseUrl = parsed.baseUrl; code = parsed.code; kind = parsed.kind;
   }
-  if (typeof code !== 'string' || !/^CS-[A-Za-z0-9_-]{43}$/.test(code)) throw problem('INVALID_PAIRING');
-  return { baseUrl: baseOrigin(baseUrl), code };
+  if (typeof code !== 'string' || !/^C[SF]-[A-Za-z0-9_-]{43}$/.test(code)) throw problem('INVALID_PAIRING');
+  const family = code.startsWith('CF-');
+  if (kind && kind !== (family ? 'cookie-sync-family' : 'cookie-sync')) throw problem('INVALID_PAIRING');
+  return { baseUrl: baseOrigin(baseUrl), code, ...(family ? { scope: 'family' } : {}) };
 }
 export function platformForDomain(domain) {
   const host = domain.replace(/^\./, '').toLowerCase();
@@ -71,10 +73,13 @@ const errors = {
   HTTP_404: '后台尚未支持插件同步，请先更新配套后台。', HTTP_401: '授权已失效，请在后台重新生成插件配对码。',
   HTTP_403: '此同步操作未获授权，请检查配对和账号归属。', HTTP_409: '账号或登录信息已变化，请刷新状态后重新核对。',
   HTTP_429: '同步过于频繁，稍后会自动重试。', NOT_CONFIRMED: '请先读取登录信息并确认首次同步。',
-  AUTO_PAUSED: '自动同步已暂停。', BAD_MESSAGE: '不支持的插件操作。'
+  AUTO_PAUSED: '自动同步已暂停。', PLATFORM_NOT_SELECTED: '此平台未选择同步，请先勾选并授权。', REQUEST_CANCELED: '本次授权已取消，请重新发起。', BAD_MESSAGE: '不支持的插件操作。'
 };
 Object.assign(errors, {
   COOKIE_PAIRING_INVALID: '配对码无效、已使用或已过期，请在后台重新生成。',
+  COOKIE_REQUEST_INVALID: '授权请求已过期或已使用，请从插件重新发起。',
+  COOKIE_REQUEST_APPROVED: '此请求已经授权，请返回插件继续同步。',
+  COOKIE_PLATFORM_EXISTS: '后台已存在此平台账号，请刷新角色后选择对应账号同步。',
   COOKIE_SYNC_UNAUTHORIZED: errors.HTTP_401,
   COOKIE_IDENTITY_REQUIRED: '缺少稳定的平台账号标识，请打开网页版订单页重新登录。',
   COOKIE_IDENTITY_AMBIGUOUS: errors.IDENTITY_CONFLICT, COOKIE_LOGIN_REQUIRED: errors.LOGIN_REQUIRED,
@@ -83,10 +88,10 @@ Object.assign(errors, {
   COOKIE_CONFIRMATION_REQUIRED: '首次核对已过期或登录信息变化，请重新读取后确认。',
   COOKIE_CREDENTIAL_CONFLICT: '后台登录信息已被更新，本次未覆盖，请重新同步。'
 });
-export function errorText(error) { return errors[error?.code] || errors[`HTTP_${error?.status}`] || '操作未完成，请刷新状态后重试。'; }
+export function errorText(error) { return (PLATFORMS[error?.platform] ? PLATFORMS[error.platform].name + '：' : '') + (errors[error?.code] || errors[`HTTP_${error?.status}`] || '操作未完成，请刷新状态后重试。'); }
 
 export async function apiRequest(baseUrl, path, { token, body, method = body === undefined ? 'GET' : 'POST', fetchImpl = fetch } = {}) {
-  if (!/^\/v1\/cookie-sync\/(?:pairing\/preview|connections|current(?:\/preview|\/cookie)?)$/.test(path)) throw problem('BAD_MESSAGE');
+  if (!/^\/v1\/cookie-sync\/(?:pairing\/preview|connections|current(?:\/preview|\/cookie)?|families\/(?:pairing\/preview|connections|requests(?:\/poll)?|current(?:\/accounts\/[A-Za-z0-9_-]{1,128}(?:\/preview|\/cookie)?|\/platforms\/(?:taobao|pdd|jd)\/(?:preview|cookie))?))$/.test(path)) throw problem('BAD_MESSAGE');
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000);
   try {
     const response = await fetchImpl(baseOrigin(baseUrl) + path, { method, signal: controller.signal, redirect: 'error', credentials: 'omit', cache: 'no-store',

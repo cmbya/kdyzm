@@ -125,7 +125,7 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 ## 浏览器 Cookie 同步（兼容 v1）
 
-此授权独立于管理员会话和手机设备 token，只允许向一个既有的淘宝、拼多多或京东账号提交登录 Cookie。它没有订单读取、设备管理、角色整组或管理员权限；不能创建账号或更改平台、角色、名称、采集开关。服务须先初始化。
+以下单账号授权独立于管理员会话和手机设备 token，只允许向一个既有的淘宝、拼多多或京东账号提交登录 Cookie。它没有订单读取、设备管理、角色整组或管理员权限；不能创建账号或更改平台、角色、名称、采集开关。服务须先初始化。后述角色授权采用独立接口和 token，旧单账号接口保持兼容。
 
 | 方法与路径 | 权限与请求/响应 |
 | --- | --- |
@@ -154,3 +154,47 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 `expectedCredentialVersion` 为必填正安全整数，过期版本返回 `409 COOKIE_CREDENTIAL_CONFLICT`，保留原凭据。首次无有效确认返回 `409 COOKIE_CONFIRMATION_REQUIRED`；身份不一致为 `409 COOKIE_IDENTITY_MISMATCH`，已有后台身份异常为 `409 COOKIE_BACKEND_IDENTITY_INVALID`；身份缺失、冲突和缺少登录字段分别为 `400 COOKIE_IDENTITY_REQUIRED/COOKIE_IDENTITY_AMBIGUOUS/COOKIE_LOGIN_REQUIRED`；授权过期或撤销为 `401 COOKIE_SYNC_UNAUTHORIZED`；码失效为 `400 COOKIE_PAIRING_INVALID`。
 
 完全相同的 Cookie 返回 `changed:false`，不增加凭据版本、不采集，可更新 `lastSyncAt`。变化则使用原 AES-GCM 加密存储，增加凭据版本使旧采集结果失效，保留原 `lastAttemptAt/nextSyncAt` 冷却与定时设置，并请求一次采集。已有运行采集时在其完成后再次核对授权与凭据版本再请求；期间更新、撤权、转组或关闭服务则取消该次后续请求。原已排队任务可复用并在启动时读新凭据。停用账号不会被启用，五分钟采集冷却仍生效。每授权一分钟最多六次变化写入、一百二十次接口请求，预览最多二十次；限频失败保留原 Cookie。
+
+### 角色级浏览器授权
+
+角色授权包含该角色当前及以后加入的淘宝、拼多多和京东账号，但不含订单、设备或管理员权限。插件须将每个账号的“选中”和“自动同步”默认关闭；每个账号仍单独预览并确认身份后才能写入。空角色也可以授权。角色改名不撤权，账号移出角色则不再可读写；移回时原子授权已永久撤销，客户端看到 `connection:null`，须清除该账号的自动同步选择并重新明确确认。
+
+| 方法与路径 | 权限与请求/响应 |
+| --- | --- |
+| POST /v1/admin/cookie-sync/families/pairing | 管理员；`{familyId}` → `{code,expiresAt,baseUrl}` |
+| GET /v1/admin/cookie-sync/families/connections?familyId=:id | 管理员；`{connections}` |
+| DELETE /v1/admin/cookie-sync/families/connections/:id | 管理员；`{revoked:true}`，同时撤销所有子授权 |
+| POST /v1/cookie-sync/families/pairing/preview | 公开限频；`{code}` → `{family,accounts,expiresAt,serviceId}` |
+| POST /v1/cookie-sync/families/connections | 公开限频；`{code,name}` → `{token,connection,family,accounts,serviceId}` |
+| GET /v1/cookie-sync/families/current | 角色 token；`{connection,family,accounts,serviceId}` |
+| DELETE /v1/cookie-sync/families/current | 角色 token；`{revoked:true}` |
+| GET /v1/cookie-sync/families/current/accounts/:accountId | 角色 token；`{account,connection,serviceId}` |
+| POST /v1/cookie-sync/families/current/accounts/:accountId/preview | 角色 token；`{cookie}` → 原单账号预览字段及 `{connection,serviceId}` |
+| POST /v1/cookie-sync/families/current/accounts/:accountId/cookie | 角色 token；请求/响应沿用单账号 Cookie 写入接口 |
+
+角色配对码为 `CF-` 加 43 个 base64url 字符，有效十分钟、单次使用；角色 token 为 `cfg_` 加 43 个 base64url 字符，有效九十天。两者只保存 SHA-256，不能与旧 `CS-/csg_`、设备 token 或管理员会话互换。角色配对预览不继承旧授权，因此其中子连接均为 null；兑换新角色授权时撤销同角色旧父授权及全部子授权，保留已有单账号授权。旧单账号重新兑换沿用原替换行为，撤销对应账号的角色子授权；角色父授权仍有效，但该账号必须重新预览。所有写操作仍复用原身份、确认摘要、凭据版本和冷却检查。
+
+父 `connection` 为 `{id,name,familyId,createdAt,expiresAt,revokedAt}`；`family` 为 `{id,name}`；`accounts` 为 `[{account,connection:null|子连接摘要}]`。子连接摘要与原单账号字段相同，没有子 token。读取不创建子授权，只有成功的明确预览才创建；上传接口不会恢复缺失、过期或撤销的子授权。子授权在父授权到期时一同到期。流式请求在完整读取 JSON 后重新校验父授权、当前角色归属、原子授权 ID 和版本，防止撤权、替换以及转走再转回的旧请求写入。
+
+每父授权每分钟最多 240 次接口调用，每父授权/账号最多 120 次，预览 20 次、变化写入 6 次；限频键不会因子授权重建而重置。配对猜测与旧接口共享 IP/全局限频。角色待用码最多 1000、父连接最多 5000、失效父连接历史最多 1000，并清理到期三十天以上的历史；删除历史父连接只级联清理其子状态。旧 3.1.18 数据库只新增角色相关表及可空 `family_connection_id`，原账号、密文、单账号授权和待用码保持有效。
+
+撤销阻止后续 Cookie 写入及尚未发起的“旧采集完成后再请求”回调；已经由后台接受的共享采集队列仍由原账号调度器管理，不因浏览器退出而取消管理员或其他入口的任务。
+
+### 插件先发起授权与首次建立平台账号
+
+插件可先让用户登录平台，在本机检查登录态，再发起不含 Cookie 的授权申请。管理员仅在可信后台登录并选择角色；插件不接收管理员密码或管理会话。浏览器可打开后台 `/#cookie-sync-request=CR-...`，片段仅包含申请码，不得包含轮询密钥。
+
+| 方法与路径 | 权限与请求/响应 |
+| --- | --- |
+| POST /v1/cookie-sync/families/requests | 公开限频；`{name,platforms}` → `{requestId,code,pollToken,expiresAt}` |
+| POST /v1/cookie-sync/families/requests/poll | 申请轮询密钥；`{requestId,pollToken}` → `{status:'pending',expiresAt}` 或 `{status:'approved',token,connection,family,accounts,serviceId}` |
+| GET /v1/admin/cookie-sync/families/requests/:code | 管理员；`{requestId,name,platforms,expiresAt,status}` |
+| POST /v1/admin/cookie-sync/families/requests/:code/approve | 管理员；`{familyId}` → `{approved:true}` |
+| POST /v1/cookie-sync/families/current/platforms/:platform/preview | 角色 token；`{cookie}` → `{newAccount:true,platform,confirmationToken,identityHint,expiresAt,serviceId}` |
+| POST /v1/cookie-sync/families/current/platforms/:platform/cookie | 角色 token；`{cookie,expectedCredentialVersion:0,confirmationToken}` → `{changed:true,account,connection,serviceId,job?}` |
+
+`platforms` 是不重复的非空 `taobao/pdd/jd` 子集，只供管理员了解申请，不改变授权覆盖角色当前及未来账号的范围。申请码为 `CR-` 加 43 个 base64url 字符，轮询密钥为 `cpr_` 加 43 个 base64url 字符，有效十分钟，数据库仅存摘要和非敏感申请元数据。申请创建沿用配对猜测限频、最多 1000 条；轮询每 IP 每分钟 120 次、全局 3000 次。批准只保存角色 ID；首次成功轮询才在事务内消耗申请并签发一次角色 token，重新轮询或过期返回 `400 COOKIE_REQUEST_INVALID`。响应丢失需重新申请，不存可取回的明文 token。重复批准返回 `409 COOKIE_REQUEST_APPROVED`，其他角色或凭证不能代替轮询密钥。
+
+首次建立平台账号仅适用于该角色完全没有该平台账号的情况。预览校验同样的平台身份和登录字段，只保存父授权/平台绑定的 Cookie 摘要、确认 token 摘要和五分钟有效期，不创建账号、不保存 Cookie、不发起采集。用户明确确认后，创建接口再次校验父授权、确认摘要、版本 0 及平台仍然缺席；账号、加密 Cookie、已绑定子授权和确认消耗在一个数据库事务中保存，失败整体回滚。账号名称由角色和平台生成，随后按原调度器请求一次采集。确认凭证不能用于其他角色、平台或 Cookie，撤权即清除。
+
+若预览后已有该平台账号、另一请求先完成创建，或原本存在多个账号，返回 `409 COOKIE_PLATFORM_EXISTS`，不选择或覆盖任何已有账号。已有账号必须使用账号 ID 接口。客户端不能自动调用首次创建接口；应在展示角色、平台和脱敏身份并获得本次批量确认后逐个平台提交。后台创建接口不接受 `enabled`、任意名称、角色或内部事务标志。

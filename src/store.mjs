@@ -128,7 +128,8 @@ export class Store {
     const allowed = ids && new Set(ids);
     return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !allowed || allowed.has(a.id)).map(a => this.accountFamily(a));
   }
-  saveAccount(body, id = randomUUID(), fixture = false, { preserveSyncSchedule = false } = {}) {
+  saveAccount(body, id = randomUUID(), fixture = false, { preserveSyncSchedule = false, inTransaction = false } = {}) {
+    if (inTransaction && !this.db.isTransaction) throw new Error('saveAccount requires an active transaction');
     onlyKeys(body, ['platform', 'label', 'cookie', 'enabled', 'intervalMinutes', 'familyId']);
     const old = this.account(id);
     const familyId = body.familyId === undefined ? old?.familyId || '' : text(body.familyId, '家人ID', 128, false);
@@ -156,7 +157,7 @@ export class Store {
       // Ownership changes also invalidate results collected under the previous scope.
       credentialVersion: (old?.credentialVersion || 0) + (body.cookie !== undefined || !old || familyId !== old.familyId ? 1 : 0),
       warnings: old?.warnings || [] };
-    this.transaction(() => {
+    const save = () => {
       this.db.prepare('INSERT INTO accounts VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,credential=excluded.credential').run(id, JSON.stringify(data), credential);
       if (old && !old.familyId && !old.familyAssigned && familyId) {
         for (const table of ['orders', 'shipments']) {
@@ -168,7 +169,8 @@ export class Store {
           }
         }
       }
-    });
+    };
+    if (inTransaction) save(); else this.transaction(save);
     return data;
   }
   cookie(id) {

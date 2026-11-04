@@ -52,10 +52,11 @@ test('rejected cooldown does not promise execution and completed jobs retain par
 class Element {
   constructor(tag = 'div') {
     this.tagName = tag.toUpperCase(); this.children = []; this.listeners = new Map(); this.value = ''; this.textContent = '';
-    this.hidden = false; this.disabled = false; this.checked = false; this.attributes = {}; this.elements = [];
+    this.hidden = false; this.disabled = false; this.checked = false; this.open = false; this.deferCloseEvent = false; this.attributes = {}; this.elements = [];
     this.classList = { toggle() {} };
   }
   append(...children) { this.children.push(...children); }
+  get options() { return this.children; }
   replaceChildren(...children) { this.children = children; }
   setAttribute(name, value) { this.attributes[name] = value; }
   removeAttribute(name) { delete this.attributes[name]; }
@@ -69,24 +70,28 @@ class Element {
   setCustomValidity() {}
   scrollIntoView() {}
   focus() {}
+  showModal() { this.open = true; }
+  close() { this.open = false; const close = () => this.listeners.get('close')?.(); this.deferCloseEvent ? queueMicrotask(close) : close(); }
 }
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(data) });
 
-async function browser() {
+async function browser(hash = '') {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const source = await readFile(new URL('../public/admin.js', import.meta.url), 'utf8');
   const elements = new Map([...html.matchAll(/<([\w-]+)[^>]*\bid="([^"]+)"/g)].map(match => [match[2], new Element(match[1])]));
   const listeners = new Map(), timeouts = new Map(), intervals = new Map(), requests = [];
   let timerId = 0;
-  const state = { job: null, platform: 'taobao', monotonic: 100, unauthorized: false, offline: false, blockAccounts: null, blockSync: null };
+  const state = { job: null, platform: 'taobao', monotonic: 100, unauthorized: false, offline: false, blockAccounts: null, blockSync: null, cookieRequest: null, families: [{ id: 'f', name: '我' }] };
+  const location = { hash, pathname: '/', search: '' };
+  const history = { replaceState: (_state, _title, url) => { location.hash = ''; location.pathname = String(url).split(/[?#]/)[0] || '/'; } };
   const document = {
     hidden: false, forms: [...elements.values()].filter(element => element.tagName === 'FORM'),
     getElementById: id => elements.get(id), createElement: tag => new Element(tag), createTextNode: value => Object.assign(new Element('text'), { textContent: value }),
     querySelector: () => null,
     addEventListener: (name, listener) => listeners.set(name, listener),
   };
-  const context = vm.createContext({ document, URL, Date, console, syncStatus,
+  const context = vm.createContext({ document, URL, Date, console, location, history, syncStatus,
     createServerClock: () => createServerClock(() => state.monotonic, () => NOW + 86_400_000),
     setTimeout: (callback, delay) => { const id = ++timerId; timeouts.set(id, { callback, delay }); return id; },
     clearTimeout: id => timeouts.delete(id), setInterval: callback => { const id = ++timerId; intervals.set(id, callback); return id; }, clearInterval: id => intervals.delete(id),
@@ -94,6 +99,11 @@ async function browser() {
       requests.push({ path, options });
       if (path === '/v1/setup') return response({ initialized: true, mode: 'managed' });
       if (path === '/v1/admin/login') return response({ token: 'session' });
+      if (path.startsWith('/v1/admin/cookie-sync/families/requests/')) {
+        if (!state.cookieRequest) return response({ error: { message: 'request not found' } }, 404);
+        if (path.endsWith('/approve')) return response({ approved: true });
+        return response(state.cookieRequest);
+      }
       if (path === '/v1/admin/accounts') {
         if (state.blockAccounts) await state.blockAccounts;
         if (state.offline) throw new Error('offline');
@@ -101,7 +111,10 @@ async function browser() {
         return response({ accounts: [account(state.job, state.platform)], serverTime: NOW + state.monotonic - 100 });
       }
       if (path === '/v1/admin/devices') return response({ devices: [] });
-      if (path === '/v1/admin/families') return response({ families: [{ id: 'f', name: '我' }] });
+      if (path === '/v1/admin/families') {
+        if (options.method === 'POST') { state.families = [{ id: 'new', name: '新角色' }]; return response({ family: state.families[0] }); }
+        return response({ families: state.families });
+      }
       if (path === '/v1/admin/status') return response({ configurationMode: 'managed', baseUrl: 'https://example.test', lanBaseUrl: state.lanBaseUrl || '' });
       if (path === '/v1/admin/settings') {
         const settings = JSON.parse(options.body); state.lanBaseUrl = settings.lanBaseUrl;
@@ -124,8 +137,45 @@ async function browser() {
     const [id, timer] = [...timeouts][0]; timeouts.delete(id); timer.callback(); await settle();
   };
   const visibility = async hidden => { document.hidden = hidden; listeners.get('visibilitychange')(); await settle(); };
-  return { state, elements, requests, timeouts, intervals, login, tick, visibility, dispatch, api: context.adminTest };
+  return { state, elements, requests, timeouts, intervals, location, login, tick, visibility, dispatch, api: context.adminTest };
 }
+
+test('reverse cookie request accepts base64url symbols, waits for login, and ignores invalid fragments', async () => {
+  const valid = `CR-${'a'.repeat(41)}_-`;
+  const page = await browser(`#cookie-sync-request=${valid}`);
+  assert.equal(page.location.hash, '');
+  assert.equal(page.requests.some(request => request.path.includes('/cookie-sync/families/requests/')), false);
+  page.state.cookieRequest = { requestId: 'r1', name: '测试浏览器', platforms: ['jd'], expiresAt: NOW + 600000, status: 'pending' };
+  await page.login();
+  await settle();
+  assert.equal(page.requests.filter(request => request.path.endsWith(valid)).length, 1, JSON.stringify(page.requests.map(request => request.path)));
+  assert.equal(page.elements.get('cookie-sync-request-approve').disabled, true);
+  page.elements.get('cookie-sync-request-family').value = 'f'; await page.dispatch(page.elements.get('cookie-sync-request-family'), 'change');
+  assert.equal(page.elements.get('cookie-sync-request-approve').disabled, false);
+  await page.dispatch(page.elements.get('cookie-sync-request-approve'), 'click');
+  assert.equal(page.requests.at(-1).path, `/v1/admin/cookie-sync/families/requests/${valid}/approve`);
+  assert.equal(page.elements.get('cookie-sync-request-approve').disabled, true);
+
+  const invalid = await browser('#cookie-sync-request=CR-invalid');
+  await invalid.login();
+  assert.equal(invalid.requests.some(request => request.path.includes('/cookie-sync/families/requests/')), false);
+  const malformed = await browser('#cookie-sync-request=CR-%E0%A4%A');
+  await malformed.login();
+  assert.equal(malformed.requests.some(request => request.path.includes('/cookie-sync/families/requests/')), false);
+});
+
+test('empty-role request survives the create-role transition for later approval', async () => {
+  const valid = `CR-${'b'.repeat(43)}`; const page = await browser(`#cookie-sync-request=${valid}`);
+  page.state.cookieRequest = { requestId: 'r2', name: '空角色浏览器', platforms: ['taobao'], expiresAt: NOW + 600000, status: 'pending' }; page.state.families = [];
+  await page.login(); await settle();
+  assert.equal(page.elements.get('cookie-sync-request-create-button').hidden, false);
+  page.elements.get('cookie-sync-request-dialog').deferCloseEvent = true;
+  await page.dispatch(page.elements.get('cookie-sync-request-create-button'), 'click');
+  assert.equal(page.elements.get('family-dialog').open, true);
+  page.elements.get('family-name').value = '新角色'; await page.dispatch(page.elements.get('family-form'), 'submit'); await settle();
+  assert.equal(page.elements.get('cookie-sync-request-dialog').open, true);
+  assert.equal(page.elements.get('cookie-sync-request-approve').disabled, true);
+});
 
 test('polling restores external jobs, advances states, preserves form drafts and binding selection, and sends only GET', async () => {
   const page = await browser();
