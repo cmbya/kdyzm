@@ -1,4 +1,4 @@
-import { randomBytes, scrypt } from 'node:crypto';
+import { createHmac, randomBytes, scrypt } from 'node:crypto';
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -15,9 +15,9 @@ function passwordInput(value) {
 function managedUrl(value) {
   if (value === '') return '';
   try {
-    if (typeof value !== 'string' || value.length > 2048) throw new Error();
+    if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f\\]/.test(value)) throw new Error();
     const origin = publicUrl(value);
-    if (!origin.startsWith('https://')) throw new Error();
+    if (!origin.startsWith('https://') || new URL(origin).port === '0') throw new Error();
     return origin;
   } catch { fail(400, 'INVALID_BASE_URL', '服务地址须为HTTPS地址，且不能包含路径、查询参数或登录凭证'); }
 }
@@ -46,18 +46,19 @@ function saveConfiguration(filename, value) {
 }
 
 export class AdminConfiguration {
-  constructor({ filename, encryptionKey, adminToken, baseUrl, now, log }) {
+  constructor({ filename, encryptionKey, adminToken, baseUrl, lanBaseUrl, now, log }) {
     this.now = now;
     this.sessions = new Map();
     this.filename = filename === ':memory:' ? null : join(dirname(filename), 'service-config.json');
-    const hasEnvironment = [encryptionKey, adminToken, baseUrl].some(value => value !== undefined && value !== '');
+    const hasEnvironment = [encryptionKey, adminToken, baseUrl, lanBaseUrl].some(value => value !== undefined && value !== '');
     if (hasEnvironment) {
       if (this.filename && existsSync(this.filename)) throw new Error('Managed configuration and legacy environment configuration cannot be combined; remove the legacy variables to keep the saved encryption key');
       if (typeof adminToken !== 'string' || adminToken.length < 32) throw new Error('ADMIN_TOKEN must be at least 32 characters when legacy environment configuration is used');
       this.key = readKey(encryptionKey);
       this.mode = 'environment';
       this.adminToken = adminToken;
-      this.state = { baseUrl: publicUrl(baseUrl || 'http://127.0.0.1:8787') };
+      this.state = { baseUrl: publicUrl(baseUrl || 'http://127.0.0.1:8787'), lanBaseUrl: managedUrl(lanBaseUrl || ''),
+        serviceId: createHmac('sha256', this.key).update('pickcode-service-identity-v1').digest('hex').slice(0, 32) };
       return;
     }
     this.mode = 'managed';
@@ -69,12 +70,19 @@ export class AdminConfiguration {
           (state.password === null ? !/^[\w-]{43}$/.test(state.setupCode) :
             (!state.password || !/^[a-f0-9]{64}$/.test(state.password.salt) || !/^[a-f0-9]{128}$/.test(state.password.hash) || state.setupCode !== null))) throw new Error();
         this.key = readKey(state.encryptionKey);
+        if (state.lanBaseUrl !== undefined && (typeof state.lanBaseUrl !== 'string' || managedUrl(state.lanBaseUrl) !== state.lanBaseUrl)) throw new Error();
+        if (state.serviceId !== undefined && (typeof state.serviceId !== 'string' || !/^[a-f0-9]{32}$/.test(state.serviceId))) throw new Error();
+        if (state.lanBaseUrl === undefined || state.serviceId === undefined) {
+          this.state = { ...state, lanBaseUrl: state.lanBaseUrl ?? '', serviceId: state.serviceId ?? randomBytes(16).toString('hex') };
+          saveConfiguration(this.filename, this.state);
+        }
         chmodSync(this.filename, 0o600);
       } catch { throw new Error('Saved service configuration is invalid; restore it from backup without replacing its encryption key'); }
     } else {
       if (filename !== ':memory:' && [filename, `${filename}-wal`, `${filename}-shm`].some(existsSync)) throw new Error('Database exists without its encryption configuration; restore service-config.json or supply the original legacy environment variables');
       if (this.filename) mkdirSync(dirname(this.filename), { recursive: true, mode: 0o700 });
-      this.state = { version: 1, encryptionKey: randomBytes(32).toString('hex'), setupCode: secret(), password: null, baseUrl: '' };
+      this.state = { version: 1, encryptionKey: randomBytes(32).toString('hex'), setupCode: secret(), password: null, baseUrl: '',
+        lanBaseUrl: '', serviceId: randomBytes(16).toString('hex') };
       this.key = readKey(this.state.encryptionKey);
       saveConfiguration(this.filename, this.state);
     }
@@ -82,6 +90,8 @@ export class AdminConfiguration {
   }
   get initialized() { return this.mode === 'environment' || this.state.password !== null; }
   get baseUrl() { return this.state.baseUrl; }
+  get lanBaseUrl() { return this.state.lanBaseUrl; }
+  get serviceId() { return this.state.serviceId; }
   status() { return { initialized: this.initialized, mode: this.mode, minPasswordLength: 12 }; }
   requireInitialized() { if (!this.initialized) fail(409, 'SETUP_REQUIRED', '请先完成服务初始化'); }
   requireManaged() { if (this.mode !== 'managed') fail(409, 'ENVIRONMENT_READ_ONLY', '当前使用环境变量配置，请在部署配置中修改'); }
@@ -124,10 +134,10 @@ export class AdminConfiguration {
     if (!valid || record !== this.state.password) fail(401, 'ADMIN_UNAUTHORIZED', '管理员密码无效');
     return this.newSession();
   }
-  settings(baseUrl) {
+  settings(baseUrl = this.baseUrl, lanBaseUrl = this.lanBaseUrl) {
     this.requireManaged();
-    this.persist({ ...this.state, baseUrl: managedUrl(baseUrl) });
-    return { configurationMode: this.mode, baseUrl: this.baseUrl };
+    this.persist({ ...this.state, baseUrl: managedUrl(baseUrl), lanBaseUrl: managedUrl(lanBaseUrl) });
+    return { configurationMode: this.mode, baseUrl: this.baseUrl, lanBaseUrl: this.lanBaseUrl };
   }
   async changePassword(token, currentPassword, password) {
     this.requireManaged();

@@ -121,6 +121,33 @@ test('ETag returns 304, keeps dates/manual states through partial collections, a
   assert.equal(after.data.events[0].id, first.data.events[0].id);
 });
 
+test('snapshot job transitions change ETag, persist stable timestamps and stay within device and account-filter scope', async t => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const { service, request, account, bind } = await setup(t, { collector: async () => { await gate; return data(); } });
+  const a = await account('A'), b = await account('B');
+  const device = await bind([a.id]);
+  const snapshot = headers => request('/v1/snapshot', { token: device.token, headers });
+  const before = await snapshot();
+  assert.deepEqual(before.data.syncJobs, []);
+  const own = service.jobs.request(a.id), other = service.jobs.request(b.id);
+  const running = await snapshot({ 'If-None-Match': before.headers.get('etag') });
+  assert.equal(running.status, 200);
+  assert.equal(running.data.syncJobs.length, 1);
+  assert.equal(running.data.syncJobs[0].id, own.job.id);
+  assert.equal(running.data.syncJobs[0].state, 'running');
+  assert.ok(running.data.syncJobs[0].updatedAt > 0);
+  assert.equal((await snapshot({ 'If-None-Match': running.headers.get('etag') })).status, 304);
+  release(); await Promise.all([own.done, other.done]);
+  const complete = await snapshot({ 'If-None-Match': running.headers.get('etag') });
+  assert.equal(complete.status, 200);
+  assert.equal(complete.data.syncJobs[0].state, 'completed');
+  assert.ok(complete.data.syncJobs[0].updatedAt > running.data.syncJobs[0].updatedAt);
+  assert.ok(complete.data.serverRevision > running.data.serverRevision);
+  assert.ok(!complete.raw.includes(other.job.id));
+  assert.equal((await request(`/v1/snapshot?accountId=${b.id}`, { token: device.token })).status, 403);
+});
+
 test('operation replay is idempotent, conflicting reuse rejects, and unauthorized batch rolls back', async t => {
   const { service, request, account, bind } = await setup(t);
   const a = await account(); service.store.importResult(a.id, data());

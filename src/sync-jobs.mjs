@@ -26,8 +26,37 @@ function fullResult(job, result) {
 
 export function createSyncJobs({ store, collector, now, onImported = () => {} }) {
   const records = new Map(), scopes = new Map(), queues = new Map(), timers = new Map(), running = new Map();
+  store.db.exec(`CREATE TABLE IF NOT EXISTS sync_job_summaries (
+    account_id TEXT NOT NULL REFERENCES accounts(id), order_id TEXT NOT NULL, account_version INTEGER NOT NULL,
+    data TEXT NOT NULL, updated_at INTEGER NOT NULL, active INTEGER NOT NULL,
+    PRIMARY KEY(account_id,order_id));`);
   let closed = false;
-  const finish = record => { record.job.finishedAt = now(); record.resolve(record.job); };
+  const persist = record => {
+    record.job.updatedAt = Math.max(now(), record.job.createdAt || 0, (record.job.updatedAt || 0) + 1);
+    store.transaction(() => {
+      store.db.prepare(`INSERT INTO sync_job_summaries VALUES(?,?,?,?,?,?) ON CONFLICT(account_id,order_id)
+        DO UPDATE SET account_version=excluded.account_version,data=excluded.data,updated_at=excluded.updated_at,active=excluded.active`)
+        .run(record.job.accountId, record.job.orderId, record.accountVersion, JSON.stringify(record.job), record.job.updatedAt, active(record.job) ? 1 : 0);
+      // Bound historical scope summaries without discarding an in-flight operation.
+      store.db.exec(`DELETE FROM sync_job_summaries WHERE rowid IN
+        (SELECT rowid FROM sync_job_summaries WHERE active=0 ORDER BY updated_at DESC,rowid DESC LIMIT -1 OFFSET 1000)`);
+      store.revision();
+    });
+  };
+  for (const row of store.db.prepare('SELECT account_version,data FROM sync_job_summaries WHERE active=1').all()) {
+    const job = JSON.parse(row.data);
+    const account = store.account(job.accountId);
+    if (job.state === 'running' && account?.credentialVersion === row.account_version && account.status === 'syncing') {
+      store.updateAccount(job.accountId, { status: 'error', error: '服务重启中断了采集，请重新刷新', warnings: [] });
+    }
+    Object.assign(job, { state: 'error', retryAt: 0, finishedAt: now(), error: '服务重启中断了采集，请重新刷新' });
+    persist({ job, accountVersion: row.account_version });
+  }
+  const finish = record => { record.job.finishedAt = now(); persist(record); record.resolve(record.job); };
+  const saved = (accountId, orderId) => {
+    const row = store.db.prepare('SELECT account_version,data FROM sync_job_summaries WHERE account_id=? AND order_id=?').get(accountId, orderId);
+    return row && row.account_version === store.account(accountId)?.credentialVersion ? JSON.parse(row.data) : null;
+  };
   const context = (accountId, orderId) => {
     const previous = store.snapshot([accountId]);
     const selected = previous.orders.filter(order => !orderId || order.id === orderId);
@@ -48,11 +77,13 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
     }
     const retryAt = account.lastAttemptAt ? account.lastAttemptAt + INTERVAL : 0;
     if (retryAt > now()) {
-      record.job.retryAt = retryAt;
+      if (record.job.retryAt !== retryAt) { record.job.retryAt = retryAt; persist(record); }
       timers.set(accountId, setTimeout(() => pump(accountId), retryAt - now()).unref()); return;
     }
     queue.shift(); record.accountVersion = account.credentialVersion;
-    Object.assign(record.job, { state: 'running', retryAt: 0, error: '' });
+    Object.assign(record.job, { state: 'running', retryAt: 0, startedAt: now(), error: '',
+      familyId: (record.job.orderId ? store.order(record.job.orderId) : account)?.familyId || '' });
+    persist(record);
     store.updateAccount(accountId, { status: 'syncing', lastAttemptAt: now(), nextSyncAt: now() + account.intervalMinutes * 60000, error: '' });
     const task = Promise.resolve().then(async () => {
       try {
@@ -114,21 +145,42 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
     // Keep a single pending request per scope. The account timer starts it at
     // the original cooldown deadline; repeated clicks never extend that time.
     const state = !account.enabled ? 'disabled' : queue.length >= 25 ? 'cooldown' : 'queued';
-    const job = { id: randomUUID(), accountId, orderId, state, createdAt: now(),
+    const previousTime = store.db.prepare('SELECT updated_at FROM sync_job_summaries WHERE account_id=? AND order_id=?').get(accountId, orderId)?.updated_at || 0;
+    const job = { id: randomUUID(), accountId, orderId, familyId: (orderId ? store.order(orderId) : account)?.familyId || '', state,
+      createdAt: Math.max(now(), previousTime + 1),
       retryAt: state !== 'disabled' && (retryAt > now() || inFlight || state === 'cooldown') ? Math.max(retryAt, now() + (queue.length >= 25 ? INTERVAL : 0)) : 0,
       error: state === 'disabled' ? '账号同步已关闭，请先在后台启用' : state === 'cooldown' ? '账号等待任务已满，本次未排队，请稍后重新获取' : '' };
     let resolve;
     const record = { job, accountVersion: account.credentialVersion, createdAt: now(), done: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
     records.set(job.id, record); scopes.set(key, record);
+    persist(record);
     if (state === 'queued') { queue.push(record); pump(accountId); } else finish(record);
     return record;
   }
   return { running, request, pump,
     latest(accountId) {
-      const record = scopes.get(`${accountId}:`);
-      return record && record.accountVersion === store.account(accountId)?.credentialVersion ? { ...record.job } : null;
+      return saved(accountId, '');
     },
-    read(id) { const record = records.get(id); if (!record) fail(404, 'NOT_FOUND', '同步任务已过期或服务已重启，请重新刷新'); return { ...record.job }; },
+    snapshot(device, accountFilter) {
+      const narrowed = accountFilter && new Set(accountFilter);
+      const syncJobs = [];
+      for (const row of store.db.prepare('SELECT account_id,account_version,data FROM sync_job_summaries ORDER BY updated_at DESC,rowid DESC').all()) {
+        if (narrowed && !narrowed.has(row.account_id)) continue;
+        if (row.account_version !== store.account(row.account_id)?.credentialVersion) continue;
+        const job = JSON.parse(row.data);
+        if (job.orderId ? !store.canRead(device, store.order(job.orderId)) : !device.accountIds.includes(job.accountId)) continue;
+        syncJobs.push(job);
+        if (syncJobs.length === 100) break;
+      }
+      return { syncJobs };
+    },
+    read(id) {
+      const record = records.get(id);
+      const row = record ? { account_id: record.job.accountId, account_version: record.accountVersion, data: JSON.stringify(record.job) }
+        : store.db.prepare("SELECT account_id,account_version,data FROM sync_job_summaries WHERE json_extract(data,'$.id')=?").get(id);
+      if (!row || row.account_version !== store.account(row.account_id)?.credentialVersion) fail(404, 'NOT_FOUND', '同步任务已过期，请重新刷新');
+      return JSON.parse(row.data);
+    },
     async close() {
       closed = true;
       for (const timer of timers.values()) clearTimeout(timer);

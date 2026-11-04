@@ -29,11 +29,11 @@ function send(res, status, data, extra = {}) {
   res.end(data === undefined ? undefined : JSON.stringify(data));
 }
 
-export function createService({ filename = ':memory:', encryptionKey, adminToken, baseUrl,
+export function createService({ filename = ':memory:', encryptionKey, adminToken, baseUrl, lanBaseUrl,
   now = Date.now, collector, fixture = false, scheduler = true, corsOrigins = [], log = console.log, aiRequest, appUpdateDirectory } = {}) {
   const appUpdates = createAppUpdateHandler({ directory: appUpdateDirectory });
   const origins = new Set(corsOrigins.map(publicUrl));
-  const configuration = new AdminConfiguration({ filename, encryptionKey, adminToken, baseUrl, now, log });
+  const configuration = new AdminConfiguration({ filename, encryptionKey, adminToken, baseUrl, lanBaseUrl, now, log });
   let logisticsRules;
   const getLogisticsRules = () => logisticsRules.read().rules;
   const store = new Store({ filename, key: configuration.key, now, getLogisticsRules });
@@ -107,7 +107,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         const content = await readFile(new URL(file, PUBLIC));
         res.end(file === 'index.html' ? content.toString('utf8').replaceAll('__SERVER_VERSION__', serverVersion) : content); return;
       }
-      if (path === '/health' && req.method === 'GET') { send(res, 200, { ok: true }); return; }
+      if (path === '/health' && req.method === 'GET') { send(res, 200, { ok: true, serviceId: configuration.serviceId }); return; }
       if (!path.startsWith('/v1/')) fail(404, 'NOT_FOUND', '接口不存在');
 
       if (path === '/v1/setup' && req.method === 'GET') { send(res, 200, configuration.status()); return; }
@@ -211,11 +211,11 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
           send(res, 200, { device: store.updateDevice(devicePath[1], body) }); return;
         }
-        if (path === '/v1/admin/status' && req.method === 'GET') { send(res, 200, { fixture, serverVersion, baseUrl: configuration.baseUrl, configurationMode: configuration.mode }); return; }
+        if (path === '/v1/admin/status' && req.method === 'GET') { send(res, 200, { fixture, serverVersion, baseUrl: configuration.baseUrl, lanBaseUrl: configuration.lanBaseUrl, configurationMode: configuration.mode }); return; }
         if (path === '/v1/admin/settings' && req.method === 'PATCH') {
-          const body = await bodyOf(req); onlyKeys(body, ['baseUrl']);
+          const body = await bodyOf(req); onlyKeys(body, ['baseUrl', 'lanBaseUrl']);
           configuration.authenticate(req.headers['x-admin-token']);
-          send(res, 200, configuration.settings(body.baseUrl)); return;
+          send(res, 200, configuration.settings(body.baseUrl, body.lanBaseUrl)); return;
         }
         if (path === '/v1/admin/password' && req.method === 'POST') {
           credentialLimit(req);
@@ -253,6 +253,9 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         admin(req); send(res, 200, store.revoke(revokePath[1])); return;
       }
       const current = device(req);
+      if (path === '/v1/connection' && req.method === 'GET') {
+        send(res, 200, { schemaVersion: 1, serviceId: configuration.serviceId, lanBaseUrl: configuration.lanBaseUrl }); return;
+      }
       if (path === '/v1/station-candidates' && req.method === 'POST') {
         const body = await bodyOf(req); onlyKeys(body, ['items']);
         const authorized = device(req); rate.check(`station-upload:${authorized.id}`, 12, 3600000);
@@ -296,6 +299,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         const rules = stations.stationRules();
         snapshot.stationRulesVersion = rules.revision;
         snapshot.stationRules = rules.stations;
+        Object.assign(snapshot, jobs.snapshot(current, requested.length ? requested : undefined));
         const etag = `"${hash(JSON.stringify(snapshot))}"`;
         const matches = (req.headers['if-none-match'] || '').split(',').map(t => t.trim().replace(/^W\//, '')).includes(etag);
         send(res, matches ? 304 : 200, matches ? undefined : snapshot, { ETag: etag }); return;

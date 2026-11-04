@@ -113,7 +113,7 @@ function validateBaseUrl(value) {
   if (!address) return '';
   let parsed;
   try { parsed = new URL(address); } catch { throw new Error('请填写有效的 HTTPS 服务地址。'); }
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+  if (/[\u0000-\u0020\u007f\\]/.test(address) || parsed.protocol !== 'https:' || parsed.port === '0' || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
     throw new Error('服务地址必须使用 HTTPS，且不能包含账号、密码、路径、查询参数或片段。');
   }
   return parsed.origin;
@@ -130,11 +130,15 @@ function renderSettings(status) {
   baseUrl = status.baseUrl || '';
   if (status.fixture !== undefined) $('fixture-notice').hidden = !status.fixture;
   $('configured-base-url').textContent = baseUrl || '尚未设置';
+  $('configured-lan-url').textContent = status.lanBaseUrl || '未启用';
   $('configuration-hint').textContent = configurationMode === 'environment'
     ? '当前使用环境变量配置，此处只读。如需修改服务地址或管理员密钥，请更新部署环境变量并重启服务。'
     : '地址和管理员密码可在此修改。未设置服务地址时，仍可管理账号。';
   $('managed-settings').hidden = configurationMode !== 'managed';
-  if (!settingsDirty) $('settings-base-url').value = baseUrl;
+  if (!settingsDirty) {
+    $('settings-base-url').value = baseUrl;
+    $('settings-lan-url').value = status.lanBaseUrl || '';
+  }
   updatePairAvailability();
 }
 function stopPolling() {
@@ -418,8 +422,9 @@ submit('login-form', async () => {
 $('retry-setup').addEventListener('click', event => run(checkSetup, event.currentTarget));
 $('logout').addEventListener('click', () => { clearSession(); notice('已退出管理。'); });
 $('settings-base-url').addEventListener('input', () => { settingsDirty = true; });
+$('settings-lan-url').addEventListener('input', () => { settingsDirty = true; });
 submit('settings-form', async () => {
-  const status = await api('/v1/admin/settings', { method: 'PATCH', body: JSON.stringify({ baseUrl: validateBaseUrl($('settings-base-url').value) }) });
+  const status = await api('/v1/admin/settings', { method: 'PATCH', body: JSON.stringify({ baseUrl: validateBaseUrl($('settings-base-url').value), lanBaseUrl: validateBaseUrl($('settings-lan-url').value) }) });
   settingsDirty = false; renderSettings(status); notice(status.baseUrl ? '服务地址已保存。' : '服务地址已清空，补充后才能绑定设备。');
 });
 submit('password-form', async () => {

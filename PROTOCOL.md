@@ -4,12 +4,12 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 | 方法与路径 | 权限 / 用途 |
 | --- | --- |
-| GET /health | 公开存活检查，不返回业务数据 |
+| GET /health | 公开存活检查，返回`{ok:true,serviceId}`，不返回业务数据或局域网地址 |
 | GET /v1/setup | 公开初始化状态，`initialized,mode,minPasswordLength`，不返回初始化码或密钥 |
 | POST /v1/setup | 首次初始化；`{setupCode,password,baseUrl?}`，成功后不可重复初始化 |
 | POST /v1/admin/login | 管理员登录；`{password}`，返回`{token,expiresAt}` |
 | GET /v1/admin/status | 管理员；服务地址和模式 |
-| PATCH /v1/admin/settings | 管理员；`{baseUrl}`，设置HTTPS服务地址 |
+| PATCH /v1/admin/settings | 管理员；`{baseUrl?,lanBaseUrl?}`，设置HTTPS服务地址，缺席保留、空串清除 |
 | POST /v1/admin/password | 管理员；`{currentPassword,password}`，改密并返回新`{token,expiresAt}` |
 | GET /v1/admin/accounts | 管理员；账号状态及最近全账号采集任务syncJob、响应serverTime，不含Cookie |
 | GET /v1/admin/families | 管理员；`{families:[{id,name}]}`，含无账号家人 |
@@ -26,6 +26,7 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 | POST /v1/devices | 公开限频；`{code,deviceName}`兑换token、deviceId、accounts、families、familyIds |
 | DELETE /v1/devices/current | 设备；撤销自己 |
 | GET /v1/accounts | 设备；只返回获授权账号 |
+| GET /v1/connection | 设备；`{schemaVersion:1,serviceId,lanBaseUrl}`，只应经已绑定可信地址获取 |
 | POST /v1/accounts/sync | 设备；请求获授权账号采集，不是同步完成回执 |
 | GET /v1/snapshot | 设备；完整快照，支持ETag/If-None-Match/304 |
 | POST /v1/operations | 设备；批量幂等人工操作 |
@@ -69,6 +70,16 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 `logisticsDetailCheckedAt`为采集端内部公平轮询时间，旧客户端可忽略。新增字段不进入设备写操作白名单，仍不能通过App修改平台原始数据。
 
 账号status为expired表示后台更新Cookie，设备仍有效；设备401表示重新绑定。错误JSON形如`{error:{code,message}}`。分页缺失、网络失败和上游过期时保留历史，真实结果以账号状态与lastSuccessAt为准。
+
+## 局域网连接与采集摘要（兼容 v1）
+
+`lanBaseUrl`默认为空，只接受无路径、查询、片段或凭据的HTTPS origin；后台不猜测容器宿主机地址。管理员在服务设置中配置一次，旧App忽略新字段且旧设置请求不会清除它。环境变量模式使用可选`LAN_BASE_URL`，仍只读；管理模式通过设置保存。实际入口须提供匹配地址且由手机系统信任的有效证书。
+
+`serviceId`为32位小写十六进制稳定实例标识：管理模式随机生成并保存于原配置文件，旧配置仅补缺字段；环境模式由原加密密钥以独立用途HMAC派生，不返回原密钥。备份恢复同一配置保留该标识。它是实例匹配信息而非密码，也不能替代TLS认证。客户端只从原绑定可信HTTPS地址取得连接配置，在候选地址完成TLS校验、匿名`/health`实例匹配后才允许发送设备token；失败继续使用原地址，不能降级HTTP或跟随重定向。
+
+设备快照增加`syncJobs`，最多100条最新的已授权scope摘要。scope为精确`accountId + orderId`，`orderId=''`表示全账号；账号任务按当前账号权限，订单任务按订单固化家人权限过滤。摘要包含原任务字段以及`familyId,createdAt,updatedAt,startedAt?,finishedAt?`；`updatedAt`仅在状态改变并持久化时推进。保留摘要的scope中，新任务`createdAt`严格晚于旧摘要`updatedAt`，且`updatedAt>=createdAt`，保证同毫秒请求、重启或时钟回拨后仍能排序；开始和完成时间保留实际时钟。客户端可用较新的同scope摘要替换缓存终态或确已被替代的较早在途任务，列表缺席不表示该scope成功或可删除；不凭账号`status=ok`抹掉无关失败。旧服务缺少该字段时继续旧轮询方式。
+
+后台持久化每scope最新摘要，最多保留1000条终态及尚在途任务，不保存凭据或上游原文。重启保留终态，将未完成任务明确标为中断错误，不自动重发平台请求；更新登录凭据或账号归属后旧版本摘要不再进入快照。任务变化增加`serverRevision`，且摘要参与快照ETag，稳定状态可返回304。在途和终态均可下发，`empty/unavailable`附带的说明表示平台未提供信息，只有明确`error/expired`等失败状态才当作错误。
 
 ## 站点别名扩展（3.1.13，兼容 v1）
 

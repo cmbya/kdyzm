@@ -17,8 +17,9 @@ services:
       DATA_DIR: /data
       TZ: Asia/Shanghai
       # 新部署留空：首次访问设置管理员密码和服务地址，加密密钥自动生成。
-      # 以下三项仅供 3.1.0 旧环境变量模式兼容，升级时保留原值。
+      # 以下仅供旧环境变量模式兼容，升级时保留原密钥及服务地址。
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      LAN_BASE_URL: ${LAN_BASE_URL:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       COOKIE_ENCRYPTION_KEY: ${COOKIE_ENCRYPTION_KEY:-}
     volumes:

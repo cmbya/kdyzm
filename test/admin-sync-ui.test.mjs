@@ -39,6 +39,12 @@ test('rejected cooldown does not promise execution and completed jobs retain par
   assert.equal(partial.label, '采集完成 · 部分信息未更新');
   assert.deepEqual(partial.details, ['完整轨迹查询失败', '订单日期查询失败，已保留原数据。']);
   assert.equal(syncStatus(account({ state: 'completed', logisticsState: 'unavailable' }), NOW).label, '采集完成 · 部分信息未提供');
+  for (const state of ['empty', 'unavailable']) {
+    const result = syncStatus(account({ state: 'completed', dateState: state, dateError: '平台暂未提供日期', logisticsState: state, logisticsError: '平台暂未提供轨迹' }), NOW);
+    assert.equal(result.label, '采集完成 · 部分信息未提供');
+    assert.deepEqual(result.details, ['平台暂未提供日期', '平台暂未提供轨迹']);
+  }
+  assert.equal(syncStatus(account({ state: 'completed', logisticsError: '旧后台未标状态的查询失败' }), NOW).label, '采集完成 · 部分信息未更新');
   assert.equal(syncStatus({ ...account({ state: 'completed' }), status: 'expired' }, NOW).label, '采集失败');
   assert.equal(syncStatus(account({ state: 'error', error: '平台查询失败' }), NOW).label, '采集失败');
 });
@@ -96,7 +102,11 @@ async function browser() {
       }
       if (path === '/v1/admin/devices') return response({ devices: [] });
       if (path === '/v1/admin/families') return response({ families: [{ id: 'f', name: '我' }] });
-      if (path === '/v1/admin/status') return response({ configurationMode: 'managed', baseUrl: 'https://example.test' });
+      if (path === '/v1/admin/status') return response({ configurationMode: 'managed', baseUrl: 'https://example.test', lanBaseUrl: state.lanBaseUrl || '' });
+      if (path === '/v1/admin/settings') {
+        const settings = JSON.parse(options.body); state.lanBaseUrl = settings.lanBaseUrl;
+        return response({ configurationMode: 'managed', ...settings });
+      }
       if (path === '/v1/admin/accounts/a/sync') {
         if (state.blockSync) await state.blockSync;
         state.job = { id: 'job-a', state: 'queued', retryAt: NOW + 60_000 };
@@ -147,6 +157,22 @@ test('polling restores external jobs, advances states, preserves form drafts and
   assert.equal([...page.timeouts.values()][0].delay, 30000);
   assert.ok(page.requests.slice(requestsBeforePoll).every(request => request.path === '/v1/admin/accounts' && !request.options.method));
   assert.equal(page.elements.get('notice').textContent, '');
+});
+
+test('LAN settings preserve unsaved input while polling and save or clear the configured address', async () => {
+  const page = await browser(); page.state.lanBaseUrl = 'https://lan.example'; await page.login();
+  assert.equal(page.elements.get('settings-lan-url').value, 'https://lan.example');
+  assert.equal(page.elements.get('configured-lan-url').textContent, 'https://lan.example');
+  page.elements.get('settings-lan-url').value = 'https://updated-lan.example';
+  await page.dispatch(page.elements.get('settings-lan-url'), 'input');
+  await page.api.refresh();
+  assert.equal(page.elements.get('settings-lan-url').value, 'https://updated-lan.example');
+  await page.dispatch(page.elements.get('settings-form'), 'submit');
+  assert.equal(page.state.lanBaseUrl, 'https://updated-lan.example');
+  page.elements.get('settings-lan-url').value = '';
+  await page.dispatch(page.elements.get('settings-form'), 'submit');
+  assert.equal(page.state.lanBaseUrl, '');
+  assert.equal(page.elements.get('configured-lan-url').textContent, '未启用');
 });
 
 test('a repeated sync click sends one POST, uses inline queued status, and pending jobs cannot be resubmitted', async () => {

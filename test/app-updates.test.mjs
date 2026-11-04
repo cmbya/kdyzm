@@ -98,7 +98,9 @@ test('release routes reject traversal, non-whitelisted files, other versions and
 test('missing and incomplete bundles leave health and initialization available for GitHub fallback', async t => {
   const h = await harness(t, { bundle: false });
   for (const path of [MANIFEST_PATH, APK_PATH]) assert.equal((await h.request(path)).status, 404);
-  assert.deepEqual(JSON.parse((await h.request('/health')).body), { ok: true });
+  const health = JSON.parse((await h.request('/health')).body);
+  assert.equal(health.ok, true);
+  assert.match(health.serviceId, /^[a-f0-9]{32}$/);
   assert.equal((await h.request('/v1/setup')).status, 200);
   writeBundle(h.updates);
   rmSync(join(h.updates, APK_NAME));

@@ -26,7 +26,8 @@ export function syncStatus(account, now) {
   else if (job.state === 'disabled') label = '采集已停用';
   else if (job.state === 'completed') {
     if (job.error || ['error', 'expired'].includes(account.status)) label = '采集失败';
-    else if ([job.dateState, job.logisticsState].includes('error') || job.dateError || job.logisticsError) label = '采集完成 · 部分信息未更新';
+    else if (['date', 'logistics'].some(part => job[`${part}State`] === 'error' ||
+      (!['ok', 'empty', 'unavailable'].includes(job[`${part}State`]) && job[`${part}Error`]))) label = '采集完成 · 部分信息未更新';
     else if ([job.dateState, job.logisticsState].some(state => ['empty', 'unavailable'].includes(state))) label = '采集完成 · 部分信息未提供';
     else label = '采集完成';
   } else label = '采集失败';

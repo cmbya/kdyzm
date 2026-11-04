@@ -94,7 +94,7 @@ test('settings require an admin session; password changes revoke sessions while 
   assert.equal(first.expiresAt, TIME + 8 * 60 * 60000);
   assert.notEqual(first.token, second.token);
   const status = await h.request('/v1/admin/status', { token: first.token });
-  assert.deepEqual(status.data, { fixture: false, serverVersion, baseUrl: '', configurationMode: 'managed' });
+  assert.deepEqual(status.data, { fixture: false, serverVersion, baseUrl: '', lanBaseUrl: '', configurationMode: 'managed' });
   const account = await h.request('/v1/admin/accounts', { method: 'POST', token: first.token, body: { platform: 'taobao', label: '我的淘宝', cookie: 'private-cookie-value' } });
   assert.equal(account.status, 201);
   const pairing = { method: 'POST', token: first.token, body: { accountIds: [account.data.account.id] } };
@@ -103,7 +103,7 @@ test('settings require an admin session; password changes revoke sessions while 
   assert.equal((await h.request('/v1/admin/settings', { method: 'PATCH', token: first.token, body: { baseUrl: 'https://pickup.example/path' } })).status, 400);
   assert.equal((await h.request('/v1/admin/settings', { method: 'PATCH', token: first.token, body: { baseUrl: 'https://pickup.example' }, headers: { Origin: 'https://evil.example' } })).status, 403);
   const updated = await h.request('/v1/admin/settings', { method: 'PATCH', token: first.token, body: { baseUrl: 'https://pickup.example' }, headers: { Origin: h.base() } });
-  assert.deepEqual(updated.data, { configurationMode: 'managed', baseUrl: 'https://pickup.example' });
+  assert.deepEqual(updated.data, { configurationMode: 'managed', baseUrl: 'https://pickup.example', lanBaseUrl: '' });
   const pair = await h.request('/v1/pairing-codes', pairing);
   assert.equal(JSON.parse(pair.data.qrPayload).baseUrl, 'https://pickup.example');
   const device = await h.request('/v1/devices', { method: 'POST', body: { code: pair.data.code, deviceName: '手机' } });
@@ -195,6 +195,64 @@ test('racing login and password changes leave no session authenticated with the 
   if (results[0].status === 200) assert.equal((await h.request('/v1/admin/status', { token: results[0].data.token })).status, 401);
   const winner = results.slice(1).find(r => r.status === 200);
   assert.equal((await h.request('/v1/admin/status', { token: winner.data.token })).status, 200);
+});
+
+test('LAN origin is configured once, delivered only to devices, and empty or omitted settings remain compatible', async t => {
+  const h = await harness(t);
+  await h.setup({ baseUrl: 'https://pickup.example' });
+  const { token } = (await h.login()).data;
+  const health = (await h.request('/health')).data;
+  assert.match(health.serviceId, /^[a-f0-9]{32}$/);
+  assert.deepEqual(Object.keys(health).sort(), ['ok', 'serviceId']);
+  assert.equal((await h.request('/v1/connection')).status, 401);
+  assert.equal((await h.request('/v1/connection', { token })).status, 401);
+  const store = h.service().store;
+  const account = store.saveAccount({ platform: 'taobao', label: 'fixture', cookie: 'synthetic-cookie' });
+  const device = store.redeem(store.createPairing({ accountIds: [account.id] }).code, 'fixture');
+  const connection = () => h.request('/v1/connection', { headers: { Authorization: `Bearer ${device.token}` } });
+  const patch = body => h.request('/v1/admin/settings', { method: 'PATCH', token, body });
+  assert.deepEqual((await connection()).data, { schemaVersion: 1, serviceId: health.serviceId, lanBaseUrl: '' });
+  for (const lanBaseUrl of ['http://192.168.1.2:8787', 'https://user:password@lan.example', 'https://lan.example/path',
+    'https://lan.example?key=value', 'https://lan.example/#fragment', 'https://lan.example:0', 'https://lan.example\\@other.example', 'https://lan.example\n', 42, null]) {
+    assert.equal((await patch({ lanBaseUrl })).status, 400, String(lanBaseUrl));
+  }
+  assert.equal((await patch({ lanBaseUrl: 'https://LAN.example:443/' })).status, 200);
+  assert.equal((await connection()).data.lanBaseUrl, 'https://lan.example');
+  assert.equal((await patch({ baseUrl: 'https://pickup.example' })).data.lanBaseUrl, 'https://lan.example', 'old clients preserve the LAN origin');
+  assert.equal((await patch({ lanBaseUrl: '' })).data.lanBaseUrl, '');
+  const raw = (await connection()).raw;
+  for (const secret of [token, device.token, h.config().encryptionKey]) assert.ok(!raw.includes(secret));
+  store.revoke(device.deviceId);
+  assert.equal((await connection()).status, 401);
+});
+
+test('old managed configuration gains a stable service identity without replacing credentials', async t => {
+  const h = await harness(t);
+  await h.setup();
+  const original = h.config();
+  await h.stop();
+  const legacy = { ...original }; delete legacy.lanBaseUrl; delete legacy.serviceId;
+  writeFileSync(h.configPath, JSON.stringify(legacy));
+  await h.start();
+  const migrated = h.config();
+  assert.equal(migrated.encryptionKey, original.encryptionKey);
+  assert.deepEqual(migrated.password, original.password);
+  assert.equal(migrated.lanBaseUrl, '');
+  assert.match(migrated.serviceId, /^[a-f0-9]{32}$/);
+  await h.stop(); await h.start();
+  assert.equal((await h.request('/health')).data.serviceId, migrated.serviceId);
+  assert.equal((await h.login()).status, 200);
+});
+
+test('legacy environment LAN origin and service identity survive restart without exposing its key', async t => {
+  const h = await harness(t, { encryptionKey: KEY, adminToken: ADMIN, baseUrl: 'https://pickup.example', lanBaseUrl: 'https://lan.example' });
+  const health = (await h.request('/health')).data;
+  assert.match(health.serviceId, /^[a-f0-9]{32}$/);
+  assert.ok(!KEY.includes(health.serviceId));
+  assert.equal((await h.request('/v1/admin/status', { token: ADMIN })).data.lanBaseUrl, 'https://lan.example');
+  await h.stop(); await h.start();
+  assert.equal((await h.request('/health')).data.serviceId, health.serviceId);
+  assert.throws(() => createService({ encryptionKey: KEY, adminToken: ADMIN, lanBaseUrl: 'http://192.168.1.2:8787' }), /HTTPS/);
 });
 
 test('production entrypoint rejects partial legacy environment before creating data or encryption configuration', t => {
