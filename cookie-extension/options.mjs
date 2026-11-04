@@ -33,6 +33,10 @@ function button(label, fn, cls = 'secondary', allowed = true) {
   const el = node('button', label, cls); el.type = 'button'; el.dataset.allowed = String(allowed);
   el.addEventListener('click', () => run(fn)); return el;
 }
+async function authorizePlatforms(platforms) {
+  const origins = [...new Set(platforms.flatMap(platform => PLATFORMS[platform].origins))];
+  if (!await chrome.permissions.request({ origins })) throw new Error('未授权读取所选平台登录信息，本次未读取或同步。');
+}
 function checkbox(labelText, checked, allowed = true) {
   const input = document.createElement('input'); input.type = 'checkbox'; input.checked = !!checked; input.dataset.allowed = String(allowed);
   const label = node('label', '', 'check'); label.append(input, document.createTextNode(labelText));
@@ -81,12 +85,16 @@ function renderLegacy(item) {
   auto.input.addEventListener('change', () => {
     if (busy) { auto.input.checked = item.auto; return; }
     const enabled = auto.input.checked;
-    void run(async () => { try { await call('auto', { id: item.id, enabled }); } finally { await render(); } });
+    void run(async () => { try {
+      if (enabled) await authorizePlatforms([item.account.platform]);
+      await call('auto', { id: item.id, enabled });
+    } finally { await render(); } });
   });
   card.append(auto.label);
   const actions = node('div', '', 'actions');
   actions.append(button('打开登录页', () => call('login', { id: item.id })));
   actions.append(button(item.connection.identityBound ? '立即同步' : '读取并核对登录', async () => {
+    await authorizePlatforms([item.account.platform]);
     if (item.connection.identityBound) {
       const result = await call('sync', { id: item.id });
       notice(result.pending ? '正在同步，请稍后刷新状态。' : result.changed ? '登录信息已同步，采集状态以后台验证结果为准。' : '登录信息未变化。'); await render();
@@ -127,12 +135,16 @@ function renderFamily(group) {
     auto.input.addEventListener('change', () => {
       if (busy) { auto.input.checked = item.auto; return; }
       const enabled = auto.input.checked;
-      void run(async () => { try { await call('family:auto', { id: group.id, accountId: item.account.id, enabled }); } finally { await render(); } });
+      void run(async () => { try {
+        if (enabled) await authorizePlatforms([item.account.platform]);
+        await call('family:auto', { id: group.id, accountId: item.account.id, enabled });
+      } finally { await render(); } });
     });
     row.append(auto.label);
     const actions = node('div', '', 'actions');
     actions.append(button('打开登录页', () => call('family:login', { id: group.id, accountId: item.account.id })));
     actions.append(button(item.connection?.identityBound ? '立即同步' : '读取并核对登录', async () => {
+      await authorizePlatforms([item.account.platform]);
       const args = { id: group.id, accountId: item.account.id };
       if (item.connection?.identityBound) {
         const result = await call('family:sync', args);
@@ -143,6 +155,7 @@ function renderFamily(group) {
   }
   const actions = node('div', '', 'actions');
   actions.append(button('读取并核对已选平台', async () => {
+    await authorizePlatforms(group.accounts.filter(item => item.selected).map(item => item.account.platform));
     const entries = [], failures = [];
     for (const item of group.accounts.filter(account => account.selected)) {
       const args = { id: group.id, accountId: item.account.id };

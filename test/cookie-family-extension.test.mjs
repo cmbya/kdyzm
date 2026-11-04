@@ -180,6 +180,35 @@ test('PDD failure is labelled locally and missing permission never reads cookies
   assert.match(errorText({ code: 'LOGIN_REQUIRED', platform: 'pdd' }), /^拼多多：/);
 });
 
+test('existing selected PDD pairing survives each revoked origin and recovers after restore', async t => {
+  const s = await setup(t), account = s.account('pdd'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  await s.call('confirmSync', { ...ref, confirmation: await s.call('previewSync', ref) });
+  const paired = () => s.storage.familyConnections.find(item => item.id === group.id).accounts.find(item => item.account.id === account.id);
+  const connectionId = paired().connection.id;
+  assert.equal(paired().selected, true);
+
+  for (const origin of PLATFORMS.pdd.origins) {
+    s.allowed.delete(origin);
+    const reads = s.reads.length, uploads = s.requests.filter(request => request.path.endsWith('/cookie')).length;
+    await assert.rejects(s.call('previewSync', ref), { code: 'PERMISSION_REQUIRED' });
+    await assert.rejects(s.call('auto', { ...ref, enabled: true }), { code: 'PERMISSION_REQUIRED' });
+    await assert.rejects(s.call('startRequest', { baseUrl: s.base, name: '权限测试', platforms: ['pdd'] }), { code: 'PERMISSION_REQUIRED' });
+    assert.equal(s.reads.length, reads);
+    assert.equal(s.requests.filter(request => request.path.endsWith('/cookie')).length, uploads);
+    assert.equal(paired().selected, true);
+    assert.equal(paired().connection.id, connectionId);
+    s.allowed.add(origin);
+  }
+
+  const reads = s.reads.length;
+  const confirmation = await s.call('previewSync', ref);
+  assert.ok(confirmation.token);
+  assert.ok(s.reads.length > reads);
+  assert.equal(paired().selected, true);
+  assert.equal(paired().connection.id, connectionId);
+});
+
 test('an expired poll snapshot cannot clear a newer reverse request from another options page', async t => {
   const s = await setup(t);
   s.storage.familyRequest = { requestId: 'expired-request', nonce: 'expired-nonce', expiresAt: Date.now() - 1 };

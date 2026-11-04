@@ -2,7 +2,8 @@ export const PLATFORMS = {
   taobao: { name: '淘宝', origins: ['https://*.taobao.com/*'], domains: ['taobao.com'],
     urls: ['https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm', 'https://h5api.m.taobao.com/h5/'],
     login: 'https://buyertrade.taobao.com/trade/itemlist/list_bought_items.htm', identity: ['unb'], required: ['unb', 'cookie2'] },
-  pdd: { name: '拼多多', origins: ['https://*.yangkeduo.com/*'], domains: ['yangkeduo.com'],
+  // Chrome checks non-Secure cookies against HTTP host permission even when queried by HTTPS URL.
+  pdd: { name: '拼多多', origins: ['https://*.yangkeduo.com/*', 'http://*.yangkeduo.com/*'], domains: ['yangkeduo.com'],
     urls: ['https://mobile.yangkeduo.com/proxy/api/api/aristotle/order_list_v4'],
     login: 'https://mobile.yangkeduo.com/orders.html', identity: ['pdd_user_id', 'pdduid'], required: ['PDDAccessToken'] },
   jd: { name: '京东', origins: ['https://*.jd.com/*'], domains: ['jd.com'],
