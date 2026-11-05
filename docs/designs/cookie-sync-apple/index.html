@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="取件助手登录同步插件，全流程交互设计稿。">
+  <title>登录同步 · 取件助手</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230071e3'/%3E%3Cpath d='M17 23l15-8 15 8v18l-15 8-15-8zM17 23l15 9 15-9M32 32v17' fill='none' stroke='white' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <aside class="prototype-bar" aria-label="设计稿预览工具">
+    <div class="prototype-label"><span class="prototype-dot"></span>交互设计稿<span class="prototype-note">· 所有数据均为示例</span></div>
+    <label class="scene-label">预览场景
+      <select id="scene" aria-label="预览场景">
+        <option value="home">同步首页</option>
+        <option value="first">首次使用</option>
+        <option value="bind">绑定后台</option>
+        <option value="reverse">反向授权</option>
+        <option value="confirm">首次账号确认</option>
+        <option value="manage">管理平台</option>
+        <option value="result">同步结果</option>
+        <option value="offline">后台暂时离线</option>
+        <option value="permission">站点权限缺失</option>
+        <option value="conflict">账号不匹配</option>
+        <option value="expired">角色授权失效</option>
+        <option value="multiple">多个后台</option>
+        <option value="legacy">旧版单平台授权</option>
+        <option value="update">本地升级</option>
+      </select>
+    </label>
+  </aside>
+
+  <div class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="#" aria-label="取件助手首页" data-action="home">
+        <span class="brand-icon" data-icon="package"></span>
+        <span>取件助手<span class="brand-sub">浏览器登录同步</span></span>
+      </a>
+      <button class="settings-button" data-action="settings"><span data-icon="settings"></span><span>设置</span></button>
+    </header>
+
+    <main id="main"></main>
+    <footer class="app-footer"><span data-icon="shield"></span>登录信息仅同步至你授权的后台<span class="footer-separator">·</span><span>由你选择，始终可控</span></footer>
+  </div>
+
+  <dialog id="flow-dialog" aria-labelledby="dialog-title">
+    <div id="dialog-content"></div>
+  </dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

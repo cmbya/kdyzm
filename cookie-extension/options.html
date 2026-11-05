@@ -1,28 +1,13 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>取件助手 · 登录同步</title><link rel="stylesheet" href="options.css"></head>
-<body><main>
-  <header><div><h1>登录同步</h1><p class="hint">取件助手 · 淘宝 / 拼多多 / 京东</p></div><button id="refresh" class="secondary" type="button">刷新状态</button></header>
-  <p id="notice" role="status" aria-live="polite"></p>
-  <section aria-labelledby="connected-title"><h2 id="connected-title">已授权角色与账号</h2><p id="empty" class="hint">正在读取本机配对…</p><div id="connections"></div></section>
-  <section aria-labelledby="request-title"><h2 id="request-title">从浏览器发起授权</h2><p class="hint">先打开平台网页，在此浏览器登录，再勾选要同步的平台。后台只需选择已有角色，无需提前添加平台账号。</p>
-    <form id="request-form">
-      <label for="request-base-url">后台 HTTPS 地址</label><input id="request-base-url" type="url" required autocomplete="off" placeholder="https://你的后台地址" data-request-input="true">
-      <label for="request-browser-name">此浏览器名称</label><input id="request-browser-name" value="我的 Chrome" maxlength="80" autocomplete="off" data-request-input="true">
-      <fieldset><legend>选择已在此浏览器登录的平台</legend><div id="request-platforms"></div></fieldset>
-      <p class="hint request-hint">拼多多请登录网页订单页；仅在手机 App 登录无法读取。发起请求只检查本机登录，后台批准后仍需核对账号并确认同步。</p>
-      <button id="request-submit" type="submit">读取登录并发起授权</button>
-    </form>
-    <div id="request-pending" hidden><h3>等待角色授权</h3><p id="request-target" class="hint"></p><p>授权码：<span id="request-code"></span></p><p id="request-expiry" class="hint"></p><p id="request-status" class="account-error" role="status" aria-live="polite"></p><div class="actions"><button id="request-open" type="button">打开后台授权</button><button id="request-cancel" class="secondary" type="button">取消请求</button></div></div>
-  </section>
-  <section aria-labelledby="pair-title"><h2 id="pair-title">粘贴后台配对信息</h2><p class="hint">也可在后台“账号授权”中，为角色生成配对信息。旧的单账号配对码仍可使用。</p>
-    <form id="pair-form">
-      <label for="pair-info">配对信息或一次性配对码</label><textarea id="pair-info" rows="3" required autocomplete="off" spellcheck="false" maxlength="2048" placeholder="粘贴后台复制的配对信息"></textarea>
-      <label for="base-url">后台地址（只粘贴配对码时填写）</label><input id="base-url" type="url" autocomplete="off" placeholder="https://你的后台地址">
-      <button type="submit">读取配对目标</button>
-    </form>
-    <div id="pair-confirm" hidden><p id="pair-target"></p><p id="pair-origin" class="hint"></p><p id="pair-scope" class="hint"></p><label for="browser-name">此浏览器名称</label><input id="browser-name" value="我的 Chrome" maxlength="80" autocomplete="off"><div class="actions"><button id="pair-accept" type="button">确认配对并授权平台</button><button id="pair-cancel" type="button" class="secondary">取消</button></div></div>
-  </section>
-  <p class="hint footer">只同步已授权账号的网页登录信息，不保存平台密码。浏览器运行且登录有效时可自动同步；验证码、扫码或登录失效时仍需本人重新登录。</p>
-</main>
-<dialog id="confirm-dialog" aria-labelledby="confirm-title"><h2 id="confirm-title">核对首次同步</h2><p id="confirm-target"></p><p id="confirm-identity" class="hint"></p><ul id="confirm-accounts" hidden></ul><p id="confirm-errors" class="account-error"></p><p class="hint">请确认浏览器登录的是这位家人的账号。同步会替换该账号的后台登录信息；尚未添加的平台账号会在首次确认后创建。</p><div class="actions"><button id="sync-accept" type="button">确认同步</button><button id="sync-cancel" class="secondary" type="button">取消</button></div></dialog>
-<script type="module" src="options.mjs"></script></body></html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>取件助手 · 登录同步</title><link rel="stylesheet" href="options.css"></head>
+<body>
+<div class="app-shell">
+<header class="app-header"><a class="brand" href="#" data-action="home" aria-label="取件助手首页"><span class="brand-icon" id="brand-icon"></span><span>取件助手<span class="brand-sub">浏览器登录同步</span></span></a><button class="settings-button" data-action="settings"><span id="settings-icon"></span><span>设置</span></button></header>
+<p id="notice" role="status" aria-live="polite"></p>
+<main id="main"><p class="boot">正在读取本机配置…</p></main>
+<footer class="app-footer"><span id="shield-icon"></span>登录信息仅同步至你授权的后台<span class="footer-separator">·</span><span>由你选择，始终可控</span></footer>
+</div>
+<dialog id="flow-dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+<script type="module" src="options.mjs"></script>
+</body></html>

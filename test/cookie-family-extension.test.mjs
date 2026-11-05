@@ -105,7 +105,7 @@ test('deselecting during cookie read prevents the queued preview upload', async 
   assert.equal(s.requests.filter(request => request.path.endsWith('/preview') && request.path.includes('/accounts/')).length, 0);
 });
 
-for (const action of ['deselect', 'cancel-request']) test(`${action} while URL read is pending prevents a new domain read`, async t => {
+for (const action of ['deselect', 'cancel-sync']) test(`${action} while URL read is pending prevents a new domain read`, async t => {
   const s = await setup(t), queries = [];
   let release;
   const gate = new Promise(resolve => { release = resolve; });
@@ -115,16 +115,14 @@ for (const action of ['deselect', 'cancel-request']) test(`${action} while URL r
     if (query.url) await gate;
     return [{ name: 'PDDAccessToken', value: 'synthetic', domain: 'mobile.yangkeduo.com', path: '/', storeId: '0' }];
   };
-  let pending, ref;
-  if (action === 'deselect') {
-    const account = s.account('pdd'), group = await s.bind(); ref = { id: group.id, accountId: account.id };
-    await s.call('select', { ...ref, enabled: true }); pending = s.call('previewSync', ref);
-  } else pending = s.call('startRequest', { baseUrl: s.base, name: '取消补查', platforms: ['pdd'] });
+  const account = s.account('pdd'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  const pending = s.call('previewSync', ref);
   const rejected = assert.rejects(pending, { code: action === 'deselect' ? 'PLATFORM_NOT_SELECTED' : 'REQUEST_CANCELED' });
   for (let n = 0; n < 100 && !queries.length; n++) await tick();
   assert.ok(queries.length);
   if (action === 'deselect') await s.call('select', { ...ref, enabled: false });
-  else await s.call('cancelRequest');
+  else await s.call('cancelSync', ref);
   release(); await rejected;
   assert.ok(queries.every(query => query.url));
 });
@@ -173,10 +171,16 @@ test('canceling a poll in flight cannot install a role grant and revokes a late 
   assert.equal(grants.connections.length, 1); assert.ok(grants.connections[0].revokedAt);
 });
 
-test('PDD failure is labelled locally and missing permission never reads cookies or starts a request', async t => {
+test('reverse requests need only backend permission and never read or upload platform cookies', async t => {
   const s = await setup(t); s.allowed.delete(PLATFORMS.pdd.origins[0]);
-  await assert.rejects(s.call('startRequest', { baseUrl: s.base, name: '权限测试', platforms: ['pdd'] }), { code: 'PERMISSION_REQUIRED' });
-  assert.equal(s.reads.length, 0); assert.equal(s.requests.length, 0);
+  chrome.cookies.getAll = async () => { throw Error('cookies must not be inspected before approval'); };
+  const pending = await s.call('startRequest', { baseUrl: s.base, name: '权限测试', platforms: ['pdd'] });
+  assert.ok(pending.requestId);
+  assert.equal(s.reads.length, 0); assert.equal(s.requests.length, 1);
+  assert.deepEqual(JSON.parse(s.requests[0].body), { name: '权限测试', platforms: ['pdd'] });
+  s.allowed.delete(s.base + '/*');
+  await assert.rejects(s.call('startRequest', { baseUrl: s.base, name: '后台未授权', platforms: ['pdd'] }), { code: 'PERMISSION_REQUIRED' });
+  assert.equal(s.requests.length, 1);
   assert.match(errorText({ code: 'LOGIN_REQUIRED', platform: 'pdd' }), /^拼多多：/);
 });
 
@@ -193,7 +197,7 @@ test('existing selected PDD pairing survives each revoked origin and recovers af
     const reads = s.reads.length, uploads = s.requests.filter(request => request.path.endsWith('/cookie')).length;
     await assert.rejects(s.call('previewSync', ref), { code: 'PERMISSION_REQUIRED' });
     await assert.rejects(s.call('auto', { ...ref, enabled: true }), { code: 'PERMISSION_REQUIRED' });
-    await assert.rejects(s.call('startRequest', { baseUrl: s.base, name: '权限测试', platforms: ['pdd'] }), { code: 'PERMISSION_REQUIRED' });
+    assert.ok((await s.call('startRequest', { baseUrl: s.base, name: '权限测试', platforms: ['pdd'] })).requestId);
     assert.equal(s.reads.length, reads);
     assert.equal(s.requests.filter(request => request.path.endsWith('/cookie')).length, uploads);
     assert.equal(paired().selected, true);
@@ -213,26 +217,81 @@ test('an expired poll snapshot cannot clear a newer reverse request from another
   const s = await setup(t);
   s.storage.familyRequest = { requestId: 'expired-request', nonce: 'expired-nonce', expiresAt: Date.now() - 1 };
   const get = chrome.storage.local.get;
-  let releaseRead, releaseCookie, intercepted = false;
+  let releaseRead, releaseRequest, intercepted = false, requestObserved = false;
   const readGate = new Promise(resolve => { releaseRead = resolve; });
-  s.waitCookie(new Promise(resolve => { releaseCookie = resolve; }));
+  const requestGate = new Promise(resolve => { releaseRequest = resolve; });
+  s.intercept(async url => { if (url.endsWith('/requests')) { requestObserved = true; await requestGate; } });
   chrome.storage.local.get = async key => {
     const snapshot = await get(key);
     if (key === 'familyRequest' && !intercepted) { intercepted = true; await readGate; }
     return snapshot;
   };
-  t.after(() => { releaseRead(); releaseCookie(); });
+  t.after(() => { releaseRead(); releaseRequest(); });
   const expired = assert.rejects(s.call('pollRequest'), { code: 'PREVIEW_EXPIRED' });
   for (let n = 0; n < 100 && !intercepted; n++) await tick();
   assert.equal(intercepted, true);
   const newer = s.call('startRequest', { baseUrl: s.base, name: '另一个设置页', platforms: ['pdd'] });
-  for (let n = 0; n < 100 && !s.reads.length; n++) await tick();
-  assert.ok(s.reads.length);
+  for (let n = 0; n < 100 && !requestObserved; n++) await tick();
+  assert.ok(requestObserved);
   const nonce = s.storage.familyRequest.nonce;
   assert.notEqual(nonce, 'expired-nonce');
   releaseRead(); await expired;
   assert.equal(s.storage.familyRequest.nonce, nonce);
-  releaseCookie();
+  releaseRequest();
   const pending = await newer;
   assert.equal((await s.call('pendingRequest')).requestId, pending.requestId);
+});
+
+test('reverse approval with one missing login keeps successful platforms independent and requires first confirmation', async t => {
+  const s = await setup(t), getAll = chrome.cookies.getAll;
+  chrome.cookies.getAll = async query => {
+    if (query.domain === 'yangkeduo.com' || query.url?.includes('yangkeduo.com')) return [];
+    return getAll(query);
+  };
+  const pending = await s.call('startRequest', { baseUrl: s.base, name: '三平台', platforms: ['taobao', 'jd', 'pdd'] });
+  assert.ok(pending.requestId); assert.equal(s.reads.length, 0); assert.equal(s.service.store.accounts().length, 0);
+  await s.api('/v1/admin/cookie-sync/families/requests/' + pending.code + '/approve', { familyId: s.family.id });
+  const approved = await s.call('pollRequest');
+  for (const platform of ['taobao', 'jd']) {
+    const row = approved.group.accounts.find(item => item.account.platform === platform), ref = { id: approved.group.id, accountId: row.account.id };
+    await assert.rejects(s.call('sync', ref), { code: 'NOT_CONFIRMED' });
+    const confirmation = await s.call('previewSync', ref);
+    await s.call('confirmSync', { ...ref, confirmation });
+  }
+  const row = approved.group.accounts.find(item => item.account.platform === 'pdd'), ref = { id: approved.group.id, accountId: row.account.id };
+  await assert.rejects(s.call('previewSync', ref), { code: 'LOGIN_REQUIRED' });
+  const current = (await s.call('list'))[0];
+  assert.equal(current.accounts.find(item => item.account.platform === 'pdd').errorCode, 'LOGIN_REQUIRED');
+  assert.deepEqual(s.service.store.accounts().map(account => account.platform).sort(), ['jd', 'taobao']);
+  assert.equal(s.requests.filter(request => request.path.endsWith('/cookie')).length, 2);
+  assert.ok(!JSON.stringify(s.storage).includes('cookie2='));
+});
+
+test('canceling a family flow invalidates all pending confirmations without deselecting or deleting grants', async t => {
+  const s = await setup(t), account = s.account('pdd'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  const confirmation = await s.call('previewSync', ref);
+  await s.call('cancelSync', { id: group.id });
+  await assert.rejects(s.call('confirmSync', { ...ref, confirmation }), { code: 'REQUEST_CANCELED' });
+  const record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.equal(record.selected, true); assert.equal(record.auto, false);
+  assert.equal(s.requests.filter(request => request.path.endsWith('/cookie')).length, 0);
+  const fresh = await s.call('previewSync', ref); await s.call('confirmSync', { ...ref, confirmation: fresh });
+  await s.call('auto', { ...ref, enabled: true });
+  await s.call('cancelSync', ref);
+  assert.equal((await s.call('list'))[0].accounts.find(item => item.account.id === account.id).auto, true);
+  await s.call('select', { ...ref, enabled: false });
+  await assert.rejects(s.call('auto', { ...ref, enabled: true }), { code: 'PLATFORM_NOT_SELECTED' });
+});
+
+test('canceling a reverse request during metadata response cannot restore the pending request', async t => {
+  const s = await setup(t);
+  let release, observed = false;
+  const gate = new Promise(resolve => { release = resolve; }); t.after(release);
+  s.intercept(async url => { if (url.endsWith('/requests')) { observed = true; await gate; } });
+  const request = s.call('startRequest', { baseUrl: s.base, name: '取消申请', platforms: ['pdd'] });
+  const rejected = assert.rejects(request, { code: 'REQUEST_CANCELED' });
+  for (let n = 0; n < 100 && !observed; n++) await tick();
+  assert.ok(observed); await s.call('cancelRequest'); release(); await rejected;
+  assert.equal(await s.call('pendingRequest'), null); assert.equal(s.reads.length, 0); assert.equal(s.service.store.accounts().length, 0);
 });

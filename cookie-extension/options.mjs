@@ -1,307 +1,156 @@
-import { PLATFORMS, baseOrigin, pairingInput, errorText } from './core.mjs';
-const $ = id => document.getElementById(id);
-let pair = null, pendingSync = null, pendingRequest = null, busy = false, renderVersion = 0;
-let pollTimer, polling = false, requestVersion = 0, pageActive = true;
-const date = n => n ? new Date(n).toLocaleString('zh-CN') : '尚未同步';
-const platformName = platform => PLATFORMS[platform]?.name || platform;
-const target = a => `${a.familyName || '待归属'} · ${platformName(a.platform)} · ${a.label || '平台账号'}`;
-const message = error => error.code ? errorText(error) : error.message;
-const platformFailure = (platform, error) => {
-  const label = platformName(platform) + '：', detail = message(error);
-  return detail.startsWith(label) ? detail : label + detail;
-};
-const statuses = { configured: '等待采集验证', syncing: '正在采集验证', ok: '最近采集成功', expired: '平台登录已失效，请重新登录', error: '采集未完成，请查看后台详情' };
-function notice(value, failed = false) { $('notice').textContent = value; $('notice').className = failed ? 'error' : ''; }
-async function call(action, args = {}) {
-  const result = await chrome.runtime.sendMessage({ action, ...args });
-  if (!result?.ok) throw new Error(result?.message || '插件后台未能响应，请重新打开此页面。');
-  return result.data;
+import { PLATFORMS, baseOrigin, pairingInput, errorText, platformForDomain } from './core.mjs';
+import { rolesFrom, entryKey, entryArgs, entryAction, entryStatus, errorKind, selectionChanges, platformOrder, platformName, formatDate, escapeHtml as esc } from './options-model.mjs';
+import { createSyncFlow } from './sync-flow.mjs';
+import { icon } from './icons.mjs';
+const $=id=>document.getElementById(id), dialog=$('flow-dialog'), content=$('dialog-content');
+const version=chrome.runtime.getManifest().version, releasePage=`https://github.com/zsdd2/kdyzm/releases/tag/cookie-extension-v${version}`;
+let settings={baseUrl:'',name:'我的 Chrome',baseUrls:[]}, legacy=[], groups=[], roles=[];
+let pending=null, pair=null, roleKey='', mode='', connection='checking', modalVersion=0;
+let busy=false, active=true, refreshBusy=false, pollBusy=false, pollTimer, loginTimer, refreshTimer, lastFocus=null, pendingLogin=null;
+const role=()=>roles.find(item=>item.key===roleKey);
+const textError=error=>error.message||errorText(error);
+const btn=(label,action,kind='primary',attrs='')=>`<button type="button" class="button ${kind}" data-action="${action}" ${attrs}>${label}</button>`;
+const logo=id=>`<span class="platform-logo ${id}" aria-hidden="true">${{taobao:'淘',jd:'JD',pdd:'拼'}[id]||''}</span>`;
+const host=value=>{try{return new URL(value||settings.baseUrl).host;}catch{return '尚未设置后台';}};
+const title=(label,description)=>`<h2 id="dialog-title" tabindex="-1">${label}</h2><p class="dialog-description">${description}</p>`;
+const mini=(address=settings.baseUrl)=>`<div class="connection-mini">${icon('cloud')}<span class="host">${esc(host(address))}</span><span class="saved">${address===settings.baseUrl?'已记住':'本次授权目标'}</span></div>`;
+const target=(name,address=settings.baseUrl)=>`<div class="target-pill">${icon('user')}<span>同步至 <strong>${esc(name)}</strong></span><span class="target-host">${esc(host(address))}</span></div>`;
+const steps=n=>`<div class="progress-steps" aria-label="第 ${n} 步，共 3 步">${[1,2,3].map(i=>`<span class="${i<=n?'active':''}"></span>`).join('')}</div>`;
+function notice(message='',failed=false){$('notice').textContent=message;$('notice').className=failed?'error':'';}
+async function call(action,args={}){const result=await chrome.runtime.sendMessage({action,...args});if(!result?.ok)throw Object.assign(new Error(result?.message||'插件后台未响应，请重新打开页面。'),{code:result?.code,status:result?.status,platform:result?.platform});return result.data;}
+function permissions(platforms=[],address=settings.baseUrl){return chrome.permissions.request({origins:[...new Set([...(address?[baseOrigin(address)+'/*']:[]),...platforms.flatMap(id=>PLATFORMS[id].origins)])]});}
+async function requirePermission(promise){if(!await promise)throw Object.assign(new Error('未授予所选站点权限，可以稍后授权并继续。'),{code:'PERMISSION_REQUIRED'});}
+function busyControls(){for(const el of content.querySelectorAll('button,input,textarea')){if(el.dataset.action==='close')continue;if(busy){if(!el.hasAttribute('data-previous-disabled'))el.dataset.previousDisabled=String(el.disabled);el.disabled=true;}else if(el.hasAttribute('data-previous-disabled')){el.disabled=el.dataset.previousDisabled==='true';delete el.dataset.previousDisabled;}}}
+async function run(fn){if(busy)return;const epoch=modalVersion;busy=true;busyControls();try{await fn();}catch(error){if(epoch===modalVersion&&$('dialog-error'))$('dialog-error').textContent=textError(error);else notice(textError(error),true);}finally{busy=false;busyControls();}}
+function shell(view,kicker,body){mode=view;const opening=!dialog.open;if(opening){lastFocus=document.activeElement;modalVersion++;}content.innerHTML=`<div class="dialog-top"><div class="dialog-kicker">${icon('package')}${esc(kicker)}</div><button class="icon-button" data-action="close" aria-label="关闭弹窗">${icon('close')}</button></div><div class="dialog-body">${body}<p id="dialog-error" role="alert"></p></div>`;if(opening)dialog.showModal();busyControls();$('dialog-title')?.focus({preventScroll:true});}
+function close(){modalVersion++;mode='';pair=null;pendingLogin=null;clearTimeout(loginTimer);void flow.cancel().catch(()=>{});if(dialog.open)dialog.close();}
+dialog.addEventListener('cancel',event=>{event.preventDefault();close();});
+dialog.addEventListener('close',()=>{if(lastFocus?.isConnected&&!dialog.open)lastFocus.focus();});
+async function loadLocal(){const [s,l,g,p]=await Promise.all([call('settings:get'),call('list'),call('family:list'),call('family:pendingRequest')]);settings=s;legacy=l;groups=g;pending=p;roles=rolesFrom(legacy,groups,settings.baseUrl);render();}
+function render(){
+ const saved=!!settings.baseUrl, label=!saved?'未设置':connection==='checking'?'正在更新':connection==='offline'?'暂时离线':connection==='online'?'已连接':'地址已保存';
+ const hosts=settings.baseUrls.length>1?`<select id="backend-select" class="backend-select" aria-label="切换后台">${settings.baseUrls.map(address=>`<option value="${esc(address)}" ${address===settings.baseUrl?'selected':''}>${esc(host(address))}</option>`).join('')}</select>`:`<span class="hostname">${saved?esc(host()):'保存一次，之后自动记住'}</span>`;
+ $('main').innerHTML=`<div class="page-heading"><div><p class="eyebrow">CONNECTED. SIMPLY.</p><h1>登录同步</h1><p>把平台登录留给浏览器，把同步交给取件助手。</p></div><span class="page-note">让每一次登录，都刚刚好。</span></div><section class="connection-bar"><span class="connection-icon">${icon('cloud')}</span><div class="connection-copy"><strong>我的后台</strong>${hosts}</div><span class="status ${connection==='online'?'green':connection==='offline'?'amber':'blue'}">${label}</span><button class="icon-button" data-action="address" aria-label="后台地址设置">${icon('chevron')}</button></section>`
+ +(connection==='offline'?`<div class="inline-notice">${icon('info')}<span class="notice-copy">暂时无法连接后台，已保留角色授权和上次同步状态。</span>${btn('重试','refresh','small tertiary')}</div>`:'')
+ +(pending?`<div class="inline-notice info pending-bar">${icon('clock')}<span class="notice-copy">${pending.expiresAt>Date.now()?'有一份授权申请正在等待后台批准。':'授权申请已过期，原有角色不受影响。'}</span>${btn('查看','waiting','small tinted')}</div>`:'')
+ +(roles.length?roles.map(renderRole).join('')+`<button class="add-authorization" data-action="add">${icon('plus')}添加授权<span>绑定后台 · 反向授权</span></button>`:`<section class="role-card empty-state" id="empty"><div class="empty-graphic">${platformOrder.map(logo).join('')}</div><h2>从一次授权开始。</h2><p>选择要同步的平台，连接到你的角色。<br>以后只需一键，登录状态即可同步。</p>${btn(icon('plus')+'添加授权','add')}<p class="compact-note">支持淘宝、京东、拼多多</p></section>`);
 }
-function node(tag, text, cls = '') { const el = document.createElement(tag); el.textContent = text; if (cls) el.className = cls; return el; }
-function controls() {
-  document.querySelectorAll('button, input, textarea').forEach(el => {
-    el.disabled = busy || el.dataset.allowed === 'false' || (!!pendingRequest && el.dataset.requestInput === 'true');
-  });
+function renderRole(item){const selected=item.entries.filter(e=>e.selected),auto=selected.filter(e=>e.auto).length;return `<section class="role-card" data-role="${esc(item.key)}"><div class="role-heading"><span class="avatar">${icon('user')}</span><div class="role-title"><h2>${esc(item.name)}</h2><p>${selected.length} 个账号 · ${item.family?'已获得角色授权':'单账号授权'}</p></div><span class="role-tag">${item.family?'角色':'兼容授权'}</span><button class="icon-button" data-action="more" data-role="${esc(item.key)}" aria-label="${esc(item.name)}更多操作">${icon('more')}</button></div>${item.error?`<div class="inline-notice role-error">${icon('info')}<span>${esc(item.error)}</span></div>`:''}<div class="platform-list">${selected.length?selected.map(entry=>renderEntry(entry,item)).join(''):'<p class="compact-note">还没有选择平台，在“管理平台”中添加。</p>'}</div><div class="role-bottom"><div class="role-actions">${btn(icon('sync')+'同步所选平台','sync','primary',`data-role="${esc(item.key)}" ${selected.length?'':'disabled'}`)}${btn('管理平台','manage','tertiary',`data-role="${esc(item.key)}"`)}</div><span class="auto-summary">${icon('sync')}${auto?`自动同步已开启 · ${auto} 个账号`:'自动同步未开启'}</span></div></section>`;}
+function renderEntry(entry,item){const s=entryStatus(entry),color={verified:'green',pending:'blue',new:'blue',login:'amber',permission:'amber'}[s.kind]||'red';return `<div class="platform-row" data-entry="${esc(entryKey(entry))}">${logo(entry.account.platform)}<div class="platform-info"><div class="platform-name">${platformName(entry.account.platform)}</div><div class="platform-account">${esc(s.action?s.label:entry.connection?.identityHint||entry.account.label||'首次同步时核对')}</div></div><div class="platform-state"><div class="state-label ${color}-text">${icon(s.kind==='verified'?'checkCircle':s.kind==='pending'?'clock':'info')}${s.label}</div><p>${esc(s.kind==='verified'?formatDate(entry.connection.lastSyncAt)+' · 已验证':s.detail)}</p></div><div class="row-action">${s.action?btn(s.action,'remedy','small tinted',`data-role="${esc(item.key)}" data-entry="${esc(entryKey(entry))}"`):''}</div></div>`;}
+async function refreshActive(){
+ if(refreshBusy||!active||document.hidden)return;const address=settings.baseUrl;if(!address)return;refreshBusy=true;connection='checking';render();
+ const targets=[...groups.filter(g=>g.baseUrl===address).map(g=>['family:status',{id:g.id}]),...legacy.filter(i=>i.baseUrl===address).map(i=>['status',{id:i.id}])];
+ try{const results=await Promise.allSettled(targets.map(([action,args])=>call(action,args)));if(settings.baseUrl!==address)return;connection=!results.length?'saved':results.some(r=>r.status==='fulfilled')?'online':results.some(r=>errorKind(r.reason)==='network')?'offline':'saved';await loadLocal();}finally{refreshBusy=false;}
 }
-async function run(fn) {
-  if (busy) return;
-  busy = true; controls();
-  try { await fn(); } catch (error) { notice(message(error), true); }
-  finally { busy = false; controls(); }
+function chooser(){if(!settings.baseUrl)return addressView();shell('chooser','添加授权',title('选择连接方式','两种方式，同一个目的地。')+mini()+`<div class="choice-list"><button class="choice" data-action="bind"><span class="choice-icon">${icon('link')}</span><span class="choice-copy"><strong>绑定后台</strong><small>已有配对信息，直接连接角色</small></span>${icon('chevron')}</button><button class="choice" data-action="reverse"><span class="choice-icon reverse">${icon('reverse')}</span><span class="choice-copy"><strong>反向授权</strong><small>从这里发起，由后台选择角色并批准</small></span>${icon('chevron')}</button></div><p class="compact-note center">后台地址会自动沿用，无需重复填写。</p>`);}
+function addressView(){shell('address','后台设置',title(settings.baseUrl?'你的后台，已记住。':'先连接你的后台。','两种授权方式共用这个地址。')+`<label class="form-label" for="backend-address">后台 HTTPS 地址</label><input type="url" id="backend-address" value="${esc(settings.baseUrl)}" placeholder="https://你的后台地址" autocomplete="off"><p class="input-hint">新地址会独立保存，原有角色授权仍保留。暂时离线也不会清除配置。</p><div class="dialog-actions">${btn('取消','close','tertiary')}${btn('保存地址','save-address')}</div>`);}
+function bindView(){pair=null;shell('bind','绑定后台',title('连接到你的角色。','粘贴后台生成的配对信息，下一步选择平台。')+steps(1)+mini()+`<label class="form-label" for="pair-info">配对信息</label><textarea id="pair-info" maxlength="2048" autocomplete="off" spellcheck="false" placeholder="粘贴配对信息或角色配对码"></textarea><p class="input-hint">兼容旧版单平台配对码，保持原授权范围。</p><div class="dialog-actions spread">${btn('返回','add','tertiary')}${btn('下一步'+icon('arrow'),'preview-pair')}</div>`);}
+function candidates(){if(pair?.scope!=='family')return[{account:pair.account}];const records=[...pair.accounts];for(const id of platformOrder)if(!records.some(r=>r.account.platform===id))records.push({account:{id:'platform-'+id,platform:id,label:'首次同步时添加'}});return records.sort((a,b)=>platformOrder.indexOf(a.account.platform)-platformOrder.indexOf(b.account.platform));}
+function selectView(reverse=false){
+ const records=reverse?platformOrder.map(id=>({account:{id,platform:id}})):candidates();
+ shell(reverse?'reverse':'select',reverse?'反向授权':'绑定后台',title('选择要同步的平台。',reverse?'先选择平台，再由后台决定授权给哪个角色。':'只读取你选择的平台，之后可以随时修改。')+steps(2)+(reverse?mini():target(pair.family?.name||pair.account.familyName||pair.account.label,pair.baseUrl))
+ +(!reverse&&pair.baseUrl!==settings.baseUrl?`<div class="inline-notice">${icon('info')}<span>配对信息指向新的后台。确认后使用上方地址，原授权不会迁移。</span></div>`:'')
+ +records.map(({account})=>`<label class="select-row">${logo(account.platform)}<span class="platform-info"><span class="platform-name">${platformName(account.platform)}</span><span class="platform-account" style="display:block">${esc(account.label||'未登录也可稍后补充')}</span></span><input type="checkbox" name="choose" value="${esc(account.id)}" data-platform="${account.platform}" aria-label="选择${platformName(account.platform)} ${esc(account.label||'')}"></label>`).join('')+`<p class="select-note">后续自动同步默认关闭。同平台有多个账号时，选择本次使用的一个。</p><div class="dialog-actions spread">${btn('返回',reverse?'add':'bind','tertiary')}${btn(reverse?'发起授权申请':'确认授权并检查',reverse?'request':'bind-selected','primary','id="selection-next" disabled')}</div>`);
 }
-function button(label, fn, cls = 'secondary', allowed = true) {
-  const el = node('button', label, cls); el.type = 'button'; el.dataset.allowed = String(allowed);
-  el.addEventListener('click', () => run(fn)); return el;
+function waitingView(){if(!pending)return chooser();const expired=pending.expiresAt<=Date.now();shell('waiting','反向授权',`<div class="status-hero"><div class="status-orb ${expired?'warning':''}">${icon(expired?'clock':'cloud')}</div>${title(expired?'申请已过期。':'等待后台授权。',expired?'后台地址已保留，可重新选择平台发起申请。':'请在后台选择或新建角色，然后批准本次申请。')}</div><div class="wait-progress">${expired?icon('info'):'<span class="spinner"></span>'}<span>${expired?'本次申请已过期':'等待管理员批准'}</span><small>有效至 ${formatDate(pending.expiresAt)}</small></div>${mini(pending.baseUrl)}<p class="compact-note">已选择 ${pending.platforms.map(platformName).join('、')}。未登录的平台可在授权后补充。</p><details class="details"><summary>申请详情</summary><p>申请码：${esc(pending.code)}<br>批准前不会发送平台 Cookie。</p></details><div class="dialog-actions spread">${btn('取消申请','cancel-request','tertiary')}${expired?btn('重新申请','restart-request'):btn('打开后台'+icon('external'),'open-request')}</div>`);}
+function manageView(){const current=role();if(!current)return;shell('manage','平台管理',title('按你的习惯，同步。','选择本次同步的平台，按需开启后续自动同步。')+target(current.name)+`<div class="manage-head"><span>平台 / 账号</span><span class="head-right"><span>同步</span><span>自动同步</span></span></div>`+current.entries.map(entry=>`<div class="manage-row">${logo(entry.account.platform)}<span class="platform-info"><span class="platform-name">${platformName(entry.account.platform)}</span><span class="platform-account" style="display:block">${esc(entry.connection?.identityHint||entry.account.label)}</span></span><label class="select-check"><input type="checkbox" name="selected" value="${esc(entryKey(entry))}" data-platform="${entry.account.platform}" aria-label="同步${platformName(entry.account.platform)} ${esc(entry.account.label)}" ${entry.selected?'checked':''}></label><label class="switch"><input type="checkbox" role="switch" name="auto" value="${esc(entryKey(entry))}" aria-label="自动同步${platformName(entry.account.platform)} ${esc(entry.account.label)}" ${entry.auto?'checked':''} ${entry.selected&&entry.connection?.identityBound?'':'disabled'}><i></i></label></div>`).join('')+`<p class="compact-note">首次账号需要先核对再开启自动同步。浏览器退出或休眠时会延迟同步；验证码和扫码仍需你完成。</p><div class="dialog-actions">${btn('取消','close','tertiary')}${btn('保存设置','save-platforms')}</div>`);}
+function resultAction(result){const label={login:'去登录',permission:'授予权限',conflict:'查看账号',authorization:'重新授权',network:'重试',check:'重新检查',error:'查看详情'}[errorKind(result.error)];return btn(label,'result-remedy','small tinted',`data-entry="${esc(entryKey(result.entry))}"`);}
+function flowView(state){
+ if(!state||!active)return;
+ if(pendingLogin&&state.results.some(r=>entryKey(r.entry)===entryKey(pendingLogin.entry)&&['confirm','synced'].includes(r.status))){pendingLogin=null;clearTimeout(loginTimer);}
+ const confirmations=state.results.filter(r=>r.status==='confirm'),completed=state.results.filter(r=>r.status==='synced').length,checking=['checking','syncing'].includes(state.phase);
+ const label=checking?(state.phase==='checking'?'正在检查并同步。':'正在同步所选平台。'):confirmations.length?'确认一次，安心同步。':completed?`已同步 ${completed} 个平台。`:'还有平台需要处理。';
+ const description=checking?'各平台独立处理，缺少登录可以稍后补充。':confirmations.length?'请确认这些账号属于目标角色；已核对过的账号会直接同步。':completed?'登录信息已送达，实际有效性以后台采集验证为准。':'按平台提示继续，其他成功项会保留。';
+ shell('flow',confirmations.length?'账号核对':'同步结果',`<div class="status-hero"><div class="status-orb ${!checking&&completed===state.entries.length?'success':''}">${checking?'<span class="spinner"></span>':icon(completed===state.entries.length?'check':'cloud')}</div>${title(label,description)}</div>${target(state.role.name,state.role.baseUrl)}${confirmations.length?`<div id="confirm-accounts">${confirmations.map(result=>`<div class="account-row">${logo(result.entry.account.platform)}<div class="platform-info"><strong>${platformName(result.entry.account.platform)}</strong><p>${esc(result.confirmation.identityHint)}</p></div><span class="subtle-tag">首次核对</span></div>`).join('')}</div>`:''}<div class="result-list" id="results">${state.results.filter(r=>r.status!=='confirm').map(result=>`<div class="account-row" data-entry="${esc(entryKey(result.entry))}">${logo(result.entry.account.platform)}<div class="platform-info"><strong>${platformName(result.entry.account.platform)}</strong><p>${result.status==='synced'?'已同步 · 等待采集验证':esc(({login:'需要登录',permission:'需要授权',conflict:'账号不匹配',authorization:'授权已失效',network:'连接失败'})[errorKind(result.error)]||'需要重新检查')}</p>${result.error?`<details class="details"><summary>查看诊断</summary><p class="diagnostic">${esc(result.error.message)}</p></details>`:''}</div>${result.status==='synced'?`<span class="result-check">${icon('checkCircle')}</span>`:resultAction(result)}</div>`).join('')}</div><div class="dialog-actions">${btn(checking?'取消本次同步':'完成','close',confirmations.length?'tertiary':'secondary')}${!checking&&confirmations.length?btn(`确认并同步 ${confirmations.length} 个平台`,'confirm-sync'):''}</div>`);
 }
-async function authorizePlatforms(platforms) {
-  const origins = [...new Set(platforms.flatMap(platform => PLATFORMS[platform].origins))];
-  if (!await chrome.permissions.request({ origins })) throw new Error('未授权读取所选平台登录信息，本次未读取或同步。');
+const flow=createSyncFlow({call,changed:flowView,refresh:loadLocal});
+function settingsView(){shell('settings','取件助手',title('设置','常用的保持简单，更多的留在这里。')+`<section class="settings-section"><h3>连接</h3><div class="settings-group"><button class="setting-row" data-action="address">${icon('cloud')}<span class="setting-copy">后台地址<small>${esc(settings.baseUrl||'尚未设置')}</small></span>${icon('chevron')}</button><button class="setting-row" data-action="name">${icon('monitor')}<span class="setting-copy">浏览器名称</span><span>${esc(settings.name)}</span>${icon('chevron')}</button></div></section><section class="settings-section"><h3>版本与更新</h3><div class="settings-group"><button class="setting-row" data-action="update">${icon('download')}<span class="setting-copy">本地覆盖更新<small>保留当前目录和授权设置</small></span><span>${esc(version)}</span>${icon('chevron')}</button></div></section><section class="settings-section"><h3>帮助</h3><div class="settings-group"><button class="setting-row" data-action="refresh">${icon('sync')}<span class="setting-copy">刷新后台状态</span>${icon('chevron')}</button><button class="setting-row" data-action="diagnostics">${icon('info')}<span class="setting-copy">连接诊断</span>${icon('chevron')}</button></div></section><div class="dialog-actions">${btn('完成','close')}</div>`);}
+function updateView(){shell('update','本地升级',`<div class="status-hero"><div class="status-orb">${icon('download')}</div>${title('更新软件，保留习惯。','在原目录覆盖更新，继续使用同一个插件。')}</div><div class="update-version"><span class="version-number">${esc(version)}<small>当前版本</small></span></div><ol class="update-steps"><li><span class="step-number">1</span><div><strong>打开本地更新工具</strong><p>首次选择 Chrome 当前加载的插件目录，之后自动记住。</p></div></li><li><span class="step-number">2</span><div><strong>确认版本与原目录</strong><p>更新工具校验安装包并备份，失败恢复原文件。</p></div></li><li><span class="step-number">3</span><div><strong>重新加载插件</strong><p>覆盖完成后点击下方按钮，无需卸载或重新配对。</p></div></li></ol><div class="dialog-actions">${btn('检查更新 / 获取工具','get-update','secondary')}${btn('重新加载插件','reload-confirm')}</div><p class="compact-note">也可直接使用安装包中的 Update-CookieExtension.cmd。覆盖前请结束正在进行的同步。</p>`);}
+function moreView(){const current=role();if(!current)return;shell('more','角色设置',title(esc(current.name),'管理此角色的同步授权。')+target(current.name)+`<div class="settings-group"><div class="setting-row">${icon('shield')}<span class="setting-copy">授权范围<small>${current.family?'此角色内支持的平台':'仅以下单账号授权，不扩展权限'}</small></span></div>${current.entries.map(entry=>`<div class="setting-row"><span class="setting-copy">${platformName(entry.account.platform)}<small>${esc(entry.account.label)}</small></span><span>${formatDate(entry.connection?.expiresAt||current.expiresAt)}</span></div>`).join('')}</div><div class="dialog-actions spread">${btn('撤销授权','revoke-confirm','danger')}${btn('完成','close','secondary')}</div>`);}
+function detailsView(entry,error){shell('details','平台诊断',title(errorKind(error)==='conflict'?'这个账号，暂时不同。':'查看平台状态','不会自动替换已有账号。按提示处理后，再重新同步。')+target(role()?.name||flow.state?.role.name||'当前角色')+`<div class="account-row">${logo(entry.account.platform)}<div class="platform-info"><strong>${platformName(entry.account.platform)}</strong><p>后台已核对账号：${esc(entry.connection?.identityHint||'尚未核对')}</p></div></div><p class="detail-error">${esc(error.message||error.error||entryStatus(entry).detail)}</p><div class="dialog-actions">${btn('关闭','close','tertiary')}${btn('打开平台登录','open-login','secondary',`data-entry="${esc(entryKey(entry))}"`)}${btn('重新检查','retry-entry','primary',`data-entry="${esc(entryKey(entry))}"`)}</div>`);}
+function loginView(entry){pendingLogin={entry,version:modalVersion,started:Date.now()};shell('login','补充平台登录',`<div class="status-hero"><div style="display:flex;justify-content:center;margin-bottom:22px">${logo(entry.account.platform)}</div>${title(`登录${platformName(entry.account.platform)}，然后回来。`,'请在安装此插件的同一个 Chrome 用户配置中完成登录。')}</div>${target(flow.state?.role.name||role()?.name||'当前角色')}<div class="inline-notice info">${icon('info')}<span>返回后会重新检查此平台，已同步的平台无需重复操作。</span></div><div class="dialog-actions">${btn('重新检查','retry-entry','secondary',`data-entry="${esc(entryKey(entry))}"`)}${btn('打开平台'+icon('external'),'open-login','primary',`data-entry="${esc(entryKey(entry))}"`)}</div><p class="compact-note center">拼多多支持开发者工具中的平板模拟模式。</p>`);pendingLogin.version=modalVersion;}
+function findEntry(key){return roles.flatMap(item=>item.entries).find(entry=>entryKey(entry)===key)||flow.state?.entries.find(entry=>entryKey(entry)===key);}
+async function retryEntry(entry){if(flow.state?.entries.some(item=>entryKey(item)===entryKey(entry)))await flow.retry(entry);else await flow.start(role(),[entry]);}
+function autoRecheck(){if(!pendingLogin||!active||document.hidden||busy||flow.running)return;const saved=pendingLogin;clearTimeout(loginTimer);loginTimer=setTimeout(()=>{if(saved!==pendingLogin||saved.version!==modalVersion||!active||document.hidden||busy)return;void run(()=>retryEntry(saved.entry));},650);}
+async function poll(){
+ clearTimeout(pollTimer);if(!pending||!active||document.hidden)return;if(pending.expiresAt<=Date.now()){if(mode==='waiting')waitingView();return;}if(busy||pollBusy){pollTimer=setTimeout(poll,3000);return;}
+ const requestId=pending.requestId,epoch=modalVersion,continueFlow=mode==='waiting';pollBusy=true;
+ try{const result=await call('family:pollRequest');if(pending?.requestId!==requestId||!active)return;if(result.status==='approved'){
+  const group=result.group;pending=null;if(settings.baseUrl!==group.baseUrl){await loadLocal();notice(`后台已批准“${group.family.name}”，请切换到 ${host(group.baseUrl)} 继续同步。`);return;}
+  await loadLocal();if(!active)return;notice(`后台已批准角色“${group.family.name}”。`);if(epoch!==modalVersion||!continueFlow)return;roleKey='family/'+group.id;await flow.start(role(),role().entries.filter(entry=>entry.selected));
+ }}catch(error){notice(textError(error),true);if(['PREVIEW_EXPIRED','REQUEST_CANCELED','COOKIE_REQUEST_INVALID'].includes(error.code)){pending=await call('family:pendingRequest').catch(()=>null);render();}}
+ finally{pollBusy=false;if(pending)pollTimer=setTimeout(poll,3000);}
 }
-function checkbox(labelText, checked, allowed = true) {
-  const input = document.createElement('input'); input.type = 'checkbox'; input.checked = !!checked; input.dataset.allowed = String(allowed);
-  const label = node('label', '', 'check'); label.append(input, document.createTextNode(labelText));
-  return { input, label };
-}
-function syncStatus(card, item) {
-  const connection = item.connection;
-  card.append(node('p', `登录信息同步：${date(connection?.lastSyncAt)}`, 'status'));
-  card.append(node('p', item.unconfigured ? '首次确认同步后，会在此角色下添加平台账号。' : statuses[item.account.status] || '尚未验证', 'hint'));
-  if (connection?.identityHint) card.append(node('p', `已核对账号：${connection.identityHint}`, 'hint'));
-  if (item.error) card.append(node('p', item.error, 'account-error'));
-  if (item.account.platform === 'pdd') card.append(node('p', '请在此浏览器的拼多多网页订单页登录；手机 App 登录不会同步到浏览器。', 'hint'));
-}
-function showConfirmation(entries, { familyName, failures = [] } = {}) {
-  pendingSync = { entries, failures, familyName };
-  $('confirm-title').textContent = familyName ? '核对已选平台' : '核对首次同步';
-  $('confirm-target').textContent = familyName ? `同步到角色：${familyName}` : target(entries[0].confirmation.account);
-  $('confirm-identity').textContent = familyName ? '请逐项核对浏览器账号，确认后会分别同步。' : `浏览器账号：${entries[0].confirmation.identityHint}`;
-  const list = $('confirm-accounts'); list.replaceChildren();
-  if (familyName) for (const entry of entries) {
-    list.append(node('li', `${platformName(entry.confirmation.account.platform)} · ${entry.confirmation.account.label || '平台账号'} · ${entry.confirmation.identityHint}`));
-  }
-  list.hidden = !familyName;
-  $('confirm-errors').textContent = failures.length ? `以下平台未读取成功，本次不会同步：\n${failures.join('\n')}` : '';
-  $('confirm-dialog').showModal();
-}
-async function render() {
-  const version = ++renderVersion;
-  const [items, groups] = await Promise.all([call('list'), call('family:list')]);
-  if (version !== renderVersion || !pageActive) return;
-  $('connections').replaceChildren();
-  $('empty').textContent = '还没有授权角色。可以先在浏览器登录平台，再到后台选择角色授权；也可以粘贴后台生成的配对信息。';
-  $('empty').hidden = items.length + groups.length > 0;
-  for (const group of groups) renderFamily(group);
-  if (items.length) $('connections').append(node('h3', '单账号配对', 'legacy-title'));
-  for (const item of items) renderLegacy(item);
-  controls();
-}
-function renderLegacy(item) {
-  const card = node('article', '', 'account'); card.dataset.id = item.id;
-  card.append(node('h3', target(item.account)), node('p', item.baseUrl, 'hint'));
-  syncStatus(card, item);
-  card.append(node('p', `授权到期：${date(item.connection.expiresAt)}`, 'hint'));
-  const auto = checkbox('登录信息变化时自动同步', item.auto, item.connection.identityBound);
-  auto.input.setAttribute('aria-label', target(item.account) + '自动同步');
-  auto.input.addEventListener('change', () => {
-    if (busy) { auto.input.checked = item.auto; return; }
-    const enabled = auto.input.checked;
-    void run(async () => { try {
-      if (enabled) await authorizePlatforms([item.account.platform]);
-      await call('auto', { id: item.id, enabled });
-    } finally { await render(); } });
-  });
-  card.append(auto.label);
-  const actions = node('div', '', 'actions');
-  actions.append(button('打开登录页', () => call('login', { id: item.id })));
-  actions.append(button(item.connection.identityBound ? '立即同步' : '读取并核对登录', async () => {
-    await authorizePlatforms([item.account.platform]);
-    if (item.connection.identityBound) {
-      const result = await call('sync', { id: item.id });
-      notice(result.pending ? '正在同步，请稍后刷新状态。' : result.changed ? '登录信息已同步，采集状态以后台验证结果为准。' : '登录信息未变化。'); await render();
-    } else showConfirmation([{ id: item.id, confirmation: await call('previewSync', { id: item.id }) }]);
-  }, ''));
-  actions.append(button('撤销并移除', async () => {
-    if (!confirm(`撤销 ${target(item.account)} 的插件授权？后台历史和账号保持不变。`)) return;
-    await call('remove', { id: item.id }); await render(); notice('插件授权已撤销。');
-  }, 'danger'));
-  card.append(actions); $('connections').append(card);
-}
-function renderFamily(group) {
-  const card = node('article', '', 'account family'); card.dataset.id = group.id;
-  card.append(node('h3', group.family.name), node('p', `${group.baseUrl} · 授权到期：${date(group.connection.expiresAt)}`, 'hint'));
-  card.append(node('p', '勾选要同步的平台。以后新增的平台账号默认不勾选；首次同步需核对账号。', 'hint'));
-  if (group.error) card.append(node('p', group.error, 'account-error'));
-  if (!group.accounts.length) card.append(node('p', '此角色暂无可同步的平台，请刷新状态或更新配套后台。', 'hint'));
-  for (const item of group.accounts) {
-    const row = node('div', '', 'platform-account'); row.dataset.accountId = item.account.id;
-    row.append(node('h4', `${platformName(item.account.platform)} · ${item.account.label || '平台账号'}`));
-    const select = checkbox('同步此平台', item.selected);
-    select.input.setAttribute('aria-label', `${group.family.name} · ${platformName(item.account.platform)} 同步此平台`);
-    select.input.addEventListener('change', () => {
-      if (busy) { select.input.checked = item.selected; return; }
-      const enabled = select.input.checked;
-      // Permission requests must remain directly in the user's checkbox gesture.
-      const permission = enabled ? chrome.permissions.request({ origins: PLATFORMS[item.account.platform].origins }) : Promise.resolve(true);
-      void run(async () => {
-        try {
-          if (!await permission) throw new Error('未授权读取此平台登录信息，该平台保持关闭。');
-          await call('family:select', { id: group.id, accountId: item.account.id, enabled });
-        } finally { await render(); }
-      });
-    });
-    row.append(select.label); syncStatus(row, item);
-    const auto = checkbox('登录信息变化时自动同步', item.auto, !!(item.selected && item.connection?.identityBound));
-    auto.input.setAttribute('aria-label', `${target(item.account)}自动同步`);
-    auto.input.addEventListener('change', () => {
-      if (busy) { auto.input.checked = item.auto; return; }
-      const enabled = auto.input.checked;
-      void run(async () => { try {
-        if (enabled) await authorizePlatforms([item.account.platform]);
-        await call('family:auto', { id: group.id, accountId: item.account.id, enabled });
-      } finally { await render(); } });
-    });
-    row.append(auto.label);
-    const actions = node('div', '', 'actions');
-    actions.append(button('打开登录页', () => call('family:login', { id: group.id, accountId: item.account.id })));
-    actions.append(button(item.connection?.identityBound ? '立即同步' : '读取并核对登录', async () => {
-      await authorizePlatforms([item.account.platform]);
-      const args = { id: group.id, accountId: item.account.id };
-      if (item.connection?.identityBound) {
-        const result = await call('family:sync', args);
-        notice(result.pending ? '正在同步，请稍后刷新状态。' : result.changed ? '登录信息已同步，采集状态以后台验证结果为准。' : '登录信息未变化。'); await render();
-      } else showConfirmation([{ ...args, family: true, confirmation: await call('family:previewSync', args) }], { familyName: group.family.name });
-    }, 'secondary', item.selected));
-    row.append(actions); card.append(row);
-  }
-  const actions = node('div', '', 'actions');
-  actions.append(button('读取并核对已选平台', async () => {
-    await authorizePlatforms(group.accounts.filter(item => item.selected).map(item => item.account.platform));
-    const entries = [], failures = [];
-    for (const item of group.accounts.filter(account => account.selected)) {
-      const args = { id: group.id, accountId: item.account.id };
-      try { entries.push({ ...args, family: true, confirmation: await call('family:previewSync', args) }); }
-      catch (error) { failures.push(platformFailure(item.account.platform, error)); }
-    }
-    if (!entries.length) { await render(); notice(failures.length ? failures.join('\n') : '请先勾选要同步的平台。', !!failures.length); return; }
-    showConfirmation(entries, { familyName: group.family.name, failures });
-  }, '', group.accounts.some(item => item.selected)));
-  actions.append(button('刷新角色平台', async () => { await call('family:status', { id: group.id }); await render(); notice('角色平台已刷新，新增账号需手动勾选。'); }));
-  actions.append(button('撤销角色授权', async () => {
-    if (!confirm(`撤销 ${group.family.name} 的全部插件同步授权？后台历史和账号保持不变。`)) return;
-    await call('family:remove', { id: group.id }); await render(); notice('角色的插件授权已撤销。');
-  }, 'danger'));
-  card.append(actions); $('connections').append(card);
-}
-function cancelPair() { pair = null; $('pair-confirm').hidden = true; $('pair-info').value = ''; }
-$('pair-form').addEventListener('submit', event => {
-  event.preventDefault(); if (busy) return;
-  let input;
-  try { input = pairingInput($('pair-info').value, $('base-url').value); } catch (error) { notice(errorText(error), true); return; }
-  const permission = chrome.permissions.request({ origins: [input.baseUrl + '/*'] });
-  void run(async () => {
-    pair = null; $('pair-confirm').hidden = true;
-    if (!await permission) throw new Error('未授权访问后台，配对尚未开始。');
-    const preview = await call(input.scope === 'family' ? 'family:previewPair' : 'previewPair', input); pair = { ...input, ...preview };
-    $('pair-target').textContent = input.scope === 'family' ? `角色：${preview.family.name}` : target(preview.account);
-    $('pair-origin').textContent = `${input.baseUrl} · 有效至 ${date(preview.expiresAt)}`;
-    $('pair-scope').textContent = input.scope === 'family' ? `授权覆盖此角色当前及以后新增的支持平台（${Object.values(PLATFORMS).map(p => p.name).join('、')}）。配对后由你勾选同步平台，默认全部关闭。` : '此配对只授权上方的单个平台账号。';
-    $('pair-accept').textContent = input.scope === 'family' ? '确认配对角色' : '确认配对并授权平台';
-    $('pair-confirm').hidden = false; notice(input.scope === 'family' ? '请核对目标角色，再确认配对。' : '请核对目标账号，再确认配对。');
-  });
+document.addEventListener('click',event=>{
+ const control=event.target.closest('[data-action]');if(!control||control.disabled)return;event.preventDefault();const action=control.dataset.action;
+ if(action==='close'){close();return;}if(busy)return;if(control.dataset.role)roleKey=control.dataset.role;const entry=control.dataset.entry?findEntry(control.dataset.entry):null;
+ if(action==='home'){close();render();return;}
+ if(action==='add'){close();chooser();return;}
+ if(action==='address'){close();addressView();return;}
+ if(action==='settings'){close();settingsView();return;}
+ if(action==='bind'){bindView();return;}
+ if(action==='reverse'){if(pending)waitingView();else selectView(true);return;}
+ if(action==='manage'){void flow.cancel();pendingLogin=null;manageView();return;}
+ if(action==='more'){moreView();return;}
+ if(action==='update'){updateView();return;}
+ if(action==='waiting'){waitingView();void poll();return;}
+ if(action==='get-update'){void chrome.tabs.create({url:releasePage});return;}
+ if(action==='name'){shell('name','浏览器设置',title('让后台认得这台浏览器。','名称会显示在反向授权申请中。')+`<label class="form-label" for="browser-name">浏览器名称</label><input id="browser-name" type="text" maxlength="80" value="${esc(settings.name)}"><div class="dialog-actions">${btn('返回','settings','tertiary')}${btn('保存','save-name')}</div>`);return;}
+ if(action==='diagnostics'){shell('diagnostics','连接诊断',title('连接状态，一目了然。','以下仅展示状态，不包含 Cookie 或配对令牌。')+`<div class="settings-group"><div class="setting-row"><span class="setting-copy">后台</span><span>${esc(host())}</span></div><div class="setting-row"><span class="setting-copy">连接状态</span><span>${({online:'已连接',offline:'暂时离线',checking:'正在更新',saved:'地址已保存'})[connection]}</span></div><div class="setting-row"><span class="setting-copy">版本</span><span>${esc(version)}</span></div></div><div class="dialog-actions">${btn('刷新状态','refresh','secondary')}${btn('完成','close')}</div>`);return;}
+ if(action==='revoke-confirm'){shell('revoke','撤销授权',title(`断开“${esc(role().name)}”的授权？`,'此角色将停止同步，其他角色和已保存的后台地址不受影响。')+`<div class="dialog-actions">${btn('保留授权','close','secondary')}${btn('确认撤销','revoke','danger')}</div>`);return;}
+ if(action==='reload-confirm'){shell('reload','重新加载',title('已完成原目录覆盖？','确认更新工具已完成覆盖，并结束其他插件页面正在进行的同步。重载将关闭当前页面。')+`<div class="dialog-actions">${btn('暂不重载','close','secondary')}${btn('确认重新加载','reload')}</div>`);return;}
+ if(action==='reload'){void call('runtime:reload').catch(error=>{if($('dialog-error'))$('dialog-error').textContent=textError(error);else notice(textError(error),true);});return;}
+ if(action==='save-address'){let address;try{address=baseOrigin($('backend-address').value);}catch(error){$('dialog-error').textContent=errorText(error);return;}void run(async()=>{await flow.cancel();settings=await call('settings:save',{baseUrl:address});await loadLocal();chooser();void refreshActive();});return;}
+ if(action==='save-name'){const name=$('browser-name').value.trim();void run(async()=>{settings=await call('settings:save',{name});settingsView();});return;}
+ if(action==='preview-pair'){
+  let input;try{input=pairingInput($('pair-info').value,settings.baseUrl);}catch(error){$('dialog-error').textContent=errorText(error);return;}
+  const permission=permissions([],input.baseUrl),epoch=modalVersion;void run(async()=>{await requirePermission(permission);if(!active||epoch!==modalVersion)return;const preview=await call(input.scope==='family'?'family:previewPair':'previewPair',input);if(!active||epoch!==modalVersion)return;pair={...input,...preview};selectView();});return;
+ }
+ if(action==='bind-selected'){
+  const chosen=[...content.querySelectorAll('[name=choose]:checked')].map(el=>({id:el.value,platform:el.dataset.platform})),selectedPair=pair,epoch=modalVersion,permission=permissions(chosen.map(i=>i.platform),pair.baseUrl);
+  void run(async()=>{await requirePermission(permission);if(epoch!==modalVersion)return;let connected;
+   if(selectedPair.scope==='family')connected=await call('family:pair',{...selectedPair,familyId:selectedPair.family.id,name:settings.name});else connected=await call('pair',{...selectedPair,accountId:selectedPair.account.id,platform:selectedPair.account.platform,name:settings.name});
+   if(epoch!==modalVersion){await loadLocal();return;}settings=await call('settings:save',{baseUrl:selectedPair.baseUrl});await loadLocal();roleKey=selectedPair.scope==='family'?'family/'+connected.id:'legacy/'+(connected.account.familyId||connected.id);
+   const selected=role().entries.filter(item=>chosen.some(choice=>choice.id===item.account.id||choice.id==='platform-'+item.account.platform));
+   for(const item of selected){if(epoch!==modalVersion)return;await call(entryAction(item,'select'),{...entryArgs(item),enabled:true});}
+   const selectedKeys=new Set(selected.map(entryKey));await loadLocal();if(epoch!==modalVersion)return;pair=null;await flow.start(role(),role().entries.filter(item=>selectedKeys.has(entryKey(item))));
+  });return;
+ }
+ if(action==='request'){
+  const platforms=[...content.querySelectorAll('[name=choose]:checked')].map(el=>el.dataset.platform),epoch=modalVersion,permission=permissions(platforms,settings.baseUrl);
+  void run(async()=>{if(!await permission&&!await chrome.permissions.contains({origins:[settings.baseUrl+'/*']}))await requirePermission(Promise.resolve(false));if(epoch!==modalVersion)return;const result=await call('family:startRequest',{baseUrl:settings.baseUrl,name:settings.name,platforms});if(epoch!==modalVersion){await call('family:cancelRequest');return;}pending=result;render();waitingView();await call('family:openRequest');void poll();});return;
+ }
+ if(action==='open-request'){void run(()=>call('family:openRequest'));return;}
+ if(action==='cancel-request'||action==='restart-request'){void run(async()=>{await call('family:cancelRequest');pending=null;clearTimeout(pollTimer);render();if(action==='restart-request')selectView(true);else close();});return;}
+ if(action==='save-platforms'){
+  let changes;try{changes=selectionChanges(role().entries,[...content.querySelectorAll('[name=selected]:checked')].map(el=>el.value),[...content.querySelectorAll('[name=auto]:checked:not(:disabled)')].map(el=>el.value));}catch(error){$('dialog-error').textContent=error.message;return;}
+  const permission=permissions(changes.filter(c=>c.selected).map(c=>c.entry.account.platform)),epoch=modalVersion;
+  void run(async()=>{await requirePermission(permission);if(epoch!==modalVersion)return;const failures=[];
+   for(const change of [...changes.filter(c=>!c.selected),...changes.filter(c=>c.selected)]){if(epoch!==modalVersion)return;try{if(change.selected!==change.entry.selected)await call(entryAction(change.entry,'select'),{...entryArgs(change.entry),enabled:change.selected});if(epoch!==modalVersion)return;if(change.auto!==!!change.entry.auto&&change.selected)await call(entryAction(change.entry,'auto'),{...entryArgs(change.entry),enabled:change.auto});}catch(error){failures.push(platformName(change.entry.account.platform)+'：'+textError(error));}}
+   await loadLocal();if(epoch!==modalVersion)return;if(failures.length){manageView();$('dialog-error').textContent=failures.join('\n');}else{close();notice('平台选择和自动同步设置已保存。');}
+  });return;
+ }
+ if(action==='sync'){const current=role(),entries=current.entries.filter(item=>item.selected),epoch=modalVersion,permission=permissions(entries.map(item=>item.account.platform));void run(async()=>{await requirePermission(permission);if(!active||epoch!==modalVersion)return;await flow.start(current,entries);});return;}
+ if(action==='confirm-sync'){void run(()=>flow.confirm());return;}
+ if(action==='result-remedy'||action==='remedy'){
+  if(!entry)return;const error=flow.state?.results.find(result=>entryKey(result.entry)===entryKey(entry))?.error||entry;
+  const kind=errorKind(error.error||error.message?error:{code:entryStatus(entry).kind==='login'?'LOGIN_REQUIRED':''});
+  if(kind==='login'){loginView(entry);return;}if(kind==='authorization'){close();chooser();return;}if(kind==='conflict'||kind==='error'){detailsView(entry,error);return;}
+  const epoch=modalVersion,permission=permissions([entry.account.platform],entry.baseUrl);void run(async()=>{await requirePermission(permission);if(!active||epoch!==modalVersion)return;await retryEntry(entry);});return;
+ }
+ if(action==='open-login'){if(!entry)return;if(mode!=='login')loginView(entry);void run(()=>call(entryAction(entry,'login'),entryArgs(entry)));return;}
+ if(action==='retry-entry'){if(!entry)return;const epoch=modalVersion,permission=permissions([entry.account.platform],entry.baseUrl);void run(async()=>{await requirePermission(permission);if(!active||epoch!==modalVersion)return;await retryEntry(entry);});return;}
+ if(action==='refresh'){void run(async()=>{await refreshActive();notice(connection==='offline'?'后台暂时无法连接，已保留历史状态。':'后台状态已更新。',connection==='offline');});return;}
+ if(action==='revoke'){const current=role();void run(async()=>{await flow.cancel();pendingLogin=null;if(current.family)await call('family:remove',{id:current.id});else for(const item of current.entries)await call('remove',{id:item.id});await loadLocal();close();notice('角色同步授权已撤销。');});}
 });
-$('pair-accept').addEventListener('click', () => {
-  if (!pair || busy) return;
-  const selected = pair;
-  const permission = selected.scope === 'family' ? Promise.resolve(true) : chrome.permissions.request({ origins: PLATFORMS[selected.account.platform].origins });
-  void run(async () => {
-    if (!await permission) throw new Error('未授权读取此平台登录信息，尚未配对。');
-    const name = $('browser-name').value.trim() || '我的 Chrome';
-    if (selected.scope === 'family') await call('family:pair', { ...selected, familyId: selected.family.id, name });
-    else await call('pair', { ...selected, platform: selected.account.platform, accountId: selected.account.id, name });
-    cancelPair(); await render();
-    notice(selected.scope === 'family' ? '角色配对成功。请勾选要同步的平台，登录后读取并核对。' : '配对成功。请打开对应平台登录，再读取并核对首次同步。');
-  });
+document.addEventListener('change',event=>{
+ if(event.target.id==='backend-select'){const baseUrl=event.target.value;void run(async()=>{close();await flow.cancel();settings=await call('settings:save',{baseUrl});await loadLocal();void refreshActive();});return;}
+ if(event.target.name==='choose'){if(event.target.checked)for(const input of content.querySelectorAll('[name=choose]'))if(input!==event.target&&input.dataset.platform===event.target.dataset.platform)input.checked=false;$('selection-next').disabled=!content.querySelector('[name=choose]:checked');}
+ if(event.target.name==='selected'){if(event.target.checked)for(const input of content.querySelectorAll('[name=selected]'))if(input!==event.target&&input.dataset.platform===event.target.dataset.platform)input.checked=false;for(const input of content.querySelectorAll('[name=selected]')){const toggle=[...content.querySelectorAll('[name=auto]')].find(el=>el.value===input.value),entry=findEntry(input.value);toggle.disabled=!input.checked||!entry?.connection?.identityBound;if(!input.checked)toggle.checked=false;}}
 });
-$('pair-cancel').addEventListener('click', cancelPair);
-for (const id of ['pair-info', 'base-url']) $(id).addEventListener('input', () => { pair = null; $('pair-confirm').hidden = true; });
-$('sync-cancel').addEventListener('click', () => { if (!busy) $('confirm-dialog').close(); });
-$('confirm-dialog').addEventListener('cancel', event => { if (busy) event.preventDefault(); });
-$('confirm-dialog').addEventListener('close', () => { pendingSync = null; });
-$('sync-accept').addEventListener('click', () => run(async () => {
-  if (!pendingSync) return;
-  const selected = pendingSync;
-  if (!selected.familyName) {
-    const result = await call('confirmSync', selected.entries[0]);
-    if (result.pending) { notice('已有同步正在处理，请稍后再确认。'); return; }
-    $('confirm-dialog').close(); await render(); notice('首次同步已完成，可按需开启自动同步。登录有效性以后台采集结果为准。'); return;
-  }
-  let completed = 0;
-  const failures = [...selected.failures];
-  for (const entry of selected.entries) {
-    try {
-      const result = await call('family:confirmSync', { id: entry.id, accountId: entry.accountId, confirmation: entry.confirmation });
-      if (result.pending) failures.push(`${platformName(entry.confirmation.account.platform)}：已有同步正在处理，请稍后重新读取核对。`);
-      else completed++;
-    } catch (error) { failures.push(`${platformName(entry.confirmation.account.platform)}：${message(error)}`); }
-  }
-  $('confirm-dialog').close(); await render();
-  notice(`${completed} 个平台已完成同步。${completed ? '可按需开启自动同步，登录有效性以后台采集结果为准。' : ''}${failures.length ? `\n${failures.length} 个平台未同步：\n${failures.join('\n')}` : ''}`, !!failures.length);
-}));
-$('refresh').addEventListener('click', () => run(async () => {
-  const [items, groups] = await Promise.all([call('list'), call('family:list')]); let failed = 0;
-  for (const item of items) { try { await call('status', { id: item.id }); } catch { failed++; } }
-  for (const group of groups) { try { await call('family:status', { id: group.id }); } catch { failed++; } }
-  await render(); notice(failed ? `${failed} 个授权暂时无法刷新，请检查授权或后台连接。` : '状态已刷新。', !!failed);
-}));
-
-for (const [platform, profile] of Object.entries(PLATFORMS)) {
-  const row = node('div', '', 'request-platform');
-  const selected = checkbox(profile.name, false); selected.input.id = `request-platform-${platform}`; selected.input.dataset.requestInput = 'true';
-  row.append(selected.label, button('打开登录页', () => chrome.tabs.create({ url: profile.login })));
-  $('request-platforms').append(row);
-}
-function setPendingRequest(value) {
-  pendingRequest = value; requestVersion++; clearTimeout(pollTimer);
-  $('request-pending').hidden = !value;
-  $('request-submit').dataset.allowed = String(!value);
-  if (value) {
-    $('request-base-url').value = value.baseUrl;
-    for (const platform of Object.keys(PLATFORMS)) $(`request-platform-${platform}`).checked = value.platforms.includes(platform);
-    $('request-target').textContent = `${value.baseUrl} · ${value.platforms.map(platformName).join('、')}`;
-    $('request-code').textContent = value.code;
-    $('request-expiry').textContent = `有效至 ${date(value.expiresAt)}。在后台选择已有角色并批准后，此处会自动更新。`;
-    $('request-status').textContent = '';
-    $('request-open').dataset.allowed = String(value.expiresAt > Date.now());
-  }
-  controls(); schedulePoll();
-}
-function schedulePoll() {
-  clearTimeout(pollTimer);
-  if (!pageActive || document.hidden || !pendingRequest) return;
-  if (pendingRequest.expiresAt <= Date.now()) {
-    $('request-status').textContent = '授权请求已过期。请取消后重新发起。'; $('request-open').dataset.allowed = 'false'; controls(); return;
-  }
-  pollTimer = setTimeout(pollRequest, 3000);
-}
-async function pollRequest() {
-  if (!pageActive || document.hidden || !pendingRequest) return;
-  if (pendingRequest.expiresAt <= Date.now()) { schedulePoll(); return; }
-  if (busy || polling) { schedulePoll(); return; }
-  const version = requestVersion; polling = true;
-  try {
-    const result = await call('family:pollRequest');
-    if (version !== requestVersion || !pageActive) return;
-    if (result.status === 'approved') {
-      setPendingRequest(null); await render();
-      notice('角色已授权，已为你勾选申请的平台。请点击“读取并核对已选平台”，核对账号后首次同步；自动同步仍为关闭。');
-    } else $('request-status').textContent = '等待后台批准…';
-  } catch (error) {
-    if (version !== requestVersion || !pageActive) return;
-    $('request-status').textContent = message(error);
-    const current = await call('family:pendingRequest').catch(() => pendingRequest);
-    if (version !== requestVersion || !pageActive) return;
-    if (!current) { setPendingRequest(null); notice(message(error), true); }
-  } finally { polling = false; schedulePoll(); }
-}
-$('request-form').addEventListener('submit', event => {
-  event.preventDefault(); if (busy || pendingRequest) return;
-  let baseUrl;
-  try { baseUrl = baseOrigin($('request-base-url').value); } catch (error) { notice(errorText(error), true); return; }
-  const platforms = Object.keys(PLATFORMS).filter(platform => $(`request-platform-${platform}`).checked);
-  if (!platforms.length) { notice('请先勾选至少一个已经在此浏览器登录的平台。', true); return; }
-  const permission = chrome.permissions.request({ origins: [baseUrl + '/*', ...platforms.flatMap(platform => PLATFORMS[platform].origins)] });
-  void run(async () => {
-    if (!await permission) throw new Error('未获得后台或平台访问权限，授权请求尚未发起。');
-    const pending = await call('family:startRequest', { baseUrl, name: $('request-browser-name').value.trim() || '我的 Chrome', platforms });
-    setPendingRequest(pending); notice('已读取选中平台的登录状态。请在打开的后台选择角色并批准；确认同步前不会保存登录信息或创建账号。');
-    await call('family:openRequest');
-  });
-});
-$('request-open').addEventListener('click', () => run(() => call('family:openRequest')));
-$('request-cancel').addEventListener('click', () => run(async () => {
-  await call('family:cancelRequest'); setPendingRequest(null); notice('已停止此浏览器的授权请求，可重新选择平台发起。');
-}));
-document.addEventListener('visibilitychange', () => { if (document.hidden) clearTimeout(pollTimer); else schedulePoll(); });
-window.addEventListener('pagehide', () => { pageActive = false; requestVersion++; renderVersion++; clearTimeout(pollTimer); });
-window.addEventListener('pageshow', () => { pageActive = true; schedulePoll(); });
-void run(async () => { await render(); setPendingRequest(await call('family:pendingRequest')); });
+window.addEventListener('focus',()=>{autoRecheck();if(pending)void poll();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){clearTimeout(pollTimer);clearTimeout(loginTimer);}else{autoRecheck();void poll();}});
+chrome.cookies.onChanged.addListener(({cookie})=>{if(pendingLogin&&cookie.storeId==='0'&&!cookie.partitionKey&&platformForDomain(cookie.domain).includes(pendingLogin.entry.account.platform))autoRecheck();});
+window.addEventListener('pagehide',()=>{active=false;modalVersion++;clearTimeout(pollTimer);clearTimeout(loginTimer);clearInterval(refreshTimer);void flow.cancel().catch(()=>{});});
+$('brand-icon').innerHTML=icon('package');$('settings-icon').innerHTML=icon('settings');$('shield-icon').innerHTML=icon('shield');
+void(async()=>{try{await loadLocal();void refreshActive();if(pending){waitingView();void poll();}refreshTimer=setInterval(()=>{if(!busy&&!flow.running)void refreshActive();},60000);}catch(error){notice(textError(error),true);$('main').innerHTML='<p class="boot">本机配置读取失败，请重新打开插件。</p>';}})();

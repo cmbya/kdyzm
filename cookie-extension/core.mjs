@@ -137,7 +137,8 @@ const errors = {
   HTTP_404: '后台尚未支持插件同步，请先更新配套后台。', HTTP_401: '授权已失效，请在后台重新生成插件配对码。',
   HTTP_403: '此同步操作未获授权，请检查配对和账号归属。', HTTP_409: '账号或登录信息已变化，请刷新状态后重新核对。',
   HTTP_429: '同步过于频繁，稍后会自动重试。', NOT_CONFIRMED: '请先读取登录信息并确认首次同步。',
-  AUTO_PAUSED: '自动同步已暂停。', PLATFORM_NOT_SELECTED: '此平台未选择同步，请先勾选并授权。', REQUEST_CANCELED: '本次授权已取消，请重新发起。', BAD_MESSAGE: '不支持的插件操作。'
+  SYNC_IN_PROGRESS: '仍有同步操作进行中，请稍后重新加载。', RELOAD_IN_PROGRESS: '插件正在重新加载，请稍后重新打开。',
+  AUTO_PAUSED: '自动同步已暂停。', PLATFORM_NOT_SELECTED: '此平台未选择同步，请先勾选并授权。', REQUEST_CANCELED: '本次操作已取消，请重新发起。', BAD_MESSAGE: '不支持的插件操作。'
 };
 Object.assign(errors, {
   COOKIE_PAIRING_INVALID: '配对码无效、已使用或已过期，请在后台重新生成。',

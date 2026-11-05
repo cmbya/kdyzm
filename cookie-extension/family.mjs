@@ -40,11 +40,16 @@ function groupValue(data) {
 function mergeRecord(record, previous = {}) {
   const same = previous.connection?.id === record.connection?.id;
   return { ...previous, ...record, selected: same && !!previous.selected, auto: same && !!previous.auto,
-    lastDigest: same ? previous.lastDigest || '' : '', error: same ? previous.error || '' : '', checkedAt: previous.checkedAt || 0 };
+    lastDigest: same ? previous.lastDigest || '' : '', error: same ? previous.error || '' : '',
+    errorCode: same ? previous.errorCode || '' : '', errorStatus: same ? previous.errorStatus || null : null, checkedAt: previous.checkedAt || 0 };
 }
 function visible(group) {
   const { token, ...safe } = group;
   return { ...safe, accounts: group.accounts.map(({ lastDigest, ...record }) => record) };
+}
+function errorState(error) {
+  return { error: errorText(error), errorCode: /^[A-Z][A-Z0-9_]{0,63}$/.test(error?.code || '') ? error.code : 'UNKNOWN_ERROR',
+    errorStatus: Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : null };
 }
 
 export function createFamilySync(initialized) {
@@ -66,6 +71,11 @@ export function createFamilySync(initialized) {
     return { owner, record };
   }
   const update = (ref, patch) => mutate(groups => { const record = recordIn(groups, ref); if (record) Object.assign(record, patch); });
+  const updateConsent = (ref, consent, patch) => mutate(groups => {
+    const live = recordIn(groups, ref);
+    if (!live?.selected || live.consent !== consent) throw problem('REQUEST_CANCELED');
+    Object.assign(live, patch);
+  });
   const endpoint = (ref, suffix = '', record) => {
     if (!safeId(ref.accountId)) throw problem('BAD_MESSAGE');
     if (record?.unconfigured) return API + 'current/platforms/' + record.account.platform + suffix;
@@ -76,7 +86,8 @@ export function createFamilySync(initialized) {
   }
   async function allowed(ref, consent, automatic = false) {
     const found = await target(ref);
-    if (!found.record.selected || found.record.consent !== consent) throw problem('PLATFORM_NOT_SELECTED');
+    if (!found.record.selected) throw problem('PLATFORM_NOT_SELECTED');
+    if (found.record.consent !== consent) throw problem('REQUEST_CANCELED');
     if (automatic && !found.record.auto) throw problem('AUTO_PAUSED');
     return found;
   }
@@ -108,11 +119,11 @@ export function createFamilySync(initialized) {
       await mutate(groups => {
         const live = groups.find(item => item.id === id); if (!live) return;
         const accounts = fresh.accounts.map(item => mergeRecord(item, live.accounts.find(old => old.account.id === item.account.id)));
-        Object.assign(live, fresh, { accounts, error: '', checkedAt: Date.now() });
+        Object.assign(live, fresh, { accounts, error: '', errorCode: '', errorStatus: null, checkedAt: Date.now() });
       });
       return visible(await group(id));
     } catch (error) {
-      await mutate(groups => { const live = groups.find(item => item.id === id); if (live) { live.error = errorText(error); if (error.status === 401) for (const item of live.accounts) item.auto = false; } });
+      await mutate(groups => { const live = groups.find(item => item.id === id); if (live) { Object.assign(live, errorState(error)); if (error.status === 401) for (const item of live.accounts) item.auto = false; } });
       throw error;
     }
   }
@@ -125,24 +136,31 @@ export function createFamilySync(initialized) {
   }
   async function preview(ref) {
     const { record } = await target(ref), consent = record.consent;
-    await allowed(ref, consent); await current(ref);
-    const cookie = await read(ref, consent), { owner } = await allowed(ref, consent);
-    const data = await apiRequest(owner.baseUrl, endpoint(ref, '/preview', record), { token: owner.token, body: { cookie } });
-    const fresh = record.unconfigured ? { account: record.account, connection: null } : validateTarget(data, owner, record);
-    if (typeof data.confirmationToken !== 'string' || (!record.unconfigured && !fresh.connection)
-      || (record.unconfigured && (data.newAccount !== true || data.platform !== record.account.platform || data.serviceId !== owner.serviceId))) throw problem('INVALID_RESPONSE');
-    await allowed(ref, consent);
-    await mutate(groups => { const live = recordIn(groups, ref); if (live?.selected && live.consent === consent) Object.assign(live, fresh); });
-    return { token: data.confirmationToken, identityHint: String(data.identityHint || '').slice(0, 100), expiresAt: data.expiresAt,
-      version: fresh.account.credentialVersion, digest: await digest(cookie), account: fresh.account, connectionId: fresh.connection?.id || null,
-      ...(record.unconfigured ? { createPlatform: record.account.platform } : {}), consent };
+    try {
+      await allowed(ref, consent); await current(ref);
+      const cookie = await read(ref, consent), { owner } = await allowed(ref, consent);
+      const data = await apiRequest(owner.baseUrl, endpoint(ref, '/preview', record), { token: owner.token, body: { cookie } });
+      const fresh = record.unconfigured ? { account: record.account, connection: null } : validateTarget(data, owner, record);
+      if (typeof data.confirmationToken !== 'string' || (!record.unconfigured && !fresh.connection)
+        || (record.unconfigured && (data.newAccount !== true || data.platform !== record.account.platform || data.serviceId !== owner.serviceId))) throw problem('INVALID_RESPONSE');
+      const hash = await digest(cookie); await allowed(ref, consent);
+      await updateConsent(ref, consent, { ...fresh, error: '', errorCode: '', errorStatus: null, checkedAt: Date.now() });
+      return { token: data.confirmationToken, identityHint: String(data.identityHint || '').slice(0, 100), expiresAt: data.expiresAt,
+        version: fresh.account.credentialVersion, digest: hash, account: fresh.account, connectionId: fresh.connection?.id || null,
+        ...(record.unconfigured ? { createPlatform: record.account.platform } : {}), consent };
+    } catch (error) {
+      await mutate(groups => { const live = recordIn(groups, ref);
+        if (live && live.consent === consent) Object.assign(live, errorState(error), error.status === 401 ? { auto: false } : {}); });
+      throw error;
+    }
   }
   async function sync(ref, automatic = false, confirmation) {
     const key = ref.id + '/' + ref.accountId;
     if (locks.has(key)) return { pending: true };
     locks.add(key);
+    let consent;
     try {
-      const initial = await target(ref), consent = confirmation ? confirmation.consent : initial.record.consent;
+      const initial = await target(ref); consent = confirmation ? confirmation.consent : initial.record.consent;
       await allowed(ref, consent, automatic);
       const fresh = await current(ref);
       const creating = !!initial.record.unconfigured;
@@ -152,15 +170,20 @@ export function createFamilySync(initialized) {
       const cookie = await read(ref, consent, automatic), cookieDigest = await digest(cookie);
       if (confirmation && cookieDigest !== confirmation.digest) throw problem('COOKIE_CHANGED');
       const { owner, record } = await allowed(ref, consent, automatic);
-      if (automatic && cookieDigest === record.lastDigest) { await update(ref, { error: '', checkedAt: Date.now() }); return { changed: false }; }
+      if (automatic && cookieDigest === record.lastDigest) { await updateConsent(ref, consent, { error: '', errorCode: '', errorStatus: null, checkedAt: Date.now() }); return { changed: false }; }
       const data = await apiRequest(owner.baseUrl, endpoint(ref, '/cookie', record), { token: owner.token, body: {
         cookie, expectedCredentialVersion: confirmation ? confirmation.version : fresh.account.credentialVersion,
         ...(confirmation ? { confirmationToken: confirmation.token } : {}) } });
       const updated = validateTarget(data, owner, record, creating);
       if (!updated.connection?.identityBound || (!creating && updated.connection.id !== fresh.connection.id)) throw problem('SERVICE_CHANGED');
-      await update(ref, { ...updated, unconfigured: false, lastDigest: cookieDigest, error: '', checkedAt: Date.now() });
+      await allowed(ref, consent, automatic);
+      await updateConsent(ref, consent, { ...updated, unconfigured: false, lastDigest: cookieDigest, error: '', errorCode: '', errorStatus: null, checkedAt: Date.now() });
       return { changed: data.changed };
-    } catch (error) { await update(ref, { error: errorText(error), ...(error.status === 401 ? { auto: false } : {}) }); throw error; }
+    } catch (error) {
+      await mutate(groups => { const live = recordIn(groups, ref);
+        if (live && live.consent === consent) Object.assign(live, errorState(error), error.status === 401 ? { auto: false } : {}); });
+      throw error;
+    }
     finally { locks.delete(key); }
   }
   async function dispatch(message) {
@@ -179,19 +202,16 @@ export function createFamilySync(initialized) {
       await serialized(() => chrome.storage.local.set({ [PENDING]: { nonce } }));
       try {
         await permissions({ baseUrl });
-        for (const platform of platforms) {
-          await permissions({ baseUrl }, platform);
-          try { await readCookieHeader(platform, chrome.cookies, '0', async () => {
-            if ((await pendingRequest())?.nonce !== nonce) throw problem('REQUEST_CANCELED');
-          }); } catch (error) { error.platform = platform; throw error; }
-        }
+        // Approval requests contain only metadata. Login and platform permissions are
+        // checked independently by the normal sync flow after the role is approved.
         if ((await pendingRequest())?.nonce !== nonce) throw problem('REQUEST_CANCELED');
         const data = await apiRequest(baseUrl, API + 'requests', { body: { name: message.name, platforms } });
         if (!safeId(data.requestId) || !/^CR-[A-Za-z0-9_-]{43}$/.test(data.code) || !/^cpr_[A-Za-z0-9_-]{43}$/.test(data.pollToken)
           || !Number.isSafeInteger(data.expiresAt)) throw problem('INVALID_RESPONSE');
         return await serialized(async () => {
           if ((await pendingRequest())?.nonce !== nonce) throw problem('REQUEST_CANCELED');
-          const pending = { requestId: data.requestId, code: data.code, pollToken: data.pollToken, expiresAt: data.expiresAt, baseUrl, platforms, nonce };
+          const pending = { requestId: data.requestId, code: data.code, pollToken: data.pollToken, expiresAt: data.expiresAt, baseUrl, platforms,
+            name: String(message.name || '').trim().slice(0, 80), nonce };
           await chrome.storage.local.set({ [PENDING]: pending }); return pendingVisible(pending);
         });
       } catch (error) {
@@ -240,6 +260,15 @@ export function createFamilySync(initialized) {
       return visible(item);
     }
     if (action === 'status') return refresh(message.id);
+    if (action === 'cancelSync') {
+      await group(message.id);
+      if (message.accountId !== undefined) await target({ id: message.id, accountId: message.accountId });
+      await mutate(groups => {
+        const live = groups.find(item => item.id === message.id);
+        for (const record of live?.accounts || []) if (message.accountId === undefined || record.account.id === message.accountId) record.consent = crypto.randomUUID();
+      });
+      return { canceled: true };
+    }
     if (action === 'remove') {
       const owner = await group(message.id);
       await mutate(groups => { const live = groups.find(item => item.id === message.id); if (live) for (const record of live.accounts) Object.assign(record, { auto: false, selected: false, consent: crypto.randomUUID() }); });
@@ -254,6 +283,7 @@ export function createFamilySync(initialized) {
       const consent = crypto.randomUUID();
       await update(ref, { auto: false, consent, ...(action === 'select' ? { selected: false } : {}) });
       if (message.enabled) {
+        if (action === 'auto' && !(await target(ref)).record.selected) throw problem('PLATFORM_NOT_SELECTED');
         await current(ref);
         const live = await target(ref); await permissions(live.owner, live.record.account.platform);
         if (action === 'auto' && !live.record.connection?.identityBound) throw problem('NOT_CONFIRMED');
