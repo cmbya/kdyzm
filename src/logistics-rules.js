@@ -62,7 +62,7 @@ var PickCodeLogistics = (function () {
     return kind === 'arrival' && /(?:请|要求|希望|约定|安排|同意|正在)[^，,。；;！？!?]{0,16}$/.test(value);
   }
   function fragmentMatch(fragment, rules) {
-    var current = fragment.value.split(FUTURE)[0], list = ruleList(rules), i, j, rule, at, suffix, endAt, station, extended;
+    var current = fragment.value.split(FUTURE)[0], list = ruleList(rules), i, j, rule, at, suffix, endAt, station, extended, address;
     for (i = 0; i < list.length; i++) {
       rule = list[i];
       if (!rule || !rule.enabled || !Array.isArray(rule.starts)) continue;
@@ -88,8 +88,13 @@ var PickCodeLogistics = (function () {
             if (endAt < 0) { at = current.indexOf(rule.starts[j], at + rule.starts[j].length); continue; }
             suffix = suffix.slice(0, endAt);
           }
-          station = clean(suffix);
-          if (station) return { station: station, ruleId: rule.id, kind: rule.kind, origin: rule.origin };
+          // A completed storage clause may identify its pickup address immediately after a comma.
+          address = !rule.end && rule.kind === 'arrival' && current === fragment.value && /(?:暂存|存放)$/.test(text(suffix))
+            && !/分拣|转运|分拨|物流中心|营业部|门口|门前|家中|家里|住处|收件人|本人/.test(current)
+            ? /^[，,]\s*(?:取件|取货|自提)地址\s*[:：]\s*([^，,。；;！？!?\n\r]+)/.exec(fragment.tail.slice(fragment.value.length)) : null;
+          if (address && FUTURE.test(address[1])) address = null;
+          station = clean(address ? address[1] : suffix);
+          if (station) return { station: station, ruleId: rule.id, kind: rule.kind, origin: rule.origin, pickupAddress: !!address };
           at = current.indexOf(rule.starts[j], at + rule.starts[j].length);
         }
       }
@@ -116,7 +121,7 @@ var PickCodeLogistics = (function () {
     parts = fragments(value);
     for (i = 0; i < parts.length; i++) {
       match = fragmentMatch(parts[i], rules);
-      if (match && match.kind === 'arrival' && (match.origin === 'manual' || POINT.test(match.station) || /取件|取货|自提|代收/.test(parts[i].value))) return true;
+      if (match && match.kind === 'arrival' && (match.origin === 'manual' || match.pickupAddress || POINT.test(match.station) || /取件|取货|自提|代收/.test(parts[i].value))) return true;
     }
     return !FUTURE.test(value) && !/转运|分拣|分拨|物流中心/.test(value)
       && ((!!stationHint && POINT.test(stationHint) && /^(?:签收|已签收|签收成功)(?:[:：\s]|$)/.test(value))

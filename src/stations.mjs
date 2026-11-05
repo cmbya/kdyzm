@@ -6,7 +6,7 @@ import { stationAutomationDecision } from './station-automation.mjs';
 
 const parse = row => row && JSON.parse(row.data);
 const sources = ['manual', 'ai', 'sms', 'platform'];
-const defaults = { channelId: '', channelName: '', baseUrl: '', model: '', enabled: false, autoApply: false, logisticsEnabled: false, intervalMinutes: 60, dailyLimit: 20, lastRunAt: 0 };
+const defaults = { channelId: '', defaultSelectionRevision: 0, channelName: '', baseUrl: '', model: '', enabled: false, autoApply: false, logisticsEnabled: false, intervalMinutes: 60, dailyLimit: 20, lastRunAt: 0 };
 const day = now => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
 
@@ -30,8 +30,10 @@ export class StationStore {
       const id = 'default', channel = { id, name: config.channelName || '默认渠道', baseUrl: config.baseUrl || '', model: config.model || '', enabled: true, jsonMode: true, revision: 1 };
       this.transaction(() => {
         db.prepare('INSERT OR IGNORE INTO ai_channels VALUES(?,?,?,?)').run(id, JSON.stringify(channel), legacy.credential, 'station-ai-key');
-        db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify({ ...config, channelId: id }));
+        db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify({ ...config, channelId: id, defaultSelectionRevision: 1 }));
       });
+    } else if (config && (!Number.isSafeInteger(config.defaultSelectionRevision) || config.defaultSelectionRevision < 0)) {
+      db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify({ ...config, defaultSelectionRevision: 0 }));
     }
   }
   transaction(fn) {
@@ -221,6 +223,7 @@ export class StationStore {
     }
     const channel = prepared ? { ...prepared.channel, hasApiKey: !!prepared.credential } : this.aiChannel(config.channelId);
     if (config.enabled && (!channel?.enabled || !channel.name || !channel.baseUrl || !channel.model || !channel.hasApiKey)) fail(400, 'AI_NOT_CONFIGURED', '请先配置并启用渠道、HTTPS地址、模型和API Key');
+    if (old.channelId !== config.channelId) config.defaultSelectionRevision = old.defaultSelectionRevision + 1;
     this.transaction(() => {
       if (prepared) this.writeAiChannel(prepared);
       // Preserve the old row for rollback; registry credentials are authoritative.
@@ -259,7 +262,8 @@ export class StationStore {
       this.writeAiChannel(prepared);
       if (!config.channelId) {
         const saved = parse(this.db.prepare('SELECT data FROM station_ai_settings WHERE id=1').get());
-        this.db.prepare('INSERT INTO station_ai_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(JSON.stringify({ ...defaults, ...saved, channelId: prepared.channel.id }), '');
+        this.db.prepare('INSERT INTO station_ai_settings VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(JSON.stringify({ ...defaults, ...saved, channelId: prepared.channel.id,
+          defaultSelectionRevision: config.defaultSelectionRevision + 1 }), '');
       }
     });
     this.notifyAiConfig({ credentialsChanged: prepared.changed, channelId: prepared.channel.id });

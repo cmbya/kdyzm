@@ -18,6 +18,9 @@ const messages = {
   AI_RESPONSE_TOO_LARGE: 'AI返回超过大小限制，未采纳', AI_DETAIL_LIMIT: '分析详情超过大小限制，未采纳',
   AI_REQUEST_FAILED: 'AI请求未完成，请检查渠道配置后重试',
   AI_CHANNEL_UNAVAILABLE: '所选AI渠道已暂停或未配置，请重新选择',
+  AI_DEFAULT_MISSING: '后台未选定有效的默认AI服务，请在后台设置中选择',
+  AI_CHANNEL_DISABLED: '后台默认AI服务已暂停，请在后台设置中启用',
+  AI_CHANNEL_INCOMPLETE: '后台默认AI服务配置不完整，请在后台补全渠道名称、地址、模型和密钥',
 };
 const safeFailure = error => { const code = Object.hasOwn(messages, error?.code) ? error.code : 'AI_REQUEST_FAILED'; return { code, message: messages[code] }; };
 const safeError = error => safeFailure(error).message;

@@ -12,8 +12,8 @@ const normalize = value => value.replace(/[－—–]/gu, '-').replace(/\r\n/gu,
 
 export function validateTemplateInput(body) {
   onlyKeys(body, ['channelId', 'sample', 'expectedCode']);
-  const { channelId, sample, expectedCode } = body;
-  if (typeof channelId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(channelId)) fail(400, 'AI_CHANNEL_UNAVAILABLE', '请选择AI渠道');
+  const { channelId = '', sample, expectedCode } = body;
+  if (typeof channelId !== 'string' || channelId && !/^[A-Za-z0-9_-]{1,128}$/u.test(channelId)) fail(400, 'AI_CHANNEL_UNAVAILABLE', 'AI渠道标识格式不正确，请刷新后台默认服务');
   if (typeof sample !== 'string' || !sample.trim() || sample.length > 2000 || expectedCode !== '654321' || sample.split('654321').length !== 2) fail(400, 'AI_SAMPLE_UNSAFE', '只允许在设备上脱敏后的合成样例');
   const publicText = sample.replace(/654321|合成驿站|\[(?:PHONE|URL|WAYBILL|NAME|ADDRESS)\]/gu, '');
   // Fail closed on plausible identifiers and private text; the phone must replace these before upload.

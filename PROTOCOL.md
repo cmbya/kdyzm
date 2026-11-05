@@ -140,6 +140,18 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 设备 `GET /v1/snapshot` 兼容增加 `serverLogisticsRulesVersion` 与 `serverLogisticsRules`。规则只含 `id,name,enabled,kind,starts,end,keywords,origin`，不含管理员原始sample/expectedStation、候选、密钥或其他凭证。ETag包含规则版本。App单独保存并用于重算；同ID本机规则（包括停用）优先，解绑/换绑清除只读层。旧后台缺字段时兼容；旧App忽略新增字段。匹配仍由本机确定性证据及唯一性规则决定。
 
+## 手机统一后台 AI 服务（兼容 v1，后台3.1.23 / App3.1.26）
+
+设备 `GET /v1/ai/channels` 返回 `{channels,defaultChannelId,service}`。`channels` 最多只含当前可用默认服务，能力为 `station_alias/sms_template/logistics_rule`；管理端渠道列表仍由 `GET /v1/admin/ai-channels` 返回。设备接口不返回服务地址、密钥或其他管理员配置。
+
+`service` 为 `{mode:'backend_default',available,code,message,channelId,channelName,model,revision}`。`code` 为 `AI_READY/AI_NOT_CONFIGURED/AI_DEFAULT_MISSING/AI_CHANNEL_DISABLED/AI_CHANNEL_INCOMPLETE`；默认服务不可用时仍说明具体原因，`channels=[]`、`defaultChannelId=''`。`available` 表示配置就绪，不代表已测试网络或模型效果。站点定时分析的 `enabled` 开关不阻止手机已授权的短信模板生成。
+
+设备 `POST /v1/ai/template-proposals` 接收 `{sample,expectedCode}`；手机发送本机构造的合成模板，不发送原短信与真实取件码。旧请求可包含当前默认 `channelId`；非默认值返回409 `AI_CONFIG_CHANGED`，不暗中换渠道。默认服务切换、暂停或模型/密钥变化使旧缓存及在途结果失效；额度、认证、隐私和输出校验继续有效。
+
+App不再保存独立渠道选择，不采用列表第一项或本机旧密钥回退。原生状态使用缓存的服务元信息及检查时间，每5秒本机状态刷新不访问后台；手动刷新、开启和实际分析时重新读取，确认建议时再次核对服务版本。已开启授权保留，旧渠道未确认建议清除；旧加密密钥不删除但不再用于调用。旧后台明确返回有效默认服务时兼容，否则显示不可用。
+
+物流解析增加相邻逗号分隔的“已送达…暂存,取件地址:具体站点”证据连接。仅相邻、已完成动作与明确地址生效；未来、否定、上门、途中及不相邻片段不跨界拼接。App物流投影版本2会重算旧缓存，保留人工决定；后台保存历史原文在下次正常采集导入时重算，不执行启动时全库迁移。
+
 ## 浏览器 Cookie 同步（兼容 v1）
 
 以下单账号授权独立于管理员会话和手机设备 token，只允许向一个既有的淘宝、拼多多或京东账号提交登录 Cookie。它没有订单读取、设备管理、角色整组或管理员权限；不能创建账号或更改平台、角色、名称、采集开关。服务须先初始化。后述角色授权采用独立接口和 token，旧单账号接口保持兼容。
