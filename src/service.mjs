@@ -11,6 +11,7 @@ import { StationStore, enqueuePlatformCandidates, enqueueStationProposal } from 
 import { StationAiJobs } from './station-ai.mjs';
 import { AiAssistance } from './ai-assistance.mjs';
 import { LogisticsAiJobs } from './logistics-ai.mjs';
+import { PickupCompletionAi } from './pickup-completion-ai.mjs';
 import { serverVersion } from './version.mjs';
 import { createAppUpdateHandler } from './app-updates.mjs';
 import { createCookieSyncHandler } from './cookie-sync.mjs';
@@ -19,6 +20,7 @@ import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './secur
 const PUBLIC = new URL('../public/', import.meta.url);
 const STATIC = new Map([['/', ['index.html', 'text/html; charset=utf-8']], ['/admin.js', ['admin.js', 'text/javascript; charset=utf-8']], ['/station-admin.js', ['station-admin.js', 'text/javascript; charset=utf-8']], ['/station-admin.css', ['station-admin.css', 'text/css; charset=utf-8']], ['/sync-status.js', ['sync-status.js', 'text/javascript; charset=utf-8']], ['/admin.css', ['admin.css', 'text/css; charset=utf-8']]]);
 STATIC.set('/logistics-admin.js', ['logistics-admin.js', 'text/javascript; charset=utf-8']);
+STATIC.set('/pickup-completion-admin.js', ['pickup-completion-admin.js', 'text/javascript; charset=utf-8']);
 
 async function bodyOf(req) {
   if (!(req.headers['content-type'] || '').startsWith('application/json')) fail(415, 'JSON_REQUIRED', '请使用 application/json');
@@ -45,15 +47,19 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const stationAi = new StationAiJobs({ stations, now, automaticEvents: scheduler, ...(aiRequest ? { request: aiRequest } : {}) });
   const aiAssistance = new AiAssistance({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
   const logisticsAi = new LogisticsAiJobs({ stations, rules: logisticsRules, store, assistance: aiAssistance, now, automaticEvents: scheduler });
+  const pickupCompletion = store.pickupCompletion;
+  const pickupCompletionAi = new PickupCompletionAi({ store, completionStore: pickupCompletion, stations, assistance: aiAssistance, now, automaticEvents: scheduler });
   const enrichCandidates = accountIds => {
     const snapshot = store.snapshot(accountIds);
     enqueuePlatformCandidates(stations, snapshot, now());
     logisticsAi.intake(snapshot);
+    pickupCompletionAi.intake(snapshot);
   };
   const unsubscribeOptimization = stations.onAiConfigChange(() => {
     if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
   });
   if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
+  pickupCompletionAi.intake(store.snapshot(store.accounts().filter(account => account.enabled).map(account => account.id)));
   const rate = new RateLimiter(now);
   const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now, onImported: accountId => enrichCandidates([accountId]) });
   const running = jobs.running;
@@ -83,6 +89,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
     for (const account of store.accounts()) if (account.enabled && account.nextSyncAt <= now()) void requestSync(account.id);
     stationAi.runDue();
     logisticsAi.runDue();
+    pickupCompletionAi.runDue();
   }, 30000).unref() : null;
 
   const server = createServer(async (req, res) => {
@@ -171,6 +178,19 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
+        const completionStatus = () => ({ config: pickupCompletion.config(), ...pickupCompletionAi.status() });
+        if (path === '/v1/admin/pickup-completion' && req.method === 'GET') { send(res, 200, completionStatus()); return; }
+        if (path === '/v1/admin/pickup-completion' && req.method === 'PUT') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          pickupCompletion.saveConfig(body); pickupCompletionAi.configChanged();
+          send(res, 200, completionStatus()); return;
+        }
+        if (path === '/v1/admin/pickup-completion/history' && req.method === 'GET') { send(res, 200, { changes: pickupCompletionAi.history(), candidates: pickupCompletionAi.candidates() }); return; }
+        if (path === '/v1/admin/pickup-completion/candidates' && req.method === 'GET') { send(res, 200, { candidates: pickupCompletionAi.candidates() }); return; }
+        if (path === '/v1/admin/pickup-completion/rollback' && req.method === 'POST') {
+          const body = await bodyOf(req); onlyKeys(body, ['historyId']); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, { change: pickupCompletionAi.rollback(body.historyId) }); return;
+        }
         const channelList = () => { const config = stations.aiConfig(); return { channels: stations.aiChannels(), dailyLimit: config.dailyLimit, usageToday: config.usageToday, defaultChannelId: config.channelId }; };
         if (path === '/v1/admin/ai-channels' && req.method === 'GET') { send(res, 200, channelList()); return; }
         if (path === '/v1/admin/ai-channels' && req.method === 'POST') {
@@ -385,7 +405,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, aiAssistance, logisticsRules, logisticsAi,
+  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, aiAssistance, logisticsRules, logisticsAi, pickupCompletion, pickupCompletionAi,
     async close() {
       cookieSync.close();
       unsubscribeOptimization();
@@ -395,6 +415,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       await jobs.close();
       await stationAi.close();
       await logisticsAi.close();
+      await pickupCompletionAi.close();
       store.close();
     } };
 }

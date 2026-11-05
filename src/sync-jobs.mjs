@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fail } from './security.mjs';
+import { activeKnownOrders } from './collector-enrichment.mjs';
 
 const INTERVAL = 5 * 60000;
 const active = job => ['queued', 'running'].includes(job.state);
@@ -62,7 +63,7 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
     const selected = previous.orders.filter(order => !orderId || order.id === orderId);
     const knownOrders = selected.map(order => ({ ...order, shipments: previous.shipments.filter(s => s.orderId === order.id)
       .map(s => ({ ...s, hidden: s.hidden || s.deleted })) }));
-    const trackedOrderIds = knownOrders.filter(order => order.shipments.some(s => !s.picked && !s.hidden && s.status !== 'signed')).map(o => o.platformOrderId);
+    const trackedOrderIds = activeKnownOrders(knownOrders, new Set(), 20).map(o => o.platformOrderId);
     return { knownOrders, trackedOrderIds, ...(orderId ? { targetOrder: knownOrders[0] } : {}) };
   };
   function pump(accountId) {

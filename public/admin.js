@@ -17,6 +17,7 @@ let countdownTimer = null;
 let scopeKey = '';
 let pollingError = '';
 let logisticsAdmin;
+let pickupCompletionAdmin;
 let cookieSyncGeneration = 0;
 let cookieSyncAccountId = '';
 let cookieSyncPairing = null;
@@ -245,6 +246,7 @@ function clearSession() {
   clearCookieSync();
   clearFamilyCookieSync();
   logisticsAdmin?.reset();
+  pickupCompletionAdmin?.reset();
   stopPolling(); syncSubmitting.clear(); syncRows.clear(); scopeKey = ''; pollingError = '';
   token = ''; accounts = []; families = []; devices = []; selectedFamily = ''; baseUrl = ''; settingsDirty = false;
   for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog']) if ($(id).open) $(id).close();
@@ -648,4 +650,6 @@ if (typeof window !== 'undefined') import('./station-admin.js').then(async ({ in
   initStationAdmin({ api, notice });
   const { initLogisticsAdmin } = await import('./logistics-admin.js');
   logisticsAdmin = initLogisticsAdmin({ api, notice });
+  const { initPickupCompletionAdmin } = await import('./pickup-completion-admin.js');
+  pickupCompletionAdmin = initPickupCompletionAdmin({ api, notice });
 }).catch(error => notice(error.message || '设置页面未能加载，请刷新页面。', true));

@@ -5,6 +5,8 @@ import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
 import { serverVersion, capabilities } from './version.mjs';
 import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus } from './collector-enrichment.mjs';
+import { PickupCompletionStore } from './pickup-completion-store.mjs';
+import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
@@ -93,6 +95,7 @@ export class Store {
         }
       }
     });
+    new PickupCompletionStore({ store: this, now });
   }
   close() { this.db.close(); }
   transaction(fn) {
@@ -117,7 +120,8 @@ export class Store {
         const fallback = old.status === 'arrived' && old.arrivalAtSource === 'platform_event' ? 'unknown' : old.status;
         const status = eventStatus(events[0].description, fallback, rules);
         if (status === old.status && Object.keys(pickup).every(key => pickup[key] === old[key])) continue;
-        this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify({ ...old, ...pickup, status, updatedAt: this.now() }), old.id);
+        const updated = this.pickupCompletion.project({ ...old, ...pickup, status, updatedAt: this.now() });
+        this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
         changed++;
       }
       if (changed) this.revision();
@@ -338,12 +342,15 @@ export class Store {
         const status = ['transit', 'arrived', 'signed', 'unknown'].includes(input.status) ? input.status : 'unknown';
         const logistics = logisticsData(input, old);
         const pickup = pickupData(input, old || {}, logistics.logisticsEvents, rules);
-        const shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
+        let shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
           familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: String(input.waybillNo), carrier: input.carrier || old?.carrier || '', status,
           pickupCode: input.pickupCode || (!pickup.arrivalAt && (old?.arrivalAt || logistics.logisticsEvents.some(event => pickupCycleReset(event.description))) ? '' : old?.pickupCode) || '', ...pickup,
           updatedAt: input.updatedAt || this.now(), picked: old?.picked || false, hidden: old?.hidden || false,
           deleted: old?.deleted || false, manualAt: old?.manualAt || 0,
+          pickupCompletion: pickupCompletionState(old), pickupManualAt: old?.pickupManualAt || 0,
+          pickupManualOperation: old?.pickupManualOperation || '',
           ...logistics };
+        shipment = this.pickupCompletion.project(shipment);
         this.db.prepare('INSERT INTO shipments VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, accountId, JSON.stringify(shipment));
       }
       for (const failure of result.logisticsFailures || []) {
@@ -371,7 +378,8 @@ export class Store {
     const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible).map(s => {
       // Configured services publish evidence persisted by imports or explicit rule changes.
       const pickup = pickupData({}, s, this.getLogisticsRules ? [] : s.logisticsEvents || []);
-      return { ...s, ...pickup, pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
+      const { pickupManualAt, pickupManualOperation, ...publicShipment } = s;
+      return { ...publicShipment, ...pickup, pickupCompletion: pickupCompletionState(s), pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
         familyId: s.familyId || '', familyName: s.familyName || '' };
     });
     const familyIds = device.familyIds || [];
@@ -381,7 +389,8 @@ export class Store {
       shipment.logisticsEvents = []; shipment.logisticsTruncated = !!shipment.logisticsTruncated;
       return { shipment, events };
     });
-    const snapshot = { schemaVersion: 1, serverVersion, capabilities, serverRevision: this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision, familyIds, legacyAccountIds: device.legacyAccountIds || [], families, accounts, orders, shipments,
+    const { enabled, aiEnabled } = this.pickupCompletion.config();
+    const snapshot = { schemaVersion: 1, serverVersion, capabilities, pickupCompletion: { version: 1, enabled, aiEnabled }, serverRevision: this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision, familyIds, legacyAccountIds: device.legacyAccountIds || [], families, accounts, orders, shipments,
       hiddenIds: shipments.filter(s => s.hidden).map(s => s.id), deletedIds: shipments.filter(s => s.deleted).map(s => s.id),
       events: shipments.filter(s => s.arrivalAt).map(s => ({ id: stableId(s.id, 'arrival', s.arrivalAt), shipmentId: s.id, arrivedAt: s.arrivalAt, code: s.pickupCode, stationKey: s.station })),
       syncWarnings: accounts.flatMap(a => (a.warnings || []).map(message => ({ accountId: a.id, message }))) };
@@ -428,18 +437,26 @@ export class Store {
         }
         onlyKeys(input, ['id', 'shipmentId', 'action', 'occurredAt']);
         const operation = { id: text(input.id, '操作ID', 128), shipmentId: text(input.shipmentId, '运单ID', 128), action: input.action, occurredAt: input.occurredAt };
-        if (!['pick', 'restore', 'hide', 'unhide'].includes(operation.action) || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt < 0 || operation.occurredAt > this.now() + 5 * 60000) fail(400, 'INVALID_OPERATION', '不支持的操作或时间');
+        if (!['pick', 'restore', 'resumeAutoPickup', 'hide', 'unhide'].includes(operation.action) || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt < 0 || operation.occurredAt > this.now() + 5 * 60000) fail(400, 'INVALID_OPERATION', '不支持的操作或时间');
         const shipment = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(operation.shipmentId));
         if (!this.canRead(device, shipment)) fail(403, 'SCOPE_FORBIDDEN', '运单不在授权范围内');
         const digest = hash(JSON.stringify(operation));
         const old = this.db.prepare('SELECT payload_hash FROM operations WHERE device_id=? AND id=?').get(device.id, operation.id);
         if (old && old.payload_hash !== digest) fail(409, 'OPERATION_CONFLICT', '相同操作ID不能用于不同内容');
         if (!old) {
-          if (operation.action === 'pick' || operation.action === 'restore') shipment.picked = operation.action === 'pick';
-          else shipment.hidden = operation.action === 'hide';
-          shipment.manualAt = this.now();
-          this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id);
-          this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: 'applied' }));
+          const pickupAction = ['pick', 'restore', 'resumeAutoPickup'].includes(operation.action);
+          const stale = pickupAction && (shipment.pickupManualOperation || shipment.pickupManualAt) && operation.occurredAt < (shipment.pickupManualAt || 0);
+          if (!stale) {
+            if (pickupAction) {
+              const state = pickupCompletionState(shipment);
+              state.manualOverride = operation.action === 'pick' ? 'picked' : operation.action === 'restore' ? 'pending' : '';
+              Object.assign(shipment, { pickupCompletion: state, picked: effectivePicked(state), pickupManualAt: operation.occurredAt, pickupManualOperation: `${device.id}:${operation.id}` });
+              if (operation.action === 'resumeAutoPickup') Object.assign(shipment, this.pickupCompletion.project(shipment));
+            } else shipment.hidden = operation.action === 'hide';
+            shipment.manualAt = this.now();
+            this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id);
+          }
+          this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
           this.updateAccount(shipment.accountId, {});
         }
         appliedIds.push(operation.id);

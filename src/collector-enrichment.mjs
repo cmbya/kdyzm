@@ -101,7 +101,7 @@ export const pickupEvidence = logistics.pickupEvidence;
 export const eventStatus = logistics.eventStatus;
 
 export function activeKnownParcels(order) {
-  return (Array.isArray(order?.shipments) ? order.shipments : []).filter(parcel => text(parcel?.waybillNo) && !parcel.picked && !parcel.hidden && parcel.status !== 'signed');
+  return (Array.isArray(order?.shipments) ? order.shipments : []).filter(parcel => text(parcel?.waybillNo) && !parcel.picked && !parcel.hidden && !parcel.deleted);
 }
 
 export function activeKnownOrders(orders, seen, limit = 20) {

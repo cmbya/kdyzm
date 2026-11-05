@@ -79,5 +79,5 @@ test('sync tracks only same-account active unpicked shipments for terminal logis
     }
   }
   await service.requestSync(a.id);
-  assert.deepEqual(options.trackedOrderIds, ['active']);
+  assert.deepEqual(options.trackedOrderIds, ['signed', 'active']);
 });

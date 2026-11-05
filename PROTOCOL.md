@@ -81,6 +81,20 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 后台持久化每scope最新摘要，最多保留1000条终态及尚在途任务，不保存凭据或上游原文。重启保留终态，将未完成任务明确标为中断错误，不自动重发平台请求；更新登录凭据或账号归属后旧版本摘要不再进入快照。任务变化增加`serverRevision`，且摘要参与快照ETag，稳定状态可返回304。在途和终态均可下发，`empty/unavailable`附带的说明表示平台未提供信息，只有明确`error/expired`等失败状态才当作错误。
 
+## 取件自动监测（兼容 v1）
+
+能力 `pickup_completion_v1` 表示后台逐运单保存自动完成证据。快照根字段 `pickupCompletion={version:1,enabled,aiEnabled}` 只读；两个开关默认均开启。运单增加 `pickupCompletion={version:1,autoPicked,manualOverride,completedAt,evidence}`，`manualOverride` 为 `'' / picked / pending`；`evidence` 为 null 或 `{kind,description,eventTime,fingerprint,ruleId,ruleVersion}`，kind 为 `recipient_signed/user_collected`。原 `picked` 始终是人工覆盖优先后的有效结果，旧客户端继续使用；自动证据不写入 `manualAt`，配置与证据变化进入 revision 和 ETag。
+
+只有明确本人/收件人签收、用户或收件人已取走/领取成功/从柜取出等已完成正文，并具有可信非未来事件时间，才能自动完成。无主体的“取件成功”、普通签收、交易完成、代收、门口、揽收、退回、否定、未来、请求和签收服务说明均不成立；新于或同时发生的待取/重新入库/退回等冲突会使旧证据失效，未知时间的当前冲突也保守阻止自动。不能扫描任意历史命中后永久完成。原始历史截断或失败不单独撤销已保存的有效证据。
+
+启动时给旧记录补充状态，从操作日志识别真实 pick/restore，hide/unhide 与仅有 manualAt 不构成人工取件决定；原已取及隐藏/删除历史保留。当前可见未完成记录使用有效轨迹回查，不发额外平台请求。签收但未领取记录重新进入原有有界、按最早检查时间轮转的物流查询；有效已取件记录停止主动追踪。
+
+`POST /v1/operations` 在原 pick/restore/hide/unhide 之外兼容增加 `resumeAutoPickup`，字段仍为 `{id,shipmentId,action,occurredAt}`。pick/restore 固化 picked/pending 人工覆盖；resumeAutoPickup 清除覆盖并重新应用当前自动证据。跨设备较早 occurredAt 返回成功回执但操作状态为 superseded，不改变更新的人工取件决定；相同时间按接收顺序保留旧接口兼容。相同设备操作ID仍幂等、内容冲突409，全部操作继续检查运单授权。隐藏操作不会改人工取件覆盖。
+
+管理员 `GET/PUT /v1/admin/pickup-completion` 返回 `{config,candidates,history,recent,running,aiReady,stats,monitorRules}`；PUT 只接收布尔 `{enabled?,aiEnabled?}`。monitorRules为只读词组列表，每项包含 `{id,kind,keywords,origin,version,label,isExample,enabled}`；内置示例和真实持久化的AI/人工词组明确区分，多组之间任选命中，组内全部关键词同时出现，命中后仍必须通过完整领取语义与时间校验。关闭 enabled 暂停新自动完成并保留已完成证据；重新开启回查可见记录。`GET /v1/admin/pickup-completion/history` 返回 `{changes,candidates}`，`GET /v1/admin/pickup-completion/candidates` 返回 `{candidates}`；`POST /v1/admin/pickup-completion/rollback` 接收 `{historyId}`。撤回只移除仍与当次应用一致的规则，并同事务重算其自动结果，人工取件/撤销保留。设备令牌没有配置写入或管理历史读取权限。
+
+AI 复用后台默认渠道、全局启用、共享调用额度与冷却，从近期未完成或人工取件记录的原始轨迹中识别明确领取短语，不依赖平台状态必须是signed。原文先通过严格语义校验，只有封闭词表中的主体和完成动作发送到模型。AI选择不同措辞的字面监测词组，去重并移除同组中已被更具体词包含的冗余子串，不扩大匹配范围；新词组经反例与全部缓存轨迹回放后自动追加，多组独立生效。相同证据不重复学习，已回滚候选不重新应用。系统约束提示不由模型自行改写，不接受脚本或正则，也不能放宽否定、疑问、未来、非本人和物流时间顺序保护。关闭开关/变更渠道/关闭服务会废弃在途旧结果，存疑建议留待核对，不直接修改人工状态。
+
 ## 站点别名扩展（3.1.13，兼容 v1）
 
 设备快照增加 `stationRulesVersion`（非负整数）和 `stationRules`（启用站点及名称/地区/别名/子位置）。capability 为 `station_aliases_v1`。ETag 同时覆盖站点规则版本。下发不含候选、证据和 AI 配置，未声明能力的旧后台继续使用原匹配。

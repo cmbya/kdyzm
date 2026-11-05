@@ -87,7 +87,7 @@ test('PDD verified shipping path retains full track for the matching package onl
   assert.equal(calls.filter(target => target.pathname.endsWith('/shipping')).length, 1);
 });
 
-test('PDD tracks active known orders missing from unreceived without importing or using completed parcels', async () => {
+test('PDD tracks signed-unpicked known orders missing from unreceived without using picked parcels', async () => {
   const calls = [];
   const result = await createCollector({ now: () => NOW, fetchImpl: async url => {
     const target = new URL(url); calls.push(target.pathname);
@@ -101,7 +101,7 @@ test('PDD tracks active known orders missing from unreceived without importing o
   assert.equal(result.shipments.length, 1);
   assert.equal(result.shipments[0].waybillNo, 'ACTIVE');
   assert.equal(result.shipments[0].status, 'signed');
-  assert.ok(!calls.some(path => path.includes('/done/')));
+  assert.ok(calls.some(path => path.includes('/done/')));
 });
 
 test('PDD failed shipping reports refresh failure; expired login still aborts collection', async () => {
@@ -267,7 +267,7 @@ test('Taobao detail risk failures preserve list data while explicit session expi
   await assert.rejects(createCollector({ fetchImpl: taobaoDateFetch(orders, { o1: { ret: ['FAIL_SYS_SESSION_EXPIRED::登录过期'] } }) })({ platform: 'taobao' }, cookie), { code: 'ACCOUNT_EXPIRED' });
 });
 
-test('Taobao historical picked, hidden and signed orders keep metadata without repeated logistics', async () => {
+test('Taobao keeps picked and hidden metadata without polling, and refreshes signed-unpicked logistics', async () => {
   const records = ['picked', 'hidden', 'signed', 'active', 'explicit'].map(id => ({ id, statusInfo: { text: '交易成功' } }));
   const calls = [];
   const base = taobaoDateFetch(records, {});
@@ -285,7 +285,7 @@ test('Taobao historical picked, hidden and signed orders keep metadata without r
       { platformOrderId: 'active', orderDateOrigin: 'detail', shipments: [{ waybillNo: 'A', status: 'transit' }] },
     ],
   });
-  assert.deepEqual(calls, ['active', 'explicit']);
+  assert.deepEqual(calls, ['signed', 'active', 'explicit']);
   assert.equal(result.orderUpdates.length, 5);
   assert.deepEqual(result.orders, []);
 });
