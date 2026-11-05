@@ -122,9 +122,18 @@ export function initStationAdmin({ api, notice }) {
     queueOpen: false,
     aiConfig: null,
     aiDirty: false,
+    aiSaving: false,
+    aiVersion: 0,
+    channels: [],
+    channelId: null,
+    channelDirty: false,
+    channelSaving: false,
+    channelTesting: false,
+    channelVersion: 0,
+    session: 0,
     aiRunning: false,
     aiPollTimer: null,
-    aiPollStarted: 0,
+    aiPolling: false,
     reviewCandidate: null,
     analysisOpen: new Set(),
   };
@@ -276,34 +285,88 @@ export function initStationAdmin({ api, notice }) {
   }
 
   async function loadCandidates() {
-    const data = await api('/v1/admin/station-candidates'); state.candidates = (data.candidates || []).map(candidateOf).filter(candidate => !['ignored', 'approved'].includes(candidate.status)); if (data.running !== undefined) state.aiRunning = Boolean(data.running); renderDirectory(); renderCandidates(); scheduleAiPoll();
+    const session = state.session, data = await api('/v1/admin/station-candidates'); if (session !== state.session) return;
+    state.candidates = (data.candidates || []).map(candidateOf).filter(candidate => !['ignored', 'approved'].includes(candidate.status)); if (data.running !== undefined) state.aiRunning = Boolean(data.running); renderDirectory(); renderCandidates(); scheduleAiPoll();
   }
 
-  function applyConfig(config) {
+  function channelOptions(id, selected, editing = false) {
+    const select = get(id); select.replaceChildren();
+    const blank = document.createElement('option'); blank.value = ''; blank.textContent = editing ? '新增渠道' : '请选择渠道'; select.append(blank);
+    for (const channel of state.channels) { const option = document.createElement('option'); option.value = channel.id; option.textContent = `${channel.name || '未命名渠道'}${channel.enabled ? '' : '（已暂停）'}${channel.hasApiKey ? '' : '（未配置密钥）'}`; select.append(option); }
+    if (selected && !state.channels.some(channel => channel.id === selected)) { const missing = document.createElement('option'); missing.value = selected; missing.textContent = '所选渠道已不可用'; select.append(missing); }
+    select.value = selected || '';
+  }
+
+  function channelActions() {
+    const channel = state.channels.find(item => item.id === state.channelId);
+    get('ai-test').disabled = state.channelSaving || state.channelTesting || !channel?.hasApiKey;
+    get('ai-clear-key').disabled = state.channelSaving || !channel?.hasApiKey;
+    get('ai-channel-save').disabled = state.channelSaving;
+  }
+
+  function clearChannelTest(message = '保存后可测试两项合成任务，调用计入共享额度。') {
+    setText('ai-test-result', message); get('ai-capability-results').replaceChildren();
+  }
+
+  function applyChannel(id) {
+    state.channelId = id || ''; state.channelDirty = false; state.channelVersion++;
+    const channel = state.channels.find(item => item.id === id);
+    channelOptions('ai-channel-edit', state.channelId, true);
+    get('ai-channel-name').value = channel?.name || ''; get('ai-base-url').value = channel?.baseUrl || ''; get('ai-model').value = channel?.model || ''; get('ai-api-key').value = '';
+    get('ai-channel-enabled').value = String(channel?.enabled !== false);
+    setText('ai-key-state', channel?.hasApiKey ? '已配置；留空保留原密钥' : '未配置；留空保留原密钥');
+    setText('ai-channel-result', channel ? `正在编辑：${channel.name}${channel.enabled ? '' : '（已暂停）'}` : '新增渠道，最多保存 10 个。密钥只保存在后台。');
+    clearChannelTest(); channelActions();
+  }
+
+  async function loadChannels() {
+    const session = state.session, version = state.channelVersion;
+    const data = await api('/v1/admin/ai-channels');
+    if (session !== state.session || version !== state.channelVersion || state.channelSaving) return;
+    state.channels = data.channels || [];
+    setText('ai-channel-count', `${state.channels.length} / 10 个渠道，供站点和手机短信模板共用`);
+    if (!state.channelDirty) applyChannel(state.channelId === null ? data.defaultChannelId || state.channels[0]?.id || '' : state.channelId);
+    channelOptions('ai-channel-select', state.aiDirty ? get('ai-channel-select').value : state.aiConfig?.channelId);
+  }
+
+  function applyConfig(config, force = false) {
     state.aiConfig = config || {};
-    get('ai-enabled').setAttribute('aria-checked', String(Boolean(config?.enabled))); get('ai-enabled').classList.toggle('off', !config?.enabled);
-    get('ai-channel-name').value = first(config?.channelName); get('ai-base-url').value = first(config?.baseUrl); get('ai-model').value = first(config?.model); get('ai-interval').value = String(config?.intervalMinutes === 1440 ? 1440 : 60); get('ai-limit').value = String(config?.dailyLimit || 20); get('ai-api-key').value = '';
-    const configured = Boolean(config?.hasApiKey && config?.baseUrl && config?.model && config?.channelName);
-    setText('ai-key-state', config?.hasApiKey ? '已配置；输入框留空不会覆盖已保存密钥' : '未配置；输入框留空不会覆盖已保存密钥'); setText('ai-config-state', configured ? '已配置' : '待配置');
+    if (force || !state.aiDirty && !state.aiSaving) {
+      get('ai-enabled').setAttribute('aria-checked', String(Boolean(config?.enabled))); get('ai-enabled').classList.toggle('off', !config?.enabled);
+      channelOptions('ai-channel-select', config?.channelId); get('ai-interval').value = String([5, 60, 1440].includes(config?.intervalMinutes) ? config.intervalMinutes : 60); get('ai-limit').value = String(config?.dailyLimit || 20); state.aiDirty = false;
+    }
+    const configured = Boolean(config?.channelId && config?.channelEnabled && config?.hasApiKey && config?.baseUrl && config?.model);
+    setText('ai-config-state', configured ? config.enabled ? '自动优化已开启' : '自动优化已关闭' : config?.channelId ? '渠道不可用' : '待配置');
     setText('ai-usage', Number.isSafeInteger(config?.usageToday) && config.usageToday >= 0 ? `今日已用 ${config.usageToday} 次 / ${config.dailyLimit || 20} 次` : '当日用量尚未读取');
-    setText('ai-frequency-label', !configured ? '尚未配置' : config?.enabled ? config?.intervalMinutes === 1440 ? '每天' : '每小时' : '定期已关闭 · 可手动分析'); state.aiDirty = false;
+    setText('ai-frequency-label', !configured ? '请选择可用渠道' : config?.enabled ? ({ 5: '每 5 分钟', 60: '每小时', 1440: '每天' })[config.intervalMinutes] : '自动已关闭 · 可手动分析');
   }
 
   async function loadAiConfig() {
-    const data = await api('/v1/admin/station-ai'); if (data.config) applyConfig(data.config); if (data.running !== undefined) state.aiRunning = Boolean(data.running); scheduleAiPoll();
+    const session = state.session, version = state.aiVersion;
+    const data = await api('/v1/admin/station-ai'); if (session !== state.session || version !== state.aiVersion || state.aiSaving) return;
+    if (data.config) applyConfig(data.config); if (data.running !== undefined) state.aiRunning = Boolean(data.running); scheduleAiPoll();
   }
+
+  function stationWorkspaceVisible() { return state.open && !document.hidden && !get('station-settings-view').hidden && !get('page-settings').hidden && !get('workspace').hidden; }
 
   function scheduleAiPoll() {
     clearTimeout(state.aiPollTimer); state.aiPollTimer = null;
-    if (!state.open || document.hidden || !state.aiRunning) return;
-    if (!state.aiPollStarted) state.aiPollStarted = Date.now();
-    if (Date.now() - state.aiPollStarted > 60000) { state.aiRunning = false; notice('分析任务仍在后台处理，可稍后重新打开站点管理查看结果。'); return; }
-    state.aiPollTimer = setTimeout(async () => { state.aiPollTimer = null; try { await Promise.all([loadCandidates(), loadAiConfig()]); } catch (error) { notice(error.message || '分析状态暂时无法更新。', true); } }, 3000);
+    if (!stationWorkspaceVisible() || state.aiPolling || !state.aiRunning && !state.aiConfig?.enabled) return;
+    state.aiPollTimer = setTimeout(async () => {
+      state.aiPollTimer = null; if (!stationWorkspaceVisible()) return;
+      const session = state.session; state.aiPolling = true;
+      const results = await Promise.allSettled([loadCandidates(), loadAiConfig()]);
+      if (session !== state.session) return;
+      state.aiPolling = false;
+      const failure = results.find(result => result.status === 'rejected');
+      if (failure && stationWorkspaceVisible()) notice(failure.reason?.message || '分析状态暂时无法更新。', true);
+      scheduleAiPoll();
+    }, state.aiRunning ? 3000 : 10000);
   }
 
   async function loadWorkspace() {
     if (!state.open) return;
-    try { await Promise.all([loadStations(), loadCandidates(), loadAiConfig()]); } catch (error) { notice(error.message || '站点管理暂时无法读取。', true); }
+    try { await Promise.all([loadStations(), loadCandidates(), loadAiConfig(), loadChannels()]); } catch (error) { notice(error.message || '站点管理暂时无法读取。', true); }
   }
 
   async function saveStation(event) {
@@ -324,26 +387,70 @@ export function initStationAdmin({ api, notice }) {
   }
 
   async function saveAi(event) {
-    event.preventDefault(); const body = { channelName: get('ai-channel-name').value.trim(), baseUrl: get('ai-base-url').value.trim(), model: get('ai-model').value.trim(), enabled: get('ai-enabled').getAttribute('aria-checked') === 'true', intervalMinutes: Number(get('ai-interval').value), dailyLimit: Number(get('ai-limit').value) };
-    if (!body.baseUrl || !body.model) throw new Error('请填写 AI Base URL 和模型。');
+    event.preventDefault(); if (state.aiSaving) return;
+    const channelId = get('ai-channel-select').value, body = { enabled: get('ai-enabled').getAttribute('aria-checked') === 'true', intervalMinutes: Number(get('ai-interval').value), dailyLimit: Number(get('ai-limit').value) };
+    if (channelId) body.channelId = channelId;
+    if (body.enabled && !channelId) throw new Error('请先保存并选择可用渠道。');
     if (!Number.isSafeInteger(body.dailyLimit) || body.dailyLimit < 1) throw new Error('每日调用上限须为正安全整数。');
-    const key = get('ai-api-key').value.trim(); if (key) body.apiKey = key;
-    const data = await api('/v1/admin/station-ai', { method: 'PATCH', body: JSON.stringify(body) }); applyConfig(data.config || data); notice('AI 设置已保存。');
+    const session = state.session; state.aiVersion++; state.aiSaving = true;
+    setFormBusy('ai-settings-form', true); setText('ai-settings-result', '正在保存…');
+    try { const data = await api('/v1/admin/station-ai', { method: 'PATCH', body: JSON.stringify(body) }); if (session !== state.session) return; state.aiVersion++; applyConfig(data.config || data, true); setText('ai-settings-result', '自动优化设置已保存。'); }
+    catch (error) { if (session === state.session) setText('ai-settings-result', error.message || '设置未保存，请重试。'); }
+    finally { state.aiSaving = false; setFormBusy('ai-settings-form', false); scheduleAiPoll(); }
+    if (session === state.session && stationWorkspaceVisible()) {
+      try { await loadCandidates(); } catch (error) { notice(error.message || '候选暂时无法更新，稍后自动重试。', true); }
+    }
+  }
+
+  function setFormBusy(id, busy) {
+    const form = get(id); form.setAttribute('aria-busy', String(busy));
+    for (const control of form.querySelectorAll('input, select, button')) control.disabled = busy;
+  }
+
+  async function saveChannel(event, clearKey = false) {
+    event?.preventDefault(); if (state.channelSaving) return;
+    const id = state.channelId, body = clearKey ? { clearApiKey: true, enabled: false } : { name: get('ai-channel-name').value.trim(), baseUrl: get('ai-base-url').value.trim(), model: get('ai-model').value.trim(), enabled: get('ai-channel-enabled').value === 'true' };
+    if (!clearKey && (!body.name || !body.baseUrl || !body.model)) throw new Error('请填写渠道名称、HTTPS接口地址和模型。');
+    const key = get('ai-api-key').value.trim(); if (!clearKey && key) body.apiKey = key;
+    const session = state.session; state.channelVersion++; state.channelSaving = true; clearChannelTest('渠道设置正在更新，请保存后重新测试。');
+    setFormBusy('ai-channel-form', true); setText('ai-channel-result', '正在保存渠道…');
+    try {
+      const data = await api(id ? `/v1/admin/ai-channels/${encodeURIComponent(id)}` : '/v1/admin/ai-channels', { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+      if (session !== state.session) return;
+      if (data.channel) state.channels = state.channels.map(channel => channel.id === data.channel.id ? data.channel : channel); else state.channels = data.channels || [];
+      const savedId = data.channel?.id || state.channels.at(-1)?.id || id; applyChannel(savedId);
+      setText('ai-channel-count', `${state.channels.length} / 10 个渠道，供站点和手机短信模板共用`);
+      setText('ai-channel-result', clearKey ? '密钥已清除，此渠道已暂停。' : '渠道已保存。');
+      await loadAiConfig();
+    } catch (error) { if (session === state.session) setText('ai-channel-result', error.message || '渠道未保存，请重试。'); }
+    finally { state.channelSaving = false; setFormBusy('ai-channel-form', false); channelActions(); }
   }
 
   async function clearApiKey() {
-    if (!confirm('清除后台已保存的 AI API Key，并暂停定期分析？')) return;
-    const data = await api('/v1/admin/station-ai', { method: 'PATCH', body: JSON.stringify({ clearApiKey: true, enabled: false }) }); applyConfig(data.config || data); notice('AI API Key 已清除，定期分析已暂停。');
+    if (!state.channelId || !confirm('清除此渠道已保存的 API Key 并暂停渠道？使用此渠道的站点和手机优化将停止。')) return;
+    await saveChannel(null, true);
   }
 
   async function testAi() {
-    if (state.aiDirty) throw new Error('请先保存 AI 设置，再进行连接测试。');
-    const data = await api('/v1/admin/station-ai/test', { method: 'POST', body: '{}' }); await loadAiConfig(); if (!data.ok) throw new Error(data.message || '连接测试失败。'); notice(data.message || '连接测试成功。');
+    if (state.channelDirty) throw new Error('请先保存渠道，再进行能力测试。');
+    if (!state.channelId) throw new Error('请先保存渠道。');
+    const session = state.session, version = state.channelVersion, id = state.channelId;
+    state.channelTesting = true; channelActions(); clearChannelTest('正在测试连接和两项合成任务…');
+    try {
+      const data = await api(`/v1/admin/ai-channels/${encodeURIComponent(id)}/test`, { method: 'POST', body: '{}' });
+      if (session !== state.session || version !== state.channelVersion) return;
+      setText('ai-test-result', `测试已完成：${data.message || '请查看各项校验结果。'}`);
+      for (const [capability, label] of [['station_alias', '站点别名'], ['sms_template', '短信模板']]) {
+        const result = data.capabilities?.[capability], row = document.createElement('li'); row.textContent = `${label}：${result?.ok === true ? '校验通过' : '未通过'} · ${result?.message || '未收到有效校验结果'}`; get('ai-capability-results').append(row);
+      }
+      await loadAiConfig();
+    } catch (error) { if (session === state.session && version === state.channelVersion) clearChannelTest(error.message || '测试未完成，请重试。'); }
+    finally { state.channelTesting = false; channelActions(); }
   }
 
   async function runAi() {
-    if (state.aiDirty) throw new Error('请先保存 AI 设置，再提交分析。');
-    const data = await api('/v1/admin/station-ai/run', { method: 'POST', body: '{}' }); state.aiRunning = Boolean(data.running ?? data.accepted); state.aiPollStarted = Date.now(); scheduleAiPoll(); notice(data.message || (data.accepted ? '分析任务已提交，正在后台处理。' : '分析任务未接受。'), !data.accepted);
+    if (state.aiDirty || state.channelDirty) throw new Error('请先保存 AI 设置，再提交分析。');
+    const data = await api('/v1/admin/station-ai/run', { method: 'POST', body: '{}' }); state.aiRunning = Boolean(data.running ?? data.accepted); scheduleAiPoll(); notice(data.message || (data.accepted ? '分析任务已提交，正在后台处理。' : '分析任务未接受。'), !data.accepted);
   }
 
   async function approveCandidate(event) {
@@ -362,11 +469,14 @@ export function initStationAdmin({ api, notice }) {
 
   get('basic-settings-tab').addEventListener('click', () => switchSettings('basic'));
   get('station-settings-tab').addEventListener('click', () => switchSettings('station'));
+  get('logistics-settings-tab').addEventListener('click', () => { state.open = false; clearTimeout(state.aiPollTimer); state.aiPollTimer = null; });
+  for (const id of ['nav-accounts', 'nav-devices']) get(id).addEventListener('click', () => { clearTimeout(state.aiPollTimer); state.aiPollTimer = null; });
+  get('nav-settings').addEventListener('click', () => { if (state.open) loadWorkspace(); });
   get('station-add').addEventListener('click', newStation);
   get('station-search-input').addEventListener('input', event => { state.query = event.target.value.trim(); renderDirectory(); });
   get('station-queue-entry').addEventListener('click', showQueue);
   get('ai-open-settings').addEventListener('click', () => { showQueue(); get('ai-settings-panel').open = true; get('ai-settings-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
-  const guarded = (id, handler) => get(id).addEventListener('click', async () => { const element = get(id); if (element.disabled) return; element.disabled = true; try { await handler(); } catch (error) { notice(error.message || '操作未完成，请重试。', true); } finally { element.disabled = false; } });
+  const guarded = (id, handler) => get(id).addEventListener('click', async () => { const element = get(id); if (element.disabled) return; element.disabled = true; try { await handler(); } catch (error) { notice(error.message || '操作未完成，请重试。', true); } finally { if (id === 'ai-test' || id === 'ai-clear-key') channelActions(); else element.disabled = false; } });
   guarded('ai-run', runAi);
   guarded('ai-test', testAi);
   guarded('ai-clear-key', clearApiKey);
@@ -380,10 +490,18 @@ export function initStationAdmin({ api, notice }) {
   get('review-station').addEventListener('change', event => setHidden('review-new-fields', event.target.value !== '__new__'));
   get('station-review-form').addEventListener('submit', event => approveCandidate(event).catch(error => notice(error.message || '候选未加入。', true)));
   get('ai-settings-form').addEventListener('submit', event => saveAi(event).catch(error => notice(error.message || 'AI 设置未保存。', true)));
-  get('ai-settings-form').addEventListener('input', () => { state.aiDirty = true; });
-  get('ai-interval').addEventListener('change', () => { state.aiDirty = true; });
-  get('ai-enabled').addEventListener('click', () => { const next = get('ai-enabled').getAttribute('aria-checked') !== 'true'; get('ai-enabled').setAttribute('aria-checked', String(next)); get('ai-enabled').classList.toggle('off', !next); state.aiDirty = true; });
-  get('logout').addEventListener('click', () => { state.open = false; clearTimeout(state.aiPollTimer); state.aiPollTimer = null; });
+  const markAiDirty = () => { state.aiDirty = true; state.aiVersion++; setText('ai-settings-result', '有未保存的更改。'); };
+  get('ai-settings-form').addEventListener('input', markAiDirty);
+  get('ai-interval').addEventListener('change', markAiDirty); get('ai-channel-select').addEventListener('change', markAiDirty);
+  get('ai-enabled').addEventListener('click', () => { const next = get('ai-enabled').getAttribute('aria-checked') !== 'true'; get('ai-enabled').setAttribute('aria-checked', String(next)); get('ai-enabled').classList.toggle('off', !next); markAiDirty(); });
+  get('ai-channel-form').addEventListener('submit', event => saveChannel(event).catch(error => notice(error.message || '渠道未保存。', true)));
+  const markChannelDirty = event => { if (event.target.id === 'ai-channel-edit') return; state.channelDirty = true; state.channelVersion++; clearChannelTest('渠道有未保存的更改，请保存后重新测试。'); };
+  get('ai-channel-form').addEventListener('input', markChannelDirty); get('ai-channel-enabled').addEventListener('change', markChannelDirty);
+  get('ai-channel-edit').addEventListener('change', event => {
+    if (state.channelDirty && !confirm('当前渠道有未保存更改，切换后将丢失。继续？')) { event.target.value = state.channelId || ''; return; }
+    applyChannel(event.target.value);
+  });
+  get('logout').addEventListener('click', () => { state.open = false; state.session++; state.aiVersion++; state.channelVersion++; state.channelId = null; state.channelDirty = false; state.aiDirty = false; state.aiPolling = false; get('ai-api-key').value = ''; clearChannelTest(); clearTimeout(state.aiPollTimer); state.aiPollTimer = null; });
   document.addEventListener('visibilitychange', () => { if (document.hidden) { clearTimeout(state.aiPollTimer); state.aiPollTimer = null; } else if (state.open) loadWorkspace(); });
   renderDirectory(); renderDetail();
 }

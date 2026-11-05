@@ -12,7 +12,7 @@ function fixture(t, request) {
   const db = new DatabaseSync(':memory:'), now = () => time;
   const stations = new StationStore({ db, key: Buffer.alloc(32, 4), now });
   stations.saveAiConfig({ channelName: '测试', baseUrl: 'https://api.example.com/v1', model: 'test-model', apiKey: 'test-key', enabled: true });
-  const jobs = new StationAiJobs({ stations, now, request });
+  const jobs = new StationAiJobs({ stations, now, request, automaticEvents: false });
   t.after(async () => { await jobs.close(); db.close(); });
   return { stations, jobs, advance: duration => { time += duration; } };
 }
@@ -291,13 +291,16 @@ test('scheduled empty queues and completed candidates make no calls; new items w
 });
 
 test('connection testing sends a fixed privacy-free payload and uses the same daily budget', async t => {
-  let outbound;
-  const { stations, jobs } = fixture(t, async request => { outbound = request; return reply({ ok: true }); });
+  const outbound = [];
+  const { stations, jobs } = fixture(t, async request => { outbound.push(request); const input = JSON.parse(JSON.parse(request.body).messages[1].content);
+    return reply(input.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: input.fragment, subLocation: '2号柜', evidence: [input.fragment] }
+      : { name: '合成模板', signature: '合成快递', keywords: ['取件码'], kind: 'pickup', rules: { code: { start: '取件码', end: '，' }, express: { start: '', end: '' }, address: { start: '已到', end: '，' } } }); });
   enqueue(stations); stations.saveAiConfig({ enabled: false });
-  assert.deepEqual(await jobs.testConnection(), { ok: true, message: 'AI连接正常' });
-  assert.ok(!outbound.body.includes('4卡'));
-  assert.ok(outbound.body.includes('connectionTest'));
-  assert.equal(stations.aiConfig().usageToday, 1);
+  const result = await jobs.testConnection(); assert.equal(result.ok, true);
+  assert.equal(result.capabilities.station_alias.ok, true); assert.equal(result.capabilities.sms_template.ok, true);
+  assert.ok(outbound.every(request => !JSON.parse(request.body).messages[1].content.includes('4卡')));
+  assert.equal(outbound.length, 2);
+  assert.equal(stations.aiConfig().usageToday, 2);
   assert.equal(stations.candidates()[0].status, 'pending');
   assert.equal(jobs.runDue().code, 'AI_AUTOMATIC_DISABLED');
 });

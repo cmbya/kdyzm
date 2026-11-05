@@ -9,6 +9,7 @@ import { LogisticsRuleStore } from './logistics-rule-store.mjs';
 import { createSyncJobs } from './sync-jobs.mjs';
 import { StationStore, enqueuePlatformCandidates, enqueueStationProposal } from './stations.mjs';
 import { StationAiJobs } from './station-ai.mjs';
+import { AiAssistance } from './ai-assistance.mjs';
 import { serverVersion } from './version.mjs';
 import { createAppUpdateHandler } from './app-updates.mjs';
 import { createCookieSyncHandler } from './cookie-sync.mjs';
@@ -40,7 +41,8 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const store = new Store({ filename, key: configuration.key, now, getLogisticsRules });
   logisticsRules = new LogisticsRuleStore(store.db, now);
   const stations = new StationStore({ db: store.db, key: configuration.key, now });
-  const stationAi = new StationAiJobs({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
+  const stationAi = new StationAiJobs({ stations, now, automaticEvents: scheduler, ...(aiRequest ? { request: aiRequest } : {}) });
+  const aiAssistance = new AiAssistance({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
   const rate = new RateLimiter(now);
   const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now, onImported: accountId => enqueuePlatformCandidates(stations, store.snapshot([accountId]), now()) });
   const running = jobs.running;
@@ -157,6 +159,23 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
+        const channelList = () => { const config = stations.aiConfig(); return { channels: stations.aiChannels(), dailyLimit: config.dailyLimit, usageToday: config.usageToday, defaultChannelId: config.channelId }; };
+        if (path === '/v1/admin/ai-channels' && req.method === 'GET') { send(res, 200, channelList()); return; }
+        if (path === '/v1/admin/ai-channels' && req.method === 'POST') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          stations.saveAiChannel(undefined, body); send(res, 201, channelList()); return;
+        }
+        const aiChannelPath = path.match(/^\/v1\/admin\/ai-channels\/([^/]+)(\/test)?$/);
+        if (aiChannelPath && !aiChannelPath[2] && req.method === 'PATCH') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, { channel: stations.saveAiChannel(aiChannelPath[1], body) }); return;
+        }
+        if (aiChannelPath?.[2] && req.method === 'POST') {
+          onlyKeys(await bodyOf(req), []); configuration.authenticate(req.headers['x-admin-token']);
+          rate.check('station-ai:test', 5, 60000);
+          const result = await aiAssistance.test(aiChannelPath[1]); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, result); return;
+        }
         if (path === '/v1/admin/logistics-rules' && req.method === 'GET') { send(res, 200, logisticsRules.read()); return; }
         if (path === '/v1/admin/logistics-rules' && req.method === 'PATCH') {
           const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
@@ -259,6 +278,17 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         admin(req); send(res, 200, store.revoke(revokePath[1])); return;
       }
       const current = device(req);
+      if (path === '/v1/ai/channels' && req.method === 'GET') { send(res, 200, aiAssistance.channels()); return; }
+      if (path === '/v1/ai/template-proposals' && req.method === 'POST') {
+        const body = await bodyOf(req), authorized = device(req);
+        rate.check(`ai-template:${authorized.id}`, 4, 60000);
+        rate.check(`ai-template-hour:${authorized.id}`, 20, 3600000);
+        const identityOf = value => hash(JSON.stringify([req.headers.authorization, value.id, [...value.accountIds].sort(), [...(value.familyIds || [])].sort(), [...(value.legacyAccountIds || [])].sort()]));
+        const identity = identityOf(authorized);
+        const authorize = () => { if (identityOf(store.device(req.headers.authorization.slice(7))) !== identity) fail(403, 'SCOPE_FORBIDDEN', '设备授权已变化，请重新准备建议'); };
+        const result = await aiAssistance.template(body, identity, authorize);
+        authorize(); send(res, 200, result); return;
+      }
       if (path === '/v1/connection' && req.method === 'GET') {
         send(res, 200, { schemaVersion: 1, serviceId: configuration.serviceId, lanBaseUrl: configuration.lanBaseUrl }); return;
       }
@@ -325,9 +355,10 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, logisticsRules,
+  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, aiAssistance, logisticsRules,
     async close() {
       cookieSync.close();
+      aiAssistance.close();
       if (timer) clearInterval(timer);
       await new Promise(resolve => server.close(resolve));
       await jobs.close();

@@ -55,17 +55,28 @@
               <header class="queue-head"><div><h3>建议候选 <span id="candidate-count" class="pill warning">0 条待核对</span></h3><p>AI 只读取站点相关片段，不会直接合并订单。</p></div><div class="queue-actions"><small id="ai-frequency-label">尚未配置</small><button id="ai-run" class="secondary" type="button">立即分析</button><button id="ai-open-settings" class="secondary" type="button">AI 设置</button></div></header>
               <div class="ai-rule">人工确认后才会加入站点别名；住宅地址和物流中转站不会当作取件站。</div>
               <div id="candidate-list" class="candidate-list"></div>
-              <details id="ai-settings-panel" class="ai-settings"><summary>定期 AI 设置 <span id="ai-config-state" class="pill neutral">未读取</span></summary><form id="ai-settings-form" class="settings-body">
-                <div class="setting-row"><label for="ai-enabled">启用定期 AI<small>只分析已收到的待识别片段</small></label><button id="ai-enabled" class="toggle ai-toggle" type="button" role="switch" aria-checked="false" aria-label="启用定期 AI"></button></div>
-                <div class="setting-row"><label for="ai-channel-name">渠道名称<small>用于识别后台 AI 服务</small></label><input id="ai-channel-name" maxlength="80" placeholder="例如：站点识别服务"></div>
-                <div class="setting-row"><label for="ai-base-url">Base URL<small>保存后再进行连接测试</small></label><input id="ai-base-url" type="url" maxlength="300" placeholder="https://api.example.com"></div>
-                <div class="setting-row"><label for="ai-model">模型</label><input id="ai-model" maxlength="120" placeholder="例如：deepseek-chat"></div>
-                <div class="setting-row"><label for="ai-api-key">API Key<small id="ai-key-state">未配置；输入框留空不会覆盖已保存密钥</small></label><input id="ai-api-key" type="password" autocomplete="new-password" maxlength="512" placeholder="输入新密钥，不会回显"></div>
-                <div class="setting-row"><span>清除已保存密钥<small>清除后需要重新配置才能分析</small></span><button id="ai-clear-key" class="danger secondary" type="button">清除 Key</button></div>
-                <div class="setting-row"><label for="ai-interval">分析频率</label><select id="ai-interval"><option value="60">每小时</option><option value="1440">每天</option></select></div>
-                <div class="setting-row"><label for="ai-limit">每日调用上限<small>默认20次，含连接测试和重试</small><small id="ai-usage">当日用量尚未读取</small></label><input id="ai-limit" type="number" min="1" step="1" value="20" inputmode="numeric"></div>
-                <p class="upload-note">手机端需主动开启“站点片段增强”后才会上报脱敏片段；AI 不读取完整短信，且不会自动改变订单关联。</p>
-                <div class="settings-actions"><button id="ai-test" class="secondary" type="button">连接测试</button><button type="submit">保存 AI 设置</button></div>
+              <details id="ai-settings-panel" class="ai-settings"><summary>AI 渠道与自动优化 <span id="ai-config-state" class="pill neutral">未读取</span></summary>
+              <form id="ai-channel-form" class="settings-body" method="post" action="/v1/admin/ai-channels">
+                <h4>统一 AI 渠道</h4>
+                <div class="setting-row"><label for="ai-channel-edit">管理渠道<small id="ai-channel-count">最多保存 10 个渠道，供站点和手机短信模板共用</small></label><select id="ai-channel-edit" name="channel"><option value="">新增渠道</option></select></div>
+                <div class="setting-row"><label for="ai-channel-name">渠道名称（必填）</label><input id="ai-channel-name" name="name" maxlength="80" required placeholder="例如：常用识别服务"></div>
+                <div class="setting-row"><label for="ai-base-url">接口地址（必填）<small>兼容 Chat Completions 的 HTTPS 根地址</small></label><input id="ai-base-url" name="baseUrl" type="url" maxlength="300" required pattern="https://.*" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="https://api.example.com"></div>
+                <div class="setting-row"><label for="ai-model">模型（必填）</label><input id="ai-model" name="model" maxlength="120" required autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="例如：deepseek-chat"></div>
+                <div class="setting-row"><label for="ai-api-key">API Key<small id="ai-key-state">未配置；留空保留原密钥</small></label><input id="ai-api-key" name="apiKey" type="password" autocomplete="new-password" maxlength="4096" aria-describedby="ai-key-state" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="输入新密钥，不会回显"></div>
+                <div class="setting-row"><label for="ai-channel-enabled">渠道状态<small>暂停后，正在使用此渠道的优化停止</small></label><select id="ai-channel-enabled" name="enabled"><option value="true">启用</option><option value="false">暂停</option></select></div>
+                <div class="settings-actions"><button id="ai-clear-key" class="danger secondary" type="button" disabled>清除密钥</button><button id="ai-test" class="secondary" type="button" disabled>连接与能力测试</button><button id="ai-channel-save" type="submit">保存渠道</button></div>
+                <p id="ai-channel-result" class="verify-result" role="status" aria-live="polite">渠道密钥仅保存在后台，手机只获取渠道名称和可用能力。</p>
+                <p id="ai-test-result" class="verify-result" role="status" aria-live="polite">保存后可测试两项合成任务，调用计入共享额度。</p><ul id="ai-capability-results" class="ai-capability-results"></ul>
+              </form>
+              <form id="ai-settings-form" class="settings-body" method="post" action="/v1/admin/station-ai">
+                <h4>站点自动优化</h4>
+                <div class="setting-row"><label for="ai-enabled">启用自动优化<small>新增片段自动分析，建议仍需人工确认</small></label><button id="ai-enabled" class="toggle ai-toggle off" type="button" role="switch" aria-checked="false" aria-label="启用站点自动优化"></button></div>
+                <div class="setting-row"><label for="ai-channel-select">使用渠道</label><select id="ai-channel-select" name="channelId"><option value="">请先保存渠道</option></select></div>
+                <div class="setting-row"><label for="ai-interval">自动检查频率</label><select id="ai-interval" name="intervalMinutes"><option value="5">每 5 分钟</option><option value="60">每小时</option><option value="1440">每天</option></select></div>
+                <div class="setting-row"><label for="ai-limit">共享每日调用上限<small>所有渠道、站点、手机模板、测试和重试共用</small><small id="ai-usage">当日用量尚未读取</small></label><input id="ai-limit" name="dailyLimit" type="number" min="1" step="1" value="20" inputmode="numeric" required></div>
+                <p class="upload-note">手机需主动开启“站点片段增强”才会上报脱敏片段。AI 不读取完整短信，也不会自动改变包裹关联。</p>
+                <div class="settings-actions"><button id="ai-settings-save" type="submit">保存自动优化设置</button></div>
+                <p id="ai-settings-result" class="verify-result" role="status" aria-live="polite"></p>
               </form></details>
             </div>
             <p id="station-page-note" class="page-note">仅显示当前私人后台的站点规则与待核对材料。</p>

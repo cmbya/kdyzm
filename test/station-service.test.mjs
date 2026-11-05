@@ -67,7 +67,9 @@ test('manual run HTTP responses explain rejection and permit configured AI while
 
 test('AI settings encrypt the backend key and never expose it in HTTP settings, snapshots or errors', async t => {
   let sent;
-  const { service, request, device } = await fixture(t, { aiRequest: async value => { sent = value; return response({ ok: true }); } });
+  const { service, request, device } = await fixture(t, { aiRequest: async value => { sent = value; const input = JSON.parse(JSON.parse(value.body).messages[1].content);
+    return response(input.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: input.fragment, subLocation: '2号柜', evidence: [input.fragment] }
+      : { name: '合成模板', signature: '合成快递', keywords: ['取件码'], kind: 'pickup', rules: { code: { start: '取件码', end: '，' }, express: { start: '', end: '' }, address: { start: '已到', end: '，' } } }); } });
   const saved = await request('/v1/admin/station-ai', { method: 'PATCH', admin: true, body: aiConfig });
   assert.equal(saved.status, 200); assert.equal(saved.data.config.hasApiKey, true);
   for (const result of [saved, await request('/v1/admin/station-ai', { admin: true }), await request('/v1/snapshot', { token: device.token })]) {

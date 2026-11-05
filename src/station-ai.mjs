@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fail } from './security.mjs';
 import { validateStationSuggestion } from './station-text.mjs';
+import { testAiCapabilities } from './ai-templates.mjs';
 
 const TIMEOUT = 12000, RESPONSE_LIMIT = 65536;
 const messages = {
@@ -16,6 +17,7 @@ const messages = {
   AI_ENDPOINT_BLOCKED: 'AI地址未通过公网HTTPS安全校验', AI_HTTP_ERROR: 'AI服务暂时不可用，请检查渠道配置后重试',
   AI_RESPONSE_TOO_LARGE: 'AI返回超过大小限制，未采纳', AI_DETAIL_LIMIT: '分析详情超过大小限制，未采纳',
   AI_REQUEST_FAILED: 'AI请求未完成，请检查渠道配置后重试',
+  AI_CHANNEL_UNAVAILABLE: '所选AI渠道已暂停或未配置，请重新选择',
 };
 const safeFailure = error => { const code = Object.hasOwn(messages, error?.code) ? error.code : 'AI_REQUEST_FAILED'; return { code, message: messages[code] }; };
 const safeError = error => safeFailure(error).message;
@@ -91,18 +93,34 @@ function contentJson(response) {
 }
 
 export class StationAiJobs {
-  constructor({ stations, now = Date.now, request = requestAiJson }) {
+  constructor({ stations, now = Date.now, request = requestAiJson, automaticEvents = true }) {
     this.stations = stations; this.now = now; this.transport = request; this.running = null; this.controllers = new Map(); this.closed = false; this.cancelGeneration = 0; this.batch = null;
-    this.unsubscribe = stations.onAiConfigChange(({ credentialsChanged }) => {
+    this.automaticEvents = automaticEvents;
+    this.unsubscribeQueue = stations.onAiQueueChange(() => this.schedule());
+    this.unsubscribe = stations.onAiConfigChange(({ credentialsChanged, channelId }) => {
+      if (channelId && channelId !== this.stations.aiConfig().channelId) return;
       if (credentialsChanged) this.cancelGeneration++;
       const reason = aiError(credentialsChanged ? 'AI_CONFIG_CHANGED' : !this.ready(false) ? 'AI_NOT_CONFIGURED' : 'AI_AUTOMATIC_DISABLED');
       if (this.batch && (credentialsChanged || !this.ready(this.batch.automatic))) this.batch.controller.abort(reason);
       for (const [controller, context] of this.controllers) if (credentialsChanged || !this.ready(context.automatic)) controller.abort(reason);
+      this.schedule();
     });
+    this.schedule();
+  }
+  schedule() {
+    clearTimeout(this.scheduled);
+    this.scheduled = null;
+    if (!this.automaticEvents || this.closed || !this.ready(true)) return;
+    const config = this.stations.aiConfig();
+    if (config.usageToday >= config.dailyLimit) return;
+    const pending = this.stations.candidates().filter(c => retryAttempts(c) < 3 && (c.status === 'pending' || c.status === 'failed' && c.retryAt > 0));
+    if (!pending.length) return;
+    const candidateAt = Math.min(...pending.map(c => c.status === 'failed' ? c.retryAt : this.now()));
+    this.scheduled = setTimeout(() => { this.scheduled = null; this.runDue(); }, Math.max(0, config.nextRunAt - this.now(), candidateAt - this.now())).unref();
   }
   ready(requireEnabled = true) {
     const config = this.stations.aiConfig();
-    return config.hasApiKey && config.channelName && config.baseUrl && config.model && (!requireEnabled || config.enabled);
+    return config.channelEnabled && config.hasApiKey && config.channelName && config.baseUrl && config.model && (!requireEnabled || config.enabled);
   }
   assertActive(context) {
     if (this.closed) throw aiError('SERVICE_STOPPING');
@@ -136,7 +154,7 @@ export class StationAiJobs {
     this.stations.markAiRun();
     const controller = new AbortController(), context = { automatic, generation: this.cancelGeneration, signal: controller.signal };
     this.batch = { ...context, controller };
-    this.running = Promise.resolve().then(() => this.run(context)).catch(() => {}).finally(() => { this.running = null; this.batch = null; });
+    this.running = Promise.resolve().then(() => this.run(context)).catch(() => {}).finally(() => { this.running = null; this.batch = null; this.schedule(); });
     return response('AI_ACCEPTED');
   }
   runDue() {
@@ -155,7 +173,7 @@ export class StationAiJobs {
     const aborted = new Promise((_, reject) => { onAbort = () => reject(controller.signal.reason || aiError('AI_CONFIG_CHANGED')); controller.signal.addEventListener('abort', onAbort, { once: true }); });
     try {
       const response = await Promise.race([this.transport({ url: config.baseUrl, headers: { Authorization: `Bearer ${config.apiKey}` },
-        body: JSON.stringify({ model: config.model, stream: false, temperature: 0, max_tokens: 700, response_format: { type: 'json_object' }, messages: requestMessages }), signal: controller.signal }), timeout, aborted]);
+        body: JSON.stringify({ model: config.model, stream: false, temperature: 0, max_tokens: 700, ...(config.jsonMode ? { response_format: { type: 'json_object' } } : {}), messages: requestMessages }), signal: controller.signal }), timeout, aborted]);
       this.assertActive(context);
       return response;
     } catch (error) {
@@ -212,11 +230,10 @@ export class StationAiJobs {
   async testConnection() {
     if (this.closed) fail(503, 'SERVICE_STOPPING', '服务正在停止');
     if (!this.ready(false)) fail(400, 'AI_NOT_CONFIGURED', '请先配置AI地址、模型和API Key');
-    try {
-      const value = contentJson(await this.call([{ role: 'system', content: 'Return only JSON {"ok":true}. Do not call tools.' }, { role: 'user', content: '{"connectionTest":true}' }]));
-      if (!value || Object.keys(value).length !== 1 || value.ok !== true) throw aiError('AI_INVALID_RESULT');
-      return { ok: true, message: 'AI连接正常' };
-    } catch (error) { return { ok: false, message: safeError(error) }; }
+    const generation = this.cancelGeneration;
+    return testAiCapabilities(messages => this.call(messages, { generation }), contentJson, safeFailure, SYSTEM);
   }
-  async close() { this.closed = true; this.unsubscribe(); this.batch?.controller.abort(aiError('SERVICE_STOPPING')); for (const controller of this.controllers.keys()) controller.abort(aiError('SERVICE_STOPPING')); await this.running; }
+  async close() { this.closed = true; clearTimeout(this.scheduled); this.unsubscribe(); this.unsubscribeQueue(); this.batch?.controller.abort(aiError('SERVICE_STOPPING')); for (const controller of this.controllers.keys()) controller.abort(aiError('SERVICE_STOPPING')); await this.running; }
 }
+
+export { contentJson, safeFailure, aiError, SYSTEM as STATION_SYSTEM };

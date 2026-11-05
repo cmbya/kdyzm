@@ -19,6 +19,14 @@ var PickCodeLogistics = (function () {
   }
   function clean(candidate) {
     var raw = text(candidate).replace(/^[：:\s]+/, '');
+    // A provider may prepend its brand/action before an explicit pickup address.
+    // Stay within the already validated action fragment; never borrow a later destination.
+    var address = /(?:取件|取货|自提)地址\s*[:：]\s*/.exec(raw);
+    if (address) raw = raw.slice(address.index + address[0].length);
+    var repeated = /^([^()（）]+)[(（]([^()（）]+)[)）]\s*([^()（）]+)$/.exec(raw);
+    if (repeated && stationKey(repeated[2]) === stationKey(repeated[3])
+      && !/(?:[东南西北正侧后]门|[A-Za-z0-9一二三四五六七八九十]+\s*(?:号?柜|卡|栋|幢|单元|号楼|座|门))/.test(repeated[1])
+      && !/分拣|转运|分拨|物流中心|营业部|家门口|家中|收件人|本人/.test(raw)) raw = text(repeated[2]);
     var bracket = raw.match(/^[【「“]([^】」”]+)[】」”](\s*[A-Za-z0-9一二三四五六七八九十]+号柜)?/);
     var station = text((bracket ? bracket[1] + (bracket[2] || '') : raw).replace(/^[【「“\s]+|[】」”\s]+$/g, '')
       .split(/(?:[，,。；;！？!?]|请|取件码|取货码|提货码|凭码|等待取件|待取件|已签收|已代收|联系电话|电话)/)[0]);
