@@ -22,7 +22,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 const content = element => element.textContent + element.children.map(content).join('');
 const channel = (id, extra = {}) => ({ id, name:'合成渠道'+id, baseUrl:'https://synthetic.example', model:'synthetic-model', enabled:true, hasApiKey:true, apiKeyMasked:'••••••••', revision:1, ...extra });
 
-async function browser(t) {
+async function browser(t, tuning = false) {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const elements = new Map([...html.matchAll(/<([\w-]+)[^>]*\bid="([^"]+)"/g)].map(match => [match[2], new Element(match[1], match[2])]));
   for (const formId of ['ai-channel-form', 'ai-settings-form']) {
@@ -36,10 +36,16 @@ async function browser(t) {
   t.after(()=>{for(const [key,value] of Object.entries(original)){if(value===undefined)delete globalThis[key];else globalThis[key]=value;}});
   const state = { channels:[channel('a'),channel('b',{name:'<img src=x onerror=alert(1)>',enabled:false})], config:{channelId:'a',enabled:false,intervalMinutes:5,dailyLimit:20,usageToday:0}, candidates:[],running:false,failCandidates:false,waitCandidates:null,waitTest:null,waitSave:null,failSave:false,failLoad:false, testResult:{ok:false,message:'部分能力未通过合成样例校验',capabilities:{station_alias:{ok:true,message:'合成样例通过'},sms_template:{ok:false,message:'模板未通过反例校验'}}} };
   const calls=[],notices=[];
+  if(tuning)Object.assign(state.config,{autoApply:false,logisticsEnabled:false});
+  Object.assign(state,{changes:[],logistics:[],failOptimization:false,waitOptimization:null});
   const config=()=>({...state.config,...Object.fromEntries(['baseUrl','model','hasApiKey'].map(key=>[key,state.channels.find(c=>c.id===state.config.channelId)?.[key]])),channelEnabled:!!state.channels.find(c=>c.id===state.config.channelId)?.enabled});
   initStationAdmin({notice:(...args)=>notices.push(args),api:async(path,options={})=>{
     const method=options.method||'GET',body=options.body?JSON.parse(options.body):null;calls.push({path,method,body});
     if(path==='/v1/admin/stations')return {stations:[]};
+    if(path==='/v1/admin/ai-optimization/history'){if(state.waitOptimization)await state.waitOptimization;if(state.failOptimization)throw new Error('记录暂不可用');return {changes:structuredClone(state.changes)};}
+    if(path==='/v1/admin/logistics-ai'){if(state.failOptimization)throw new Error('物流暂不可用');return {candidates:structuredClone(state.logistics)};}
+    if(path.includes('/ai-optimization/history/')&&path.endsWith('/rollback')){if(state.waitSave)await state.waitSave;const item=state.changes.find(c=>path.endsWith('/'+c.id+'/rollback'));item.status='rolled_back';item.canRollback=false;return {ok:true};}
+    if(path.startsWith('/v1/admin/logistics-ai/')&&path.endsWith('/ignore')){state.logistics=state.logistics.filter(c=>!path.endsWith('/'+c.id+'/ignore'));return {ok:true};}
     if(path==='/v1/admin/station-candidates'){if(state.waitCandidates)await state.waitCandidates;if(state.failCandidates)throw new Error('候选暂时读取失败');return {candidates:structuredClone(state.candidates),running:state.running};}
     if(path==='/v1/admin/station-ai'){
       if(method==='PATCH'){if(state.waitSave)await state.waitSave;if(state.failSave)throw new Error('保存失败，草稿仍在');Object.assign(state.config,body);}
@@ -69,6 +75,46 @@ test('统一渠道列表保留暂停项与五分钟设置，密钥不回显且�
   assert.match(content(get('ai-channel-edit')),/<img src=x onerror=alert\(1\)>（已暂停）/);
   assert.equal(get('ai-api-key').value,'');assert.match(get('ai-key-state').textContent,/已配置/);
   assert.equal(get('ai-test').disabled,false);assert.match(get('ai-usage').textContent,/0 次 \/ 20 次/);
+});
+
+test('自动调优必须显式勾选，保存后自动更新两种能力和修改记录',async t=>{
+  const page=await browser(t,true),get=id=>page.elements.get(id);
+  assert.equal(get('ai-auto-apply').checked,false);assert.equal(get('ai-auto-apply-row').hidden,false);
+  assert.equal(page.calls.some(c=>c.method==='POST'||c.method==='PATCH'),false);
+  get('ai-auto-apply').checked=true;await get('ai-auto-apply').dispatch('change');await page.click('ai-enabled');
+  await page.submit('ai-settings-form');
+  const saved=page.calls.find(c=>c.path==='/v1/admin/station-ai'&&c.method==='PATCH');
+  assert.equal(saved.body.autoApply,true);assert.equal(saved.body.logisticsEnabled,true);assert.equal(saved.body.enabled,true);
+  assert.match(get('ai-config-state').textContent,/自动调优已开启/);
+  page.state.changes=[{id:'one',kind:'station_alias',summary:'<img src=x onerror=alert(1)>',status:'applied',canRollback:true,appliedAt:1}];
+  await page.poll();assert.match(content(get('ai-optimization-list')),/<img src=x onerror=alert\(1\)>/);
+  assert.match(get('ai-optimization-count').textContent,/1 条/);
+});
+
+test('回滚需确认且防重复请求，完成刷新；失败读取不删除已知记录',async t=>{
+  const page=await browser(t,true),get=id=>page.elements.get(id);await page.click('ai-enabled');await page.submit('ai-settings-form');
+  page.state.changes=[{id:'one',kind:'logistics_rule',summary:'到店文字',status:'applied',canRollback:true}];await page.poll();
+  const rollback=get('ai-optimization-list').children[0].children.find(c=>c.tagName==='BUTTON');
+  globalThis.confirm=()=>false;await rollback.click();assert.equal(page.calls.some(c=>c.path.endsWith('/rollback')),false);
+  globalThis.confirm=()=>true;let release;page.state.waitSave=new Promise(resolve=>{release=resolve;});
+  const pending=rollback.click();await settle();await rollback.click();
+  await page.poll();assert.equal(get('ai-optimization-list').children[0].children.find(c=>c.tagName==='BUTTON'),rollback,'轮询不能重建正在提交的回滚按钮');
+  assert.equal(page.calls.filter(c=>c.path.endsWith('/rollback')).length,1);release();await pending;
+  assert.match(content(get('ai-optimization-list')),/已回滚/);
+  page.state.failOptimization=true;await page.poll();assert.match(content(get('ai-optimization-list')),/已回滚/);
+  assert.match(get('ai-optimization-result').textContent,/暂时无法读取/);
+});
+
+test('物流待处理可忽略，能力测试能显示第三项且晚到记录不能跨登录会话',async t=>{
+  const page=await browser(t,true),get=id=>page.elements.get(id);await page.click('ai-enabled');await page.submit('ai-settings-form');
+  page.state.logistics=[{id:'one',status:'review',fragment:'合成站点文字',automationReason:'位置证据存在冲突'}];await page.poll();
+  assert.match(content(get('ai-logistics-list')),/位置证据存在冲突/);
+  await get('ai-logistics-list').children[0].children.find(c=>c.tagName==='BUTTON').click();assert.match(content(get('ai-logistics-list')),/暂无/);
+  page.state.testResult.capabilities.logistics_rule={ok:true,message:'物流反例通过'};await page.click('ai-test');
+  assert.match(content(get('ai-capability-results')),/物流识别：校验通过/);
+  let release;page.state.waitOptimization=new Promise(resolve=>{release=resolve;});const pending=page.poll();await settle();
+  await page.click('logout');page.state.changes=[{id:'secret',summary:'过期会话记录',status:'applied'}];release();await pending;
+  assert.doesNotMatch(content(get('ai-optimization-list')),/过期会话记录/);
 });
 
 test('站点设置只保存渠道选择、频率、开关和共享额度，不重复写入渠道密钥',async t=>{

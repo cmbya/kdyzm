@@ -10,6 +10,7 @@ import { createSyncJobs } from './sync-jobs.mjs';
 import { StationStore, enqueuePlatformCandidates, enqueueStationProposal } from './stations.mjs';
 import { StationAiJobs } from './station-ai.mjs';
 import { AiAssistance } from './ai-assistance.mjs';
+import { LogisticsAiJobs } from './logistics-ai.mjs';
 import { serverVersion } from './version.mjs';
 import { createAppUpdateHandler } from './app-updates.mjs';
 import { createCookieSyncHandler } from './cookie-sync.mjs';
@@ -39,12 +40,22 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   let logisticsRules;
   const getLogisticsRules = () => logisticsRules.read().rules;
   const store = new Store({ filename, key: configuration.key, now, getLogisticsRules });
-  logisticsRules = new LogisticsRuleStore(store.db, now);
+  logisticsRules = new LogisticsRuleStore(store.db, now, { onRulesChanged: rules => store.refreshLogisticsRules(rules) });
   const stations = new StationStore({ db: store.db, key: configuration.key, now });
   const stationAi = new StationAiJobs({ stations, now, automaticEvents: scheduler, ...(aiRequest ? { request: aiRequest } : {}) });
   const aiAssistance = new AiAssistance({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
+  const logisticsAi = new LogisticsAiJobs({ stations, rules: logisticsRules, store, assistance: aiAssistance, now, automaticEvents: scheduler });
+  const enrichCandidates = accountIds => {
+    const snapshot = store.snapshot(accountIds);
+    enqueuePlatformCandidates(stations, snapshot, now());
+    logisticsAi.intake(snapshot);
+  };
+  const unsubscribeOptimization = stations.onAiConfigChange(() => {
+    if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
+  });
+  if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
   const rate = new RateLimiter(now);
-  const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now, onImported: accountId => enqueuePlatformCandidates(stations, store.snapshot([accountId]), now()) });
+  const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now, onImported: accountId => enrichCandidates([accountId]) });
   const running = jobs.running;
   const allowed = (device, id) => { if (!device.accountIds.includes(id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); };
   const admin = req => {
@@ -71,6 +82,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const timer = scheduler ? setInterval(() => {
     for (const account of store.accounts()) if (account.enabled && account.nextSyncAt <= now()) void requestSync(account.id);
     stationAi.runDue();
+    logisticsAi.runDue();
   }, 30000).unref() : null;
 
   const server = createServer(async (req, res) => {
@@ -205,6 +217,21 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           return;
         }
         if (path === '/v1/admin/station-ai' && req.method === 'GET') { send(res, 200, { config: stations.aiConfig(), running: !!stationAi.running }); return; }
+        if (path === '/v1/admin/logistics-ai' && req.method === 'GET') { send(res, 200, { candidates: logisticsAi.candidates(), running: !!logisticsAi.running }); return; }
+        const logisticsCandidatePath = path.match(/^\/v1\/admin\/logistics-ai\/([^/]+)\/ignore$/);
+        if (logisticsCandidatePath && req.method === 'POST') {
+          onlyKeys(await bodyOf(req), []); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 200, { candidate: logisticsAi.ignore(logisticsCandidatePath[1]) }); return;
+        }
+        if (path === '/v1/admin/ai-optimization/history' && req.method === 'GET') {
+          send(res, 200, { changes: [...stations.automationHistory(), ...logisticsAi.history()].sort((a, b) => b.appliedAt - a.appliedAt) }); return;
+        }
+        const optimizationRollback = path.match(/^\/v1\/admin\/ai-optimization\/history\/(station_alias|logistics_rule)\/([^/]+)\/rollback$/);
+        if (optimizationRollback && req.method === 'POST') {
+          onlyKeys(await bodyOf(req), []); configuration.authenticate(req.headers['x-admin-token']);
+          const change = optimizationRollback[1] === 'station_alias' ? stations.rollbackAutomaticAlias(optimizationRollback[2]) : logisticsAi.rollback(optimizationRollback[2]);
+          send(res, 200, { change }); return;
+        }
         if (path === '/v1/admin/station-ai' && req.method === 'PATCH') {
           const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
           send(res, 200, { config: stations.saveAiConfig(body) }); return;
@@ -335,6 +362,9 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         const rules = stations.stationRules();
         snapshot.stationRulesVersion = rules.revision;
         snapshot.stationRules = rules.stations;
+        const logistics = logisticsRules.read();
+        snapshot.serverLogisticsRulesVersion = logistics.revision;
+        snapshot.serverLogisticsRules = logistics.rules.map(({ id, name, enabled, kind, starts, end, keywords, origin }) => ({ id, name, enabled, kind, starts, end, keywords, origin }));
         Object.assign(snapshot, jobs.snapshot(current, requested.length ? requested : undefined));
         const etag = `"${hash(JSON.stringify(snapshot))}"`;
         const matches = (req.headers['if-none-match'] || '').split(',').map(t => t.trim().replace(/^W\//, '')).includes(etag);
@@ -355,14 +385,16 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, aiAssistance, logisticsRules,
+  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, aiAssistance, logisticsRules, logisticsAi,
     async close() {
       cookieSync.close();
+      unsubscribeOptimization();
       aiAssistance.close();
       if (timer) clearInterval(timer);
       await new Promise(resolve => server.close(resolve));
       await jobs.close();
       await stationAi.close();
+      await logisticsAi.close();
       store.close();
     } };
 }

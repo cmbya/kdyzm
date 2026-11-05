@@ -111,6 +111,7 @@ export class StationAiJobs {
     clearTimeout(this.scheduled);
     this.scheduled = null;
     if (!this.automaticEvents || this.closed || !this.ready(true)) return;
+    this.stations.autoApplyReviewed();
     const config = this.stations.aiConfig();
     if (config.usageToday >= config.dailyLimit) return;
     const pending = this.stations.candidates().filter(c => retryAttempts(c) < 3 && (c.status === 'pending' || c.status === 'failed' && c.retryAt > 0));
@@ -139,12 +140,15 @@ export class StationAiJobs {
   eligibleCandidate(c) { return retryAttempts(c) < 3 && (c.status === 'pending' || c.status === 'failed' && c.retryAt > 0 && c.retryAt <= this.now()); }
   eligible() { return this.stations.candidates().filter(c => this.eligibleCandidate(c)); }
   request({ automatic = false } = {}) {
-    const response = (code, extra = {}) => ({ accepted: code === 'AI_ACCEPTED', running: !!this.running, code, message: messages[code], ...extra });
+    const response = (code, extra = {}) => ({ accepted: code === 'AI_ACCEPTED', running: !!this.running, code,
+      message: code === 'AI_ACCEPTED' && this.stations.aiConfig().enabled && this.stations.aiConfig().autoApply
+        ? '已开始分析；通过校验的已有站点别名会自动应用，冲突候选保留核对' : messages[code], ...extra });
     if (this.closed) return response('SERVICE_STOPPING');
     if (this.running) return response('AI_RUNNING');
     if (!this.ready(false)) return response('AI_NOT_CONFIGURED');
     const config = this.stations.aiConfig();
     if (automatic && !config.enabled) return response('AI_AUTOMATIC_DISABLED');
+    this.stations.autoApplyReviewed();
     if (config.usageToday >= config.dailyLimit) return response('AI_DAILY_LIMIT');
     if (!this.eligible().length) {
       const retries = this.stations.candidates().filter(c => c.status === 'failed' && retryAttempts(c) < 3 && c.retryAt > this.now());
@@ -214,6 +218,7 @@ export class StationAiJobs {
         const result = validateStationSuggestion(this.stations.candidate(candidate.id), contentJson(response), this.stations.stations());
         this.stations.recordAnalysis(candidate.id, { ...this.stations.candidate(candidate.id).analysis, finishedAt: this.now(), result, error: null });
         this.stations.recordSuggestion(candidate.id, result);
+        this.stations.autoApplyCandidate(candidate.id);
       } catch (error) {
         // Never persist provider errors: they can echo API keys or private request data.
         this.finishAnalysis(candidate.id, error);

@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { Readable } from 'node:stream';
 import { StationStore } from '../src/stations.mjs';
 import { StationAiJobs, publicAddress, validateAiBaseUrl, resolveAiEndpoint, requestAiJson } from '../src/station-ai.mjs';
+import { LOGISTICS_TEST_RESULT } from '../src/ai-templates.mjs';
 
 const NOW = Date.parse('2026-11-03T12:00:00+08:00');
 function fixture(t, request) {
@@ -293,14 +294,14 @@ test('scheduled empty queues and completed candidates make no calls; new items w
 test('connection testing sends a fixed privacy-free payload and uses the same daily budget', async t => {
   const outbound = [];
   const { stations, jobs } = fixture(t, async request => { outbound.push(request); const input = JSON.parse(JSON.parse(request.body).messages[1].content);
-    return reply(input.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: input.fragment, subLocation: '2号柜', evidence: [input.fragment] }
+    return reply(input.expectedStation ? LOGISTICS_TEST_RESULT : input.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: input.fragment, subLocation: '2号柜', evidence: [input.fragment] }
       : { name: '合成模板', signature: '合成快递', keywords: ['取件码'], kind: 'pickup', rules: { code: { start: '取件码', end: '，' }, express: { start: '', end: '' }, address: { start: '已到', end: '，' } } }); });
   enqueue(stations); stations.saveAiConfig({ enabled: false });
   const result = await jobs.testConnection(); assert.equal(result.ok, true);
   assert.equal(result.capabilities.station_alias.ok, true); assert.equal(result.capabilities.sms_template.ok, true);
   assert.ok(outbound.every(request => !JSON.parse(request.body).messages[1].content.includes('4卡')));
-  assert.equal(outbound.length, 2);
-  assert.equal(stations.aiConfig().usageToday, 2);
+  assert.equal(outbound.length, 3); assert.equal(result.capabilities.logistics_rule.ok, true);
+  assert.equal(stations.aiConfig().usageToday, 3);
   assert.equal(stations.candidates()[0].status, 'pending');
   assert.equal(jobs.runDue().code, 'AI_AUTOMATIC_DISABLED');
 });

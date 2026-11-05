@@ -134,6 +134,9 @@ export function initStationAdmin({ api, notice }) {
     aiRunning: false,
     aiPollTimer: null,
     aiPolling: false,
+    tuningSupported: false,
+    tuningVersion: 0,
+    optimizationBusy: false,
     reviewCandidate: null,
     analysisOpen: new Set(),
   };
@@ -304,7 +307,7 @@ export function initStationAdmin({ api, notice }) {
     get('ai-channel-save').disabled = state.channelSaving;
   }
 
-  function clearChannelTest(message = '保存后可测试两项合成任务，调用计入共享额度。') {
+  function clearChannelTest(message = '保存后可测试各项合成任务，调用计入共享额度。') {
     setText('ai-test-result', message); get('ai-capability-results').replaceChildren();
   }
 
@@ -324,19 +327,25 @@ export function initStationAdmin({ api, notice }) {
     const data = await api('/v1/admin/ai-channels');
     if (session !== state.session || version !== state.channelVersion || state.channelSaving) return;
     state.channels = data.channels || [];
-    setText('ai-channel-count', `${state.channels.length} / 10 个渠道，供站点和手机短信模板共用`);
+    setText('ai-channel-count', `${state.channels.length} / 10 个渠道，供站点、物流和手机短信模板共用`);
     if (!state.channelDirty) applyChannel(state.channelId === null ? data.defaultChannelId || state.channels[0]?.id || '' : state.channelId);
     channelOptions('ai-channel-select', state.aiDirty ? get('ai-channel-select').value : state.aiConfig?.channelId);
   }
 
   function applyConfig(config, force = false) {
     state.aiConfig = config || {};
+    state.tuningSupported = typeof config?.autoApply === 'boolean' && typeof config?.logisticsEnabled === 'boolean';
+    setHidden('ai-auto-apply-row', !state.tuningSupported);
+    setHidden('ai-optimization-history', !state.tuningSupported);
+    setHidden('ai-logistics-candidates', !state.tuningSupported);
     if (force || !state.aiDirty && !state.aiSaving) {
       get('ai-enabled').setAttribute('aria-checked', String(Boolean(config?.enabled))); get('ai-enabled').classList.toggle('off', !config?.enabled);
+      get('ai-auto-apply').checked = Boolean(config?.autoApply && config?.logisticsEnabled);
       channelOptions('ai-channel-select', config?.channelId); get('ai-interval').value = String([5, 60, 1440].includes(config?.intervalMinutes) ? config.intervalMinutes : 60); get('ai-limit').value = String(config?.dailyLimit || 20); state.aiDirty = false;
     }
     const configured = Boolean(config?.channelId && config?.channelEnabled && config?.hasApiKey && config?.baseUrl && config?.model);
-    setText('ai-config-state', configured ? config.enabled ? '自动优化已开启' : '自动优化已关闭' : config?.channelId ? '渠道不可用' : '待配置');
+    setText('ai-config-state', configured ? config.enabled ? config.autoApply && config.logisticsEnabled ? '自动调优已开启' : '自动分析已开启' : '自动优化已关闭' : config?.channelId ? '渠道不可用' : '待配置');
+    setText('ai-application-note', config?.enabled && config?.autoApply ? '通过证据校验的站点别名自动应用；有歧义的建议留待核对。不会合并标准站点，也不会直接修改包裹归属。' : '当前仅生成建议，确认后才会加入站点别名；可在 AI 设置中开启自动调优。');
     setText('ai-usage', Number.isSafeInteger(config?.usageToday) && config.usageToday >= 0 ? `今日已用 ${config.usageToday} 次 / ${config.dailyLimit || 20} 次` : '当日用量尚未读取');
     setText('ai-frequency-label', !configured ? '请选择可用渠道' : config?.enabled ? ({ 5: '每 5 分钟', 60: '每小时', 1440: '每天' })[config.intervalMinutes] : '自动已关闭 · 可手动分析');
   }
@@ -344,7 +353,59 @@ export function initStationAdmin({ api, notice }) {
   async function loadAiConfig() {
     const session = state.session, version = state.aiVersion;
     const data = await api('/v1/admin/station-ai'); if (session !== state.session || version !== state.aiVersion || state.aiSaving) return;
-    if (data.config) applyConfig(data.config); if (data.running !== undefined) state.aiRunning = Boolean(data.running); scheduleAiPoll();
+    if (data.config) applyConfig(data.config); if (data.running !== undefined) state.aiRunning = Boolean(data.running);
+    if (state.tuningSupported) await loadOptimization();
+    scheduleAiPoll();
+  }
+
+  async function loadOptimization() {
+    if (state.optimizationBusy) return;
+    const session = state.session, version = ++state.tuningVersion;
+    const results = await Promise.allSettled([api('/v1/admin/ai-optimization/history'), api('/v1/admin/logistics-ai')]);
+    if (session !== state.session || version !== state.tuningVersion) return;
+    const [history, logistics] = results;
+    setText('ai-optimization-result', results.some(result => result.status === 'rejected') ? '部分优化记录暂时无法读取，将自动重试。' : '自动修改保留记录；回滚只撤销该次修改，人工后续改动会受到保护。');
+    if (history.status === 'fulfilled') {
+      const changes = history.value.changes || [], list = get('ai-optimization-list'); list.replaceChildren();
+      setText('ai-optimization-count', `${changes.length} 条`);
+      if (!changes.length) list.textContent = '暂无自动修改。';
+      for (const change of changes) {
+        const row = document.createElement('article'), title = document.createElement('p'), detail = document.createElement('p'); row.className = 'optimization-item';
+        const label = change.kind === 'station_alias' ? '站点别名' : '物流规则';
+        title.textContent = text(change.summary).startsWith(label) ? change.summary : `${label} · ${change.summary || '自动优化'}`;
+        detail.textContent = `${change.status === 'rolled_back' ? '已回滚' : '已应用'}${change.appliedAt ? ' · ' + new Date(change.appliedAt).toLocaleString('zh-CN') : ''}`;
+        row.append(title, detail);
+        if (change.canRollback && ['station_alias', 'logistics_rule'].includes(change.kind)) row.append(button('回滚本次修改', async () => {
+          if (state.optimizationBusy) return;
+          if (!confirm('回滚这次自动修改？其他规则及人工后续改动不会被覆盖。')) return;
+          const currentSession = state.session; state.tuningVersion++; state.optimizationBusy = true;
+          try { await api(`/v1/admin/ai-optimization/history/${change.kind}/${encodeURIComponent(change.id)}/rollback`, { method: 'POST', body: '{}' }); }
+          finally { state.optimizationBusy = false; }
+          if (currentSession !== state.session) return;
+          await Promise.all([loadOptimization(), loadCandidates()]);
+          if (!state.dirty) { state.draft = null; await loadStations(); }
+          notice('已回滚，授权设备同步后重新核对。');
+        }));
+        list.append(row);
+      }
+    }
+    if (logistics.status === 'fulfilled') {
+      const candidates = (logistics.value.candidates || []).filter(item => !['applied', 'ignored', 'rolled_back'].includes(item.status));
+      const list = get('ai-logistics-list'); list.replaceChildren(); setText('ai-logistics-count', `${candidates.length} 条`);
+      if (!candidates.length) list.textContent = '暂无待处理物流片段。';
+      for (const candidate of candidates) {
+        const row = document.createElement('article'), title = document.createElement('p'), detail = document.createElement('p'); row.className = 'optimization-item';
+        title.textContent = candidate.fragment || '物流片段';
+        detail.textContent = candidate.automationReason || candidate.error || ({ pending: '等待自动分析', review: '证据不足，需核对', failed: '分析失败，等待重试' })[candidate.status] || '待处理';
+        row.append(title, detail, button('忽略', async () => {
+          if (state.optimizationBusy) return;
+          const currentSession = state.session; state.tuningVersion++; state.optimizationBusy = true;
+          try { await api(`/v1/admin/logistics-ai/${encodeURIComponent(candidate.id)}/ignore`, { method: 'POST', body: '{}' }); }
+          finally { state.optimizationBusy = false; }
+          if (currentSession === state.session) await loadOptimization();
+        })); list.append(row);
+      }
+    }
   }
 
   function stationWorkspaceVisible() { return state.open && !document.hidden && !get('station-settings-view').hidden && !get('page-settings').hidden && !get('workspace').hidden; }
@@ -389,6 +450,7 @@ export function initStationAdmin({ api, notice }) {
   async function saveAi(event) {
     event.preventDefault(); if (state.aiSaving) return;
     const channelId = get('ai-channel-select').value, body = { enabled: get('ai-enabled').getAttribute('aria-checked') === 'true', intervalMinutes: Number(get('ai-interval').value), dailyLimit: Number(get('ai-limit').value) };
+    if (state.tuningSupported) { body.autoApply = get('ai-auto-apply').checked; body.logisticsEnabled = body.autoApply; }
     if (channelId) body.channelId = channelId;
     if (body.enabled && !channelId) throw new Error('请先保存并选择可用渠道。');
     if (!Number.isSafeInteger(body.dailyLimit) || body.dailyLimit < 1) throw new Error('每日调用上限须为正安全整数。');
@@ -398,7 +460,7 @@ export function initStationAdmin({ api, notice }) {
     catch (error) { if (session === state.session) setText('ai-settings-result', error.message || '设置未保存，请重试。'); }
     finally { state.aiSaving = false; setFormBusy('ai-settings-form', false); scheduleAiPoll(); }
     if (session === state.session && stationWorkspaceVisible()) {
-      try { await loadCandidates(); } catch (error) { notice(error.message || '候选暂时无法更新，稍后自动重试。', true); }
+      try { await Promise.all([loadCandidates(), ...(state.tuningSupported ? [loadOptimization()] : [])]); } catch (error) { notice(error.message || '候选暂时无法更新，稍后自动重试。', true); }
     }
   }
 
@@ -419,7 +481,7 @@ export function initStationAdmin({ api, notice }) {
       if (session !== state.session) return;
       if (data.channel) state.channels = state.channels.map(channel => channel.id === data.channel.id ? data.channel : channel); else state.channels = data.channels || [];
       const savedId = data.channel?.id || state.channels.at(-1)?.id || id; applyChannel(savedId);
-      setText('ai-channel-count', `${state.channels.length} / 10 个渠道，供站点和手机短信模板共用`);
+      setText('ai-channel-count', `${state.channels.length} / 10 个渠道，供站点、物流和手机短信模板共用`);
       setText('ai-channel-result', clearKey ? '密钥已清除，此渠道已暂停。' : '渠道已保存。');
       await loadAiConfig();
     } catch (error) { if (session === state.session) setText('ai-channel-result', error.message || '渠道未保存，请重试。'); }
@@ -435,12 +497,12 @@ export function initStationAdmin({ api, notice }) {
     if (state.channelDirty) throw new Error('请先保存渠道，再进行能力测试。');
     if (!state.channelId) throw new Error('请先保存渠道。');
     const session = state.session, version = state.channelVersion, id = state.channelId;
-    state.channelTesting = true; channelActions(); clearChannelTest('正在测试连接和两项合成任务…');
+    state.channelTesting = true; channelActions(); clearChannelTest('正在测试连接和各项合成任务…');
     try {
       const data = await api(`/v1/admin/ai-channels/${encodeURIComponent(id)}/test`, { method: 'POST', body: '{}' });
       if (session !== state.session || version !== state.channelVersion) return;
       setText('ai-test-result', `测试已完成：${data.message || '请查看各项校验结果。'}`);
-      for (const [capability, label] of [['station_alias', '站点别名'], ['sms_template', '短信模板']]) {
+      for (const [capability, label] of [['station_alias', '站点别名'], ['sms_template', '短信模板'], ...(data.capabilities?.logistics_rule ? [['logistics_rule', '物流识别']] : [])]) {
         const result = data.capabilities?.[capability], row = document.createElement('li'); row.textContent = `${label}：${result?.ok === true ? '校验通过' : '未通过'} · ${result?.message || '未收到有效校验结果'}`; get('ai-capability-results').append(row);
       }
       await loadAiConfig();
@@ -492,6 +554,8 @@ export function initStationAdmin({ api, notice }) {
   get('ai-settings-form').addEventListener('submit', event => saveAi(event).catch(error => notice(error.message || 'AI 设置未保存。', true)));
   const markAiDirty = () => { state.aiDirty = true; state.aiVersion++; setText('ai-settings-result', '有未保存的更改。'); };
   get('ai-settings-form').addEventListener('input', markAiDirty);
+  get('ai-auto-apply').addEventListener('change', markAiDirty);
+  get('ai-open-logistics').addEventListener('click', () => get('logistics-settings-tab').click());
   get('ai-interval').addEventListener('change', markAiDirty); get('ai-channel-select').addEventListener('change', markAiDirty);
   get('ai-enabled').addEventListener('click', () => { const next = get('ai-enabled').getAttribute('aria-checked') !== 'true'; get('ai-enabled').setAttribute('aria-checked', String(next)); get('ai-enabled').classList.toggle('off', !next); markAiDirty(); });
   get('ai-channel-form').addEventListener('submit', event => saveChannel(event).catch(error => notice(error.message || '渠道未保存。', true)));

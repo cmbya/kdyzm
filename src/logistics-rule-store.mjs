@@ -4,9 +4,10 @@ import { fail, onlyKeys } from './security.mjs';
 const engine = globalThis.PickCodeLogistics;
 
 export class LogisticsRuleStore {
-  constructor(db, now = Date.now) {
+  constructor(db, now = Date.now, { onRulesChanged } = {}) {
     this.db = db;
     this.now = now;
+    this.onRulesChanged = onRulesChanged;
     db.exec(`CREATE TABLE IF NOT EXISTS logistics_rule_settings (
       id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, rules TEXT NOT NULL, updated_at INTEGER NOT NULL)`);
     db.prepare('INSERT OR IGNORE INTO logistics_rule_settings VALUES(1,1,?,?)').run(JSON.stringify(engine.defaults()), now());
@@ -21,10 +22,16 @@ export class LogisticsRuleStore {
     let rules;
     try { rules = engine.validateRules(body.rules); }
     catch (error) { fail(400, 'INVALID_LOGISTICS_RULE', error.message); }
-    const saved = this.db.prepare('UPDATE logistics_rule_settings SET revision=revision+1,rules=?,updated_at=? WHERE id=1 AND revision=?')
-      .run(JSON.stringify(rules), this.now(), body.revision);
-    if (!saved.changes) fail(409, 'LOGISTICS_RULE_CONFLICT', '规则已被其他管理员更新，请重新加载后再编辑');
-    return this.read();
+    const savepoint = `logistics_rule_write_${this.writeSequence = (this.writeSequence || 0) + 1}`;
+    this.db.exec(`SAVEPOINT ${savepoint}`);
+    try {
+      const saved = this.db.prepare('UPDATE logistics_rule_settings SET revision=revision+1,rules=?,updated_at=? WHERE id=1 AND revision=?')
+        .run(JSON.stringify(rules), this.now(), body.revision);
+      if (!saved.changes) fail(409, 'LOGISTICS_RULE_CONFLICT', '规则已被其他管理员更新，请重新加载后再编辑');
+      this.onRulesChanged?.(rules);
+      this.db.exec(`RELEASE ${savepoint}`);
+      return this.read();
+    } catch (error) { this.db.exec(`ROLLBACK TO ${savepoint}`); this.db.exec(`RELEASE ${savepoint}`); throw error; }
   }
   test(body) {
     onlyKeys(body, ['rule', 'sample']);

@@ -16,7 +16,7 @@ export class AiAssistance {
   }
   channels() {
     const channels = this.stations.aiChannels().filter(channel => channel.enabled && channel.hasApiKey && channel.name && channel.baseUrl && channel.model)
-      .map(({ id, name, model }) => ({ id, name, model, capabilities: ['station_alias', 'sms_template'] }));
+      .map(({ id, name, model }) => ({ id, name, model, capabilities: ['station_alias', 'sms_template', 'logistics_rule'] }));
     const selected = this.stations.aiConfig().channelId;
     return { channels, defaultChannelId: channels.some(channel => channel.id === selected) ? selected : '' };
   }
@@ -26,10 +26,13 @@ export class AiAssistance {
     if (!channel || !allowDisabled && !channel.enabled || !channel.name || !channel.baseUrl || !channel.model || !channel.apiKey) fail(409, 'AI_CHANNEL_UNAVAILABLE', '所选AI渠道已暂停或未配置，请重新选择');
     return channel;
   }
-  async call(id, messages, { allowDisabled = false } = {}) {
+  async call(id, messages, { allowDisabled = false, signal } = {}) {
+    if (signal?.aborted) throw signal.reason || aiError('AI_CONFIG_CHANGED');
     const channel = this.channel(id, allowDisabled);
     if (!this.stations.reserveAiCall()) throw aiError('AI_DAILY_LIMIT');
     const controller = new AbortController(); this.controllers.set(controller, { id, revision: channel.revision });
+    const parentAborted = () => controller.abort(signal.reason || aiError('AI_CONFIG_CHANGED'));
+    signal?.addEventListener('abort', parentAborted, { once: true });
     let timer, onAbort;
     const aborted = new Promise((_, reject) => { onAbort = () => reject(controller.signal.reason || aiError('AI_CONFIG_CHANGED')); controller.signal.addEventListener('abort', onAbort, { once: true }); });
     const timeout = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(aiError('AI_TIMEOUT')); reject(aiError('AI_TIMEOUT')); }, TIMEOUT); });
@@ -39,7 +42,7 @@ export class AiAssistance {
       if (controller.signal.aborted) throw controller.signal.reason;
       if (this.channel(id, allowDisabled).revision !== channel.revision) throw aiError('AI_CONFIG_CHANGED');
       return response;
-    } finally { clearTimeout(timer); controller.signal.removeEventListener('abort', onAbort); this.controllers.delete(controller); }
+    } finally { clearTimeout(timer); controller.signal.removeEventListener('abort', onAbort); signal?.removeEventListener('abort', parentAborted); this.controllers.delete(controller); }
   }
   async template(body, identity, authorize) {
     const input = validateTemplateInput(body), channel = this.channel(input.channelId);

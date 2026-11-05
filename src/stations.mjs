@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { encryptCookie, decryptCookie, fail, hash, onlyKeys } from './security.mjs';
 import { stationText, stationKey, redactStationFragment, nonPickupPlace, validateStationSuggestion } from './station-text.mjs';
 import { validateAiBaseUrl } from './station-ai.mjs';
+import { stationAutomationDecision } from './station-automation.mjs';
 
 const parse = row => row && JSON.parse(row.data);
 const sources = ['manual', 'ai', 'sms', 'platform'];
-const defaults = { channelId: '', channelName: '', baseUrl: '', model: '', enabled: false, intervalMinutes: 60, dailyLimit: 20, lastRunAt: 0 };
+const defaults = { channelId: '', channelName: '', baseUrl: '', model: '', enabled: false, autoApply: false, logisticsEnabled: false, intervalMinutes: 60, dailyLimit: 20, lastRunAt: 0 };
 const day = now => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
 
@@ -14,6 +15,7 @@ export class StationStore {
     this.db = db; this.key = key; this.now = now;
     this.aiConfigListeners = new Set();
     this.aiQueueListeners = new Set();
+    this.stationRulesListeners = new Set();
     db.exec(`CREATE TABLE IF NOT EXISTS station_meta (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
       INSERT OR IGNORE INTO station_meta VALUES(1,0);
       CREATE TABLE IF NOT EXISTS station_catalog (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -33,9 +35,10 @@ export class StationStore {
     }
   }
   transaction(fn) {
-    this.db.exec('BEGIN IMMEDIATE');
-    try { const result = fn(); this.db.exec('COMMIT'); return result; }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    const savepoint = `station_write_${this.transactionSequence = (this.transactionSequence || 0) + 1}`;
+    this.db.exec(`SAVEPOINT ${savepoint}`);
+    try { const result = fn(); this.db.exec(`RELEASE ${savepoint}`); return result; }
+    catch (error) { this.db.exec(`ROLLBACK TO ${savepoint}`); this.db.exec(`RELEASE ${savepoint}`); throw error; }
   }
   get revision() { return this.db.prepare('SELECT revision FROM station_meta WHERE id=1').get().revision; }
   bumpRevision() { this.db.exec('UPDATE station_meta SET revision=revision+1 WHERE id=1'); return this.revision; }
@@ -64,7 +67,7 @@ export class StationStore {
     if (others.some(s => stationKey(s.name) === stationKey(name) && stationKey(s.region) === stationKey(region))) fail(409, 'STATION_EXISTS', '该地区已有同名站点');
     const ownedKeys = new Set([stationKey(name), ...keys].filter(Boolean));
     if ((body.enabled ?? old?.enabled ?? true) && others.some(s => s.enabled && [s.name, ...s.aliases.map(a => a.name)].some(value => ownedKeys.has(stationKey(value))))) fail(409, 'ALIAS_EXISTS', '名称或别名已属于其他启用站点');
-    return this.transaction(() => {
+    const saved = this.transaction(() => {
       const station = { id, name, region, enabled: body.enabled ?? old?.enabled ?? true, aliases, revision: this.revision + 1 };
       const all = [...others, station];
       if (all.length > 100 || all.reduce((sum, s) => sum + s.aliases.length, 0) > 1000 || Buffer.byteLength(JSON.stringify(all), 'utf8') > 100000) fail(400, 'STATION_LIMIT', '站点规则已达到容量上限，请先精简停用站点或别名');
@@ -72,6 +75,8 @@ export class StationStore {
       this.db.prepare('INSERT INTO station_catalog VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(station));
       return station;
     });
+    for (const listener of this.stationRulesListeners) { try { listener(); } catch { /* Rules remain authoritative when enrichment is unavailable. */ } }
+    return saved;
   }
   candidates() { return this.db.prepare('SELECT data FROM station_candidates ORDER BY rowid DESC LIMIT 2000').all().map(parse); }
   candidate(id) { const value = parse(this.db.prepare('SELECT data FROM station_candidates WHERE id=?').get(id)); if (!value) fail(404, 'NOT_FOUND', '待核对片段不存在'); return value; }
@@ -138,9 +143,53 @@ export class StationStore {
     const aliases = station?.aliases || [];
     const existing = aliases.find(a => stationKey(a.name) === stationKey(alias));
     if (existing && existing.subLocation !== subLocation) fail(409, 'ALIAS_EXISTS', '同名别名已有不同柜号，请在站点详情编辑');
-    station = this.saveStation(station?.id, { name: station?.name || body.name || candidate.suggestion?.suggestedName || candidate.stationName, region: station?.region || body.region || candidate.region,
-      enabled: true, aliases: existing ? aliases : [...aliases, { name: alias, subLocation, source: candidate.suggestion ? 'ai' : 'manual' }] });
-    return { station, candidate: this.updateCandidate(id, { status: 'approved', stationId: station.id, error: '' }) };
+    return this.transaction(() => {
+      station = this.saveStation(station?.id, { name: station?.name || body.name || candidate.suggestion?.suggestedName || candidate.stationName, region: station?.region || body.region || candidate.region,
+        enabled: true, aliases: existing ? aliases : [...aliases, { name: alias, subLocation, source: candidate.suggestion ? 'ai' : 'manual' }] });
+      return { station, candidate: this.updateCandidate(id, { status: 'approved', stationId: station.id, error: '' }) };
+    });
+  }
+  autoApplyCandidate(id) {
+    const config = this.aiConfig(), candidate = this.candidate(id);
+    if (!config.enabled || !config.autoApply || candidate.status !== 'review') return candidate;
+    const decision = stationAutomationDecision(candidate, this.stations());
+    if (decision.reason) return this.updateCandidate(id, { automationReason: decision.reason });
+    if (decision.alreadyKnown) return this.updateCandidate(id, { status: 'approved', stationId: decision.target.id, approvalMode: 'automatic', automationReason: '已有确认规则，无需重复修改' });
+    try {
+      return this.transaction(() => {
+        const result = this.approveCandidate(id, {}), alias = result.station.aliases.find(value => stationKey(value.name) === stationKey(candidate.suggestion.alias));
+        return this.updateCandidate(id, { approvalMode: 'automatic', automationReason: '', application: {
+          stationId: result.station.id, alias, stationName: result.station.name, appliedAt: this.now(), revision: result.station.revision, rolledBackAt: 0,
+        } });
+      });
+    } catch (error) {
+      if (!error.status) throw error;
+      return this.updateCandidate(id, { automationReason: '规则有冲突或容量不足，请核对后再应用' });
+    }
+  }
+  autoApplyReviewed() {
+    if (!this.aiConfig().enabled || !this.aiConfig().autoApply) return;
+    for (const candidate of this.candidates()) if (candidate.status === 'review') this.autoApplyCandidate(candidate.id);
+  }
+  automationHistory() {
+    return this.candidates().filter(candidate => candidate.application).map(candidate => {
+      const application = candidate.application, station = this.station(application.stationId);
+      const current = station?.aliases.find(alias => alias.id === application.alias.id);
+      return { id: candidate.id, kind: 'station_alias', summary: `${application.stationName}：${application.alias.name}`,
+        status: application.rolledBackAt ? 'rolled_back' : 'applied', appliedAt: application.appliedAt, rolledBackAt: application.rolledBackAt,
+        canRollback: !application.rolledBackAt && !!current && JSON.stringify(current) === JSON.stringify(application.alias) };
+    });
+  }
+  rollbackAutomaticAlias(id) {
+    const candidate = this.candidate(id), application = candidate.application;
+    if (!application || application.rolledBackAt) fail(409, 'AI_CHANGE_CLOSED', '该自动变更已回退或不存在');
+    const station = this.station(application.stationId), current = station?.aliases.find(alias => alias.id === application.alias.id);
+    if (!current || JSON.stringify(current) !== JSON.stringify(application.alias)) fail(409, 'AI_CHANGE_CONFLICT', '别名已被人工修改，不能覆盖后续更改');
+    return this.transaction(() => {
+      this.saveStation(station.id, { aliases: station.aliases.filter(alias => alias.id !== current.id) });
+      this.updateCandidate(id, { status: 'ignored', automationReason: '自动变更已回退', application: { ...application, rolledBackAt: this.now() } });
+      return this.automationHistory().find(change => change.id === id);
+    });
   }
   ignoreCandidate(id) {
     const candidate = this.candidate(id);
@@ -155,11 +204,12 @@ export class StationStore {
       hasApiKey: !!channel?.hasApiKey, apiKeyMasked: channel?.apiKeyMasked || '', usageToday, nextRunAt: config.lastRunAt ? config.lastRunAt + config.intervalMinutes * 60000 : 0 };
   }
   saveAiConfig(body) {
-    onlyKeys(body, ['channelId', 'channelName', 'baseUrl', 'model', 'apiKey', 'clearApiKey', 'enabled', 'intervalMinutes', 'dailyLimit', 'jsonMode']);
+    onlyKeys(body, ['channelId', 'channelName', 'baseUrl', 'model', 'apiKey', 'clearApiKey', 'enabled', 'autoApply', 'logisticsEnabled', 'intervalMinutes', 'dailyLimit', 'jsonMode']);
     const row = this.db.prepare('SELECT data,credential FROM station_ai_settings WHERE id=1').get(), old = { ...defaults, ...parse(row) };
     const config = { ...old, channelId: body.channelId ?? old.channelId,
-      enabled: body.enabled ?? old.enabled, intervalMinutes: body.intervalMinutes ?? old.intervalMinutes, dailyLimit: body.dailyLimit === undefined ? old.dailyLimit : body.dailyLimit };
-    if (typeof config.enabled !== 'boolean' || ![5, 60, 1440].includes(config.intervalMinutes) || !Number.isSafeInteger(config.dailyLimit) || config.dailyLimit < 1 || typeof config.channelId !== 'string' || config.channelId && !validId(config.channelId)) fail(400, 'INVALID_AI_CONFIG', 'AI频率须为5分钟、每小时或每天，每日上限须为正安全整数');
+      enabled: body.enabled ?? old.enabled, autoApply: body.autoApply ?? old.autoApply, logisticsEnabled: body.logisticsEnabled ?? old.logisticsEnabled,
+      intervalMinutes: body.intervalMinutes ?? old.intervalMinutes, dailyLimit: body.dailyLimit === undefined ? old.dailyLimit : body.dailyLimit };
+    if (typeof config.enabled !== 'boolean' || typeof config.autoApply !== 'boolean' || typeof config.logisticsEnabled !== 'boolean' || ![5, 60, 1440].includes(config.intervalMinutes) || !Number.isSafeInteger(config.dailyLimit) || config.dailyLimit < 1 || typeof config.channelId !== 'string' || config.channelId && !validId(config.channelId)) fail(400, 'INVALID_AI_CONFIG', 'AI模式、频率或每日上限格式不正确');
     if (body.channelId !== undefined && !this.aiChannel(body.channelId)) fail(400, 'AI_CHANNEL_UNAVAILABLE', '请选择现有AI渠道');
     const fields = ['channelName', 'baseUrl', 'model', 'apiKey', 'clearApiKey', 'jsonMode'];
     const changesChannel = fields.some(key => Object.hasOwn(body, key));
@@ -222,6 +272,7 @@ export class StationStore {
   notifyAiConfig(event) { for (const listener of this.aiConfigListeners) { try { listener(event); } catch { /* Configuration persists independently of workers. */ } } }
   onAiConfigChange(listener) { this.aiConfigListeners.add(listener); return () => this.aiConfigListeners.delete(listener); }
   onAiQueueChange(listener) { this.aiQueueListeners.add(listener); return () => this.aiQueueListeners.delete(listener); }
+  onStationRulesChange(listener) { this.stationRulesListeners.add(listener); return () => this.stationRulesListeners.delete(listener); }
   aiCredentials() {
     const config = this.aiConfig();
     return { ...config, apiKey: this.aiChannelCredentials(config.channelId)?.apiKey || '' };

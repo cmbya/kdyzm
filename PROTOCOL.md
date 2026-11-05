@@ -100,7 +100,7 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 ## 物流明文识别模板（兼容 v1，后台 3.1.16）
 
-后台模板与 App 本机模板独立保存，不通过设备快照同步。已有站点别名接口保持不变；模板负责从物流正文提取站点与到站证据，不直接确认同站别名或强制合并包裹。
+后台模板与 App 本机模板独立保存。3.1.22起通过后述独立只读层同步后台模板；本机编辑不上传、不覆盖后台模板。已有站点别名接口保持不变；模板负责从物流正文提取站点与到站证据，不直接确认同站别名或强制合并包裹。
 
 - 管理员 `GET /v1/admin/logistics-rules` 返回 `{revision,rules,defaults}`，初始 revision 为 1。
 - 管理员 `PATCH /v1/admin/logistics-rules` 接收 `{revision,rules}`，整体保存并增加版本；过期版本返回 `409 LOGISTICS_RULE_CONFLICT`，不覆盖较新规则。
@@ -122,6 +122,23 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 两者均返回 `Content-Length` 和以文件 SHA-256 为值的 `ETag`。HEAD 只返回头部，APK 下载流不会为 HEAD 打开。服务启动时校验服务根目录 `app-updates/`（镜像中为 `/app/app-updates`）的清单、APK 大小/流式 SHA-256 与 `SHA256SUMS`，请求时确认已校验文件未变化；缺失或损坏返回 404 / 503，App 可回退 GitHub。更新包校验失败不影响 `/health`、初始化或业务同步。
 
 清单保持现有发布格式与 GitHub 官方固定 `apkUrl`，不会按请求 Host 改写，不返回重定向。客户端可用已绑定后台 origin 加上述固定 APK 路径下载，并继续核对清单大小、摘要和安装签名。此接口无需管理或设备凭证，只公开精确清单和当前版本 APK；其他文件、目录、旧版本及路径穿越均不开放，`SHA256SUMS` 也不对外提供。账号、设备、凭证与业务数据继续使用原有接口鉴权。
+
+## 自动调优与只读物流规则同步（兼容 v1，后台3.1.22 / App3.1.25）
+
+`GET/PATCH /v1/admin/station-ai` 增加布尔 `autoApply` 与 `logisticsEnabled`，默认均为false。前者允许校验通过的自动应用，后者允许物流候选处理；自动运行还受原 `enabled`、有效渠道及共享额度约束。旧客户端不传字段时保留原值。后台界面一次勾选“自动调优（站点＋物流）”保存两者；关闭后站点回到仅建议模式。能力测试可新增 `logistics_rule` 结果，旧结果渲染保持兼容。
+
+自动站点更新只追加唯一且有原文依据的既有启用站点别名，不新建/合并标准站。物流只接受受限字面模板，并验证原始材料、完成到站语义、具体公共站点、固定反例及已有物流语料无回归；缺依据与冲突留待核对。此显式模式取代上文“其余结果仍需人工确认”的限制，未开启时原人工确认流程保持。
+
+| 方法与路径 | 权限与请求/响应 |
+| --- | --- |
+| GET /v1/admin/logistics-ai | 管理员；`{candidates,running}`，候选含状态、脱敏片段、建议及未应用原因 |
+| POST /v1/admin/logistics-ai/:id/ignore | 管理员；`{}` → `{candidate}`，已应用规则须撤回 |
+| GET /v1/admin/ai-optimization/history | 管理员；`{changes}`，每条含id、kind、summary、status、appliedAt、rolledBackAt、canRollback |
+| POST /v1/admin/ai-optimization/history/:kind/:id/rollback | 管理员；kind为station_alias或logistics_rule；`{}` → `{change}` |
+
+撤回只移除本次新增且尚未被人工改动的内容，否则409。物流规则保存及缓存重算同事务完成；自动修改记录同事务保存。授权、渠道或开关变化会取消旧模型结果，模型不能执行代码或直接改包裹归属。
+
+设备 `GET /v1/snapshot` 兼容增加 `serverLogisticsRulesVersion` 与 `serverLogisticsRules`。规则只含 `id,name,enabled,kind,starts,end,keywords,origin`，不含管理员原始sample/expectedStation、候选、密钥或其他凭证。ETag包含规则版本。App单独保存并用于重算；同ID本机规则（包括停用）优先，解绑/换绑清除只读层。旧后台缺字段时兼容；旧App忽略新增字段。匹配仍由本机确定性证据及唯一性规则决定。
 
 ## 浏览器 Cookie 同步（兼容 v1）
 

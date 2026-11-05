@@ -62,9 +62,24 @@ test('only administrators can read, test or edit logistics rules and invalid sav
   assert.equal(invalid.status, 400); assert.deepEqual(service.logisticsRules.read().rules, [custom]);
   const snapshot = (await request('/v1/snapshot', { token: device.token })).data;
   assert.equal(snapshot.logisticsRules, undefined); assert.equal(snapshot.defaults, undefined);
+  assert.equal(snapshot.serverLogisticsRulesVersion, 2);
+  assert.deepEqual(Object.keys(snapshot.serverLogisticsRules[0]).sort(), ['enabled', 'end', 'id', 'keywords', 'kind', 'name', 'origin', 'starts']);
+  assert.equal(snapshot.serverLogisticsRules[0].sample, undefined); assert.equal(snapshot.serverLogisticsRules[0].expectedStation, undefined);
 });
 
-test('edited rules affect the next successful import, preserve locker and manual state, and are not reparsed by snapshot reads', async t => {
+test('location-only rule changes reparse cached station names without manufacturing arrival times or changing manual state', async t => {
+  const { service, account, device } = await fixture(t);
+  const location = { ...custom, id: 'location', kind: 'location', sample: '交付给幸福菜鸟驿站' };
+  service.store.importResult(account.id, { orders: [{ platformOrderId: 'o', title: '合成包裹' }], shipments: [
+    { platformOrderId: 'o', waybillNo: 'A', status: 'transit', logisticsState: 'ok', logisticsEvents: [{ time: NOW - 10000, description: location.sample }] }], warnings: [] });
+  const original = service.store.snapshot([account.id]).shipments[0];
+  service.store.applyOperations(service.store.device(device.token), [{ id: 'picked', shipmentId: original.id, action: 'pick', occurredAt: NOW }]);
+  service.logisticsRules.save({ revision: 1, rules: [location] });
+  const saved = service.store.snapshot([account.id]).shipments[0];
+  assert.equal(saved.station, location.expectedStation); assert.equal(saved.arrivalAt, 0); assert.equal(saved.status, 'transit'); assert.equal(saved.picked, true);
+});
+
+test('edited rules immediately reparse cached tracks, preserve locker and manual state, and snapshot reads stay read-only', async t => {
   const { service, account } = await fixture(t);
   const getRules = () => service.logisticsRules.read().rules;
   const saveRules = rules => service.logisticsRules.save({ revision: service.logisticsRules.read().revision, rules });
@@ -78,9 +93,12 @@ test('edited rules affect the next successful import, preserve locker and manual
     return service.store.snapshot([account.id]).shipments[0];
   };
   assert.equal((await refresh()).arrivalAt, 0);
-  saveRules([custom]); assert.equal(service.store.snapshot([account.id]).shipments[0].arrivalAt, 0);
+  const beforeRevision = service.store.snapshot([account.id]).serverRevision;
+  saveRules([custom]);
+  const reparsed = service.store.snapshot([account.id]); assert.ok(reparsed.shipments[0].arrivalAt > 0); assert.ok(reparsed.serverRevision > beforeRevision);
+  assert.equal(service.store.snapshot([account.id]).serverRevision, reparsed.serverRevision);
   const parsed = await refresh(); assert.equal(parsed.station, custom.expectedStation); assert.ok(parsed.arrivalAt > 0);
-  saveRules([]); assert.equal(service.store.snapshot([account.id]).shipments[0].arrivalAt, parsed.arrivalAt);
+  saveRules([]); assert.equal(service.store.snapshot([account.id]).shipments[0].arrivalAt, 0);
   const cleared = await refresh(); assert.equal(cleared.arrivalAt, 0); assert.equal(cleared.station, '');
   service.store.importResult(account.id, { orders: [order], shipments: [{ platformOrderId: 'o', waybillNo: 'A', status: 'arrived', station: '幸福丰巢快递柜',
     stationSource: 'locker', arrivalAt: NOW - 3600000, arrivalAtSource: 'locker_arrival', arrivalAtPrecision: 'second', pickupCode: '123456' }], logisticsRules: [] });

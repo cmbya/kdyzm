@@ -4,7 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { StationStore } from '../src/stations.mjs';
 import { StationAiJobs } from '../src/station-ai.mjs';
 import { AiAssistance } from '../src/ai-assistance.mjs';
-import { TEMPLATE_SAMPLE, validateTemplateInput, validateTemplateCandidate } from '../src/ai-templates.mjs';
+import { TEMPLATE_SAMPLE, LOGISTICS_TEST_RESULT, validateTemplateInput, validateTemplateCandidate } from '../src/ai-templates.mjs';
 import { encryptCookie } from '../src/security.mjs';
 import { randomBytes } from 'node:crypto';
 
@@ -128,12 +128,12 @@ test('channel pause or credentials change cancels in-flight responses without pr
 test('synthetic capability test requires actual extraction and shares quota with templates and station jobs', async t => {
   const calls = [];
   const { assistance, stations, channel } = fixture(t, async request => { calls.push(request); const value = JSON.parse(JSON.parse(request.body).messages[1].content);
-    return reply(value.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: value.fragment, subLocation: '2号柜', evidence: [value.fragment] } : candidate); });
-  const tested = await assistance.test(channel.id); assert.equal(tested.ok, true); assert.equal(calls.length, 2);
+    return reply(value.expectedStation ? LOGISTICS_TEST_RESULT : value.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: value.fragment, subLocation: '2号柜', evidence: [value.fragment] } : candidate); });
+  const tested = await assistance.test(channel.id); assert.equal(tested.ok, true); assert.equal(calls.length, 3); assert.equal(tested.capabilities.logistics_rule.ok, true);
   assert.ok(tested.message.includes('仍需核对'));
-  stations.saveAiConfig({ dailyLimit: 3 });
+  stations.saveAiConfig({ dailyLimit: 4 });
   await assistance.template(input(channel.id), 'device', () => {});
-  const exhausted = await assistance.test(channel.id); assert.equal(exhausted.ok, false); assert.equal(exhausted.capabilities.station_alias.code, 'AI_DAILY_LIMIT'); assert.equal(calls.length, 3);
+  const exhausted = await assistance.test(channel.id); assert.equal(exhausted.ok, false); assert.equal(exhausted.capabilities.station_alias.code, 'AI_DAILY_LIMIT'); assert.equal(calls.length, 4);
   const jobs = new StationAiJobs({ stations, automaticEvents: false });
   stations.enqueue([{ id: 'station', fragment: '合成驿站' }]); assert.equal(jobs.request().code, 'AI_DAILY_LIMIT'); await jobs.close();
 });

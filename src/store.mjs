@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
 import { serverVersion, capabilities } from './version.mjs';
-import { genericPickupStation, pickupCycleReset, pickupEvidence } from './collector-enrichment.mjs';
+import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus } from './collector-enrichment.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
@@ -103,6 +103,27 @@ export class Store {
   revision() {
     this.db.exec('UPDATE meta SET revision=revision+1 WHERE id=1');
     return this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision;
+  }
+  refreshLogisticsRules(rules = this.getLogisticsRules?.()) {
+    const savepoint = `logistics_projection_${this.projectionSequence = (this.projectionSequence || 0) + 1}`;
+    this.db.exec(`SAVEPOINT ${savepoint}`);
+    try {
+      let changed = 0;
+      for (const row of this.db.prepare('SELECT data FROM shipments').all()) {
+        const old = parse(row), events = old.logisticsEvents || [];
+        if (!events.length || old.stationSource === 'locker' || ['locker_arrival', 'locker_created'].includes(old.arrivalAtSource)) continue;
+        const evidence = pickupEvidence(events, rules);
+        const pickup = evidence.arrivalAt ? pickupData({ logisticsState: 'ok', logisticsEvents: events, arrivalAt: 0 }, old, events, rules) : evidence;
+        const fallback = old.status === 'arrived' && old.arrivalAtSource === 'platform_event' ? 'unknown' : old.status;
+        const status = eventStatus(events[0].description, fallback, rules);
+        if (status === old.status && Object.keys(pickup).every(key => pickup[key] === old[key])) continue;
+        this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify({ ...old, ...pickup, status, updatedAt: this.now() }), old.id);
+        changed++;
+      }
+      if (changed) this.revision();
+      this.db.exec(`RELEASE ${savepoint}`);
+      return { changed };
+    } catch (error) { this.db.exec(`ROLLBACK TO ${savepoint}`); this.db.exec(`RELEASE ${savepoint}`); throw error; }
   }
   family(id) { return this.db.prepare('SELECT id,name FROM families WHERE id=?').get(id); }
   families(ids) {
@@ -348,7 +369,7 @@ export class Store {
       .map(o => ({ ...o, familyId: o.familyId || '', familyName: o.familyName || '', orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
         dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '' }));
     const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible).map(s => {
-      // Configured services publish stored evidence until the next successful platform refresh.
+      // Configured services publish evidence persisted by imports or explicit rule changes.
       const pickup = pickupData({}, s, this.getLogisticsRules ? [] : s.logisticsEvents || []);
       return { ...s, ...pickup, pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
         familyId: s.familyId || '', familyName: s.familyName || '' };

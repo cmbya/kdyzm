@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createService } from '../src/service.mjs';
-import { TEMPLATE_SAMPLE } from '../src/ai-templates.mjs';
+import { TEMPLATE_SAMPLE, LOGISTICS_TEST_RESULT } from '../src/ai-templates.mjs';
 import { randomBytes } from 'node:crypto';
 
 const SYNTHETIC_CREDENTIAL = randomBytes(24).toString('hex');
@@ -36,7 +36,7 @@ test('channel routes protect admin writes, expose only configured public choices
   assert.equal(created.status, 201); assert.equal(created.data.channels.length, 1); assert.equal(created.data.dailyLimit, 20); assert.ok(!created.raw.includes(SYNTHETIC_CREDENTIAL));
   const channel = created.data.channels[0];
   const list = await request('/v1/ai/channels', { token: device.token });
-  assert.deepEqual(list.data, { channels: [{ id: channel.id, name: channel.name, model: channel.model, capabilities: ['station_alias', 'sms_template'] }], defaultChannelId: channel.id });
+  assert.deepEqual(list.data, { channels: [{ id: channel.id, name: channel.name, model: channel.model, capabilities: ['station_alias', 'sms_template', 'logistics_rule'] }], defaultChannelId: channel.id });
   assert.ok(!list.raw.includes('example.com')); assert.ok(!list.raw.includes('Key'));
   const snapshot = await request('/v1/snapshot', { token: device.token }); assert.ok(!snapshot.raw.includes(SYNTHETIC_CREDENTIAL));
   const paused = await request(`/v1/admin/ai-channels/${channel.id}`, { method: 'PATCH', admin: true, body: { enabled: false } }); assert.equal(paused.data.channel.enabled, false);
@@ -86,16 +86,16 @@ test('revocation and grant changes during transport suppress late results and pr
   });
 });
 
-test('per-channel test checks both synthetic capabilities using the selected provider only', async t => {
+test('per-channel test checks all three synthetic capabilities using the selected provider only', async t => {
   const calls = [];
   const { request, service } = await fixture(t, async value => { calls.push(value); const input = JSON.parse(JSON.parse(value.body).messages[1].content);
-    return response(input.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: input.fragment, subLocation: '2号柜', evidence: [input.fragment] } : candidate); });
+    return response(input.expectedStation ? LOGISTICS_TEST_RESULT : input.fragment ? { kind: 'locker', suggestedName: '合成驿站', alias: input.fragment, subLocation: '2号柜', evidence: [input.fragment] } : candidate); });
   service.stations.saveAiChannel(undefined, channelConfig);
   const other = service.stations.saveAiChannel(undefined, { ...channelConfig, name: '测试第二渠道', baseUrl: 'https://second.example.com/v1', apiKey: SECOND_CREDENTIAL, model: 'second-model' });
   const result = await request(`/v1/admin/ai-channels/${other.id}/test`, { method: 'POST', admin: true, body: {} });
-  assert.equal(result.status, 200); assert.equal(result.data.ok, true); assert.equal(calls.length, 2);
+  assert.equal(result.status, 200); assert.equal(result.data.ok, true); assert.equal(calls.length, 3); assert.equal(result.data.capabilities.logistics_rule.ok, true);
   assert.ok(calls.every(value => value.url === 'https://second.example.com/v1' && value.headers.Authorization === 'Bearer ' + SECOND_CREDENTIAL && JSON.parse(value.body).model === 'second-model'));
-  assert.equal(service.stations.aiConfig().usageToday, 2); assert.ok(!result.raw.includes('PRIVATE_KEY'));
+  assert.equal(service.stations.aiConfig().usageToday, 3); assert.ok(!result.raw.includes('PRIVATE_KEY'));
 });
 
 test('pausing an active channel promptly cancels HTTP work and preserves daily charge', async t => {
