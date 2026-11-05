@@ -67,7 +67,7 @@ test('retry cooldown and daily budget refusals provide actionable reason codes',
   const exhausted = jobs.request(); assert.equal(exhausted.code, 'AI_DAILY_LIMIT'); assert.ok(exhausted.message.includes('测试和重试'));
 });
 
-test('a raised daily limit processes more than twenty candidates while upload batches remain capped at twenty', async t => {
+test('an excessive configured limit still allows at most twenty calls while upload batches remain capped at twenty', async t => {
   let calls = 0;
   const { stations, jobs } = fixture(t, async request => {
     calls++; const input = JSON.parse(JSON.parse(request.body).messages[1].content);
@@ -78,8 +78,9 @@ test('a raised daily limit processes more than twenty candidates while upload ba
   assert.throws(() => stations.enqueue(items), { code: 'INVALID_CANDIDATES' });
   stations.enqueue(items.slice(0, 20)); stations.enqueue(items.slice(20));
   jobs.request(); await jobs.running;
-  assert.equal(calls, 25); assert.equal(stations.aiConfig().usageToday, 25);
-  assert.ok(stations.candidates().every(c => c.status === 'review'));
+  assert.equal(calls, 20); assert.equal(stations.aiConfig().usageToday, 20);
+  assert.equal(stations.candidates().filter(c => c.status === 'review').length, 20);
+  assert.equal(stations.candidates().filter(c => c.status === 'pending').length, 5);
 });
 
 test('analysis details never store provider errors, invalid model content, headers or API keys', async t => {
@@ -111,7 +112,7 @@ test('clearing the key aborts active work and records only a safe cancellation',
   candidate = stations.candidates()[0]; assert.equal(candidate.suggestion, null); assert.equal(candidate.analysis.result, null);
 });
 
-test('channel changes cancel the whole batch during retry backoff and between candidates', async t => {
+test('channel changes cancel the whole batch in flight and between candidates', async t => {
   for (const patch of [{ baseUrl: 'https://next.example.com/v1' }, { model: 'next-model' }, { apiKey: 'next-key' }]) await t.test(Object.keys(patch)[0], async t => {
     let rejectFirst;
     const calls = [], { stations, jobs } = fixture(t, request => {
@@ -120,13 +121,12 @@ test('channel changes cancel the whole batch during retry backoff and between ca
     });
     enqueue(stations); enqueue(stations, 'c2', '另一条包裹在4卡2号柜');
     jobs.request(); await new Promise(resolve => setImmediate(resolve));
-    rejectFirst(Object.assign(new Error('temporary'), { code: 'AI_HTTP_ERROR', retryable: true }));
-    await new Promise(resolve => setImmediate(resolve));
     stations.saveAiConfig(patch); await jobs.running;
+    rejectFirst(Object.assign(new Error('temporary'), { code: 'AI_HTTP_ERROR', retryable: true }));
     assert.equal(calls.length, 1); assert.equal(stations.aiConfig().usageToday, 1);
     const attempted = stations.candidates().find(c => c.attempts);
     assert.equal(attempted.status, 'pending'); assert.ok(attempted.error.includes('配置或密钥已更改'));
-    assert.equal(attempted.cancelledAttempts || 0, 0, 'a completed transport failure still uses the finite retry allowance');
+    assert.equal(attempted.cancelledAttempts, 1, 'cancelled requests remain retryable with the replacement service');
     assert.equal(jobs.request().accepted, true); await jobs.running;
     assert.equal(calls.length, 3); assert.equal(stations.aiConfig().usageToday, 3);
     for (const call of calls.slice(1)) {
@@ -258,8 +258,8 @@ test('finite retries consume the daily budget and provider errors never persist 
   jobs.request(); await jobs.running;
   assert.equal(calls, 2);
   assert.equal(stations.aiConfig().usageToday, 2);
-  assert.equal(stations.candidates().filter(c => c.status === 'pending').length, 1);
-  assert.equal(stations.candidates().filter(c => c.status === 'failed').length, 1);
+  assert.equal(stations.candidates().filter(c => c.status === 'pending').length, 0);
+  assert.equal(stations.candidates().filter(c => c.status === 'failed').length, 2);
   assert.ok(!JSON.stringify(stations.candidates()).includes('test-key'));
   assert.equal(jobs.request().code, 'AI_DAILY_LIMIT');
 });
@@ -268,25 +268,27 @@ test('transient failures retry after the configured interval and stop after thre
   let calls = 0;
   const { stations, jobs, advance } = fixture(t, async () => { calls++; throw Object.assign(new Error('temporary'), { retryable: true }); });
   enqueue(stations); jobs.request(); await jobs.running;
-  assert.equal(calls, 2);
-  assert.equal(stations.candidates()[0].attempts, 2);
-  assert.equal(stations.candidates()[0].retryAt, NOW + 3600000);
+  assert.equal(calls, 1);
+  assert.equal(stations.candidates()[0].attempts, 1);
+  assert.equal(stations.candidates()[0].retryAt, NOW + 360 * 60000);
   assert.equal(jobs.request().accepted, false);
-  advance(3600000); assert.equal(jobs.runDue().accepted, true); await jobs.running;
+  advance(360 * 60000); assert.equal(jobs.runDue().accepted, true); await jobs.running;
+  assert.equal(calls, 2);
+  advance(360 * 60000); assert.equal(jobs.runDue().accepted, true); await jobs.running;
   assert.equal(calls, 3);
   assert.equal(stations.candidates()[0].attempts, 3);
   assert.equal(stations.candidates()[0].retryAt, 0);
   advance(86400000); assert.equal(jobs.runDue().accepted, false);
 });
 
-test('scheduled empty queues and completed candidates make no calls; new items wait for the interval', async t => {
+test('scheduled empty queues and completed candidates make no calls; new evidence uses the event cooldown', async t => {
   let calls = 0;
   const { stations, jobs, advance } = fixture(t, async () => { calls++; return reply(suggestion); });
   assert.equal(jobs.runDue().accepted, false); assert.equal(calls, 0); assert.equal(stations.aiConfig().lastRunAt, 0);
   enqueue(stations); assert.equal(jobs.runDue().accepted, true); await jobs.running;
   assert.equal(calls, 1);
   enqueue(stations, 'c2', '另一条包裹在4卡2号柜'); assert.equal(jobs.runDue().accepted, false);
-  advance(3600000); assert.equal(jobs.runDue().accepted, true); await jobs.running;
+  advance(60000); assert.equal(jobs.runDue().accepted, true); await jobs.running;
   assert.equal(calls, 2);
   advance(86400000); assert.equal(stations.aiConfig().usageToday, 0); assert.equal(jobs.runDue().accepted, false);
 });

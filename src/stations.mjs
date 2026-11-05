@@ -3,10 +3,11 @@ import { encryptCookie, decryptCookie, fail, hash, onlyKeys } from './security.m
 import { stationText, stationKey, redactStationFragment, nonPickupPlace, validateStationSuggestion } from './station-text.mjs';
 import { validateAiBaseUrl } from './station-ai.mjs';
 import { stationAutomationDecision } from './station-automation.mjs';
+import { AI_INTERVAL_MINUTES, AI_EVENT_COOLDOWN, aiDailyLimit } from './ai-policy.mjs';
 
 const parse = row => row && JSON.parse(row.data);
 const sources = ['manual', 'ai', 'sms', 'platform'];
-const defaults = { channelId: '', defaultSelectionRevision: 0, channelName: '', baseUrl: '', model: '', enabled: false, autoApply: false, logisticsEnabled: false, intervalMinutes: 60, dailyLimit: 20, lastRunAt: 0 };
+const defaults = { channelId: '', defaultSelectionRevision: 0, channelName: '', baseUrl: '', model: '', enabled: false, autoApply: false, logisticsEnabled: false, intervalMinutes: AI_INTERVAL_MINUTES, dailyLimit: 20, lastRunAt: 0, lastEventAt: 0 };
 const day = now => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
 
@@ -34,6 +35,10 @@ export class StationStore {
       });
     } else if (config && (!Number.isSafeInteger(config.defaultSelectionRevision) || config.defaultSelectionRevision < 0)) {
       db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify({ ...config, defaultSelectionRevision: 0 }));
+    }
+    const saved = parse(db.prepare('SELECT data FROM station_ai_settings WHERE id=1').get());
+    if (saved && (saved.intervalMinutes !== AI_INTERVAL_MINUTES || saved.dailyLimit !== aiDailyLimit(saved.dailyLimit))) {
+      db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify({ ...saved, intervalMinutes: AI_INTERVAL_MINUTES, dailyLimit: aiDailyLimit(saved.dailyLimit) }));
     }
   }
   transaction(fn) {
@@ -101,7 +106,7 @@ export class StationStore {
             this.updateCandidate(existing.id, { occurrences: Math.min(1000000, existing.occurrences + 1), updatedAt: this.now() }); result.duplicates++;
           } else {
             if (this.db.prepare('SELECT COUNT(*) AS count FROM station_candidates').get().count >= 2000) fail(429, 'STATION_QUEUE_FULL', '站点队列已满');
-            const id = randomUUID(), candidate = { id, stationName, fragment, source, region, status: 'pending', suggestion: null, evidence: [], occurrences: 1, attempts: 0, cancelledAttempts: 0, retryAt: 0, error: '', analysis: null, createdAt: this.now(), updatedAt: this.now() };
+            const id = randomUUID(), candidate = { id, stationName, fragment, source, region, status: 'pending', eventPending: true, suggestion: null, evidence: [], occurrences: 1, attempts: 0, cancelledAttempts: 0, retryAt: 0, error: '', analysis: null, createdAt: this.now(), updatedAt: this.now() };
             this.db.prepare('INSERT INTO station_candidates VALUES(?,?,?)').run(id, fingerprint, JSON.stringify(candidate)); result.accepted++;
           }
           this.db.prepare('INSERT INTO station_candidate_receipts VALUES(?)').run(receipt);
@@ -200,10 +205,12 @@ export class StationStore {
   }
   aiConfig() {
     const row = this.db.prepare('SELECT data,credential FROM station_ai_settings WHERE id=1').get(), config = { ...defaults, ...parse(row) };
+    config.intervalMinutes = AI_INTERVAL_MINUTES; config.dailyLimit = aiDailyLimit(config.dailyLimit);
     const channel = this.aiChannel(config.channelId);
     const usageToday = this.db.prepare('SELECT calls FROM station_ai_usage WHERE day=?').get(day(this.now()))?.calls || 0;
     return { ...config, channelName: channel?.name || '', baseUrl: channel?.baseUrl || '', model: channel?.model || '', channelEnabled: !!channel?.enabled, jsonMode: channel?.jsonMode ?? true,
-      hasApiKey: !!channel?.hasApiKey, apiKeyMasked: channel?.apiKeyMasked || '', usageToday, nextRunAt: config.lastRunAt ? config.lastRunAt + config.intervalMinutes * 60000 : 0 };
+      hasApiKey: !!channel?.hasApiKey, apiKeyMasked: channel?.apiKeyMasked || '', usageToday, nextRunAt: config.lastRunAt ? config.lastRunAt + config.intervalMinutes * 60000 : 0,
+      nextEventAt: config.lastEventAt ? config.lastEventAt + AI_EVENT_COOLDOWN : 0 };
   }
   saveAiConfig(body) {
     onlyKeys(body, ['channelId', 'channelName', 'baseUrl', 'model', 'apiKey', 'clearApiKey', 'enabled', 'autoApply', 'logisticsEnabled', 'intervalMinutes', 'dailyLimit', 'jsonMode']);
@@ -211,7 +218,9 @@ export class StationStore {
     const config = { ...old, channelId: body.channelId ?? old.channelId,
       enabled: body.enabled ?? old.enabled, autoApply: body.autoApply ?? old.autoApply, logisticsEnabled: body.logisticsEnabled ?? old.logisticsEnabled,
       intervalMinutes: body.intervalMinutes ?? old.intervalMinutes, dailyLimit: body.dailyLimit === undefined ? old.dailyLimit : body.dailyLimit };
-    if (typeof config.enabled !== 'boolean' || typeof config.autoApply !== 'boolean' || typeof config.logisticsEnabled !== 'boolean' || ![5, 60, 1440].includes(config.intervalMinutes) || !Number.isSafeInteger(config.dailyLimit) || config.dailyLimit < 1 || typeof config.channelId !== 'string' || config.channelId && !validId(config.channelId)) fail(400, 'INVALID_AI_CONFIG', 'AI模式、频率或每日上限格式不正确');
+    if (typeof config.enabled !== 'boolean' || typeof config.autoApply !== 'boolean' || typeof config.logisticsEnabled !== 'boolean' || ![5, 60, 360, 1440].includes(config.intervalMinutes) || !Number.isSafeInteger(config.dailyLimit) || config.dailyLimit < 1 || typeof config.channelId !== 'string' || config.channelId && !validId(config.channelId)) fail(400, 'INVALID_AI_CONFIG', 'AI模式、频率或每日上限格式不正确');
+    // Older administrators can still submit their saved frequency; the server policy is authoritative.
+    config.intervalMinutes = AI_INTERVAL_MINUTES; config.dailyLimit = aiDailyLimit(config.dailyLimit);
     if (body.channelId !== undefined && !this.aiChannel(body.channelId)) fail(400, 'AI_CHANNEL_UNAVAILABLE', '请选择现有AI渠道');
     const fields = ['channelName', 'baseUrl', 'model', 'apiKey', 'clearApiKey', 'jsonMode'];
     const changesChannel = fields.some(key => Object.hasOwn(body, key));
@@ -289,9 +298,9 @@ export class StationStore {
       this.db.prepare('DELETE FROM station_ai_usage WHERE day<?').run(day(this.now() - 32 * 86400000)); return true;
     });
   }
-  markAiRun() {
+  markAiRun({ event = false } = {}) {
     const row = this.db.prepare('SELECT data FROM station_ai_settings WHERE id=1').get();
-    if (row) this.db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify({ ...parse(row), lastRunAt: this.now() }));
+    if (row) this.db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify({ ...parse(row), ...(!event ? { lastRunAt: this.now() } : {}), lastEventAt: this.now() }));
   }
 }
 

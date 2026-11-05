@@ -69,9 +69,9 @@ async function browser(t, tuning = false) {
   await click('station-settings-tab');return {elements,state,calls,notices,document,timers,poll,click,fill,select,submit};
 }
 
-test('统一渠道列表保留暂停项与五分钟设置，密钥不回显且渠道名称作为文字',async t=>{
+test('统一渠道列表保留暂停项并显示六小时频率，密钥不回显且渠道名称作为文字',async t=>{
   const page=await browser(t),get=id=>page.elements.get(id);
-  assert.equal(get('ai-channel-edit').value,'a');assert.equal(get('ai-channel-select').value,'a');assert.equal(get('ai-interval').value,'5');
+  assert.equal(get('ai-channel-edit').value,'a');assert.equal(get('ai-channel-select').value,'a');assert.equal(get('ai-interval').value,'360');
   assert.match(content(get('ai-channel-edit')),/<img src=x onerror=alert\(1\)>（已暂停）/);
   assert.equal(get('ai-api-key').value,'');assert.match(get('ai-key-state').textContent,/已配置/);
   assert.equal(get('ai-test').disabled,false);assert.match(get('ai-usage').textContent,/0 次 \/ 20 次/);
@@ -118,10 +118,16 @@ test('物流待处理可忽略，能力测试能显示第三项且晚到记录�
 });
 
 test('站点设置只保存渠道选择、频率、开关和共享额度，不重复写入渠道密钥',async t=>{
-  const page=await browser(t);await page.select('ai-channel-select','b');await page.select('ai-interval','5');await page.fill('ai-limit','33');await page.submit('ai-settings-form');
+  const page=await browser(t);await page.select('ai-channel-select','b');await page.fill('ai-limit','13');await page.submit('ai-settings-form');
   const saved=page.calls.find(c=>c.path==='/v1/admin/station-ai'&&c.method==='PATCH');
-  assert.deepEqual(saved.body,{channelId:'b',enabled:false,intervalMinutes:5,dailyLimit:33});
+  assert.deepEqual(saved.body,{channelId:'b',enabled:false,intervalMinutes:360,dailyLimit:13});
   assert.match(page.elements.get('ai-settings-result').textContent,/已保存/);assert.match(page.elements.get('ai-config-state').textContent,/渠道不可用/);
+});
+
+test('共享额度超过20时显示错误且不发保存请求',async t=>{
+  const page=await browser(t);await page.fill('ai-limit','21');await page.submit('ai-settings-form');
+  assert.equal(page.calls.some(c=>c.path==='/v1/admin/station-ai'&&c.method==='PATCH'),false);
+  assert.match(JSON.stringify(page.notices),/1至20/);
 });
 
 test('编辑渠道留空保留密钥，创建后不回显密钥，清除只暂停所选渠道',async t=>{

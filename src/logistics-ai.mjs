@@ -2,6 +2,7 @@ import './logistics-rules.js';
 import { fail, hash } from './security.mjs';
 import { contentJson, safeFailure, aiError } from './station-ai.mjs';
 import { LOGISTICS_SYSTEM, validateLogisticsSuggestion, logisticsActionIn as actionIn, logisticsPublicText as publicText, specificLogisticsStation as specificStation } from './logistics-ai-template.mjs';
+import { aiCandidateDueAt, nextAiDay } from './ai-policy.mjs';
 
 const engine = globalThis.PickCodeLogistics;
 const pickupPoint = /驿站|代收点|自提点|自提站|自提柜|快递柜|智能柜|丰巢/u;
@@ -133,18 +134,20 @@ export class LogisticsAiJobs {
           if (!preview.arrival || preview.station !== expectedStation) { result.rejected++; continue; }
           const existing = engine.pickupEvidence([event], rules);
           if (existing.arrivalAt && existing.station === expectedStation) continue;
+          const backed = this.backing(expectedStation, [shipment]);
+          if (!backed) this.stations.enqueue([{ id: `logistics-station-${hash(expectedStation).slice(0, 32)}`,
+            stationName: expectedStation, fragment: expectedStation, source: 'platform' }], { source: 'platform' });
           const id = `logistics-${hash(JSON.stringify([fragment, expectedStation])).slice(0, 32)}`;
           const previous = parse(this.db.prepare('SELECT data FROM logistics_ai_candidates WHERE id=?').get(id));
           if (previous) {
             if (['pending', 'failed', 'review'].includes(previous.status) && event.time > previous.eventTime) this.update(id, { eventTime: event.time });
             if (previous.status === 'review' && ['NO_STATION_EVIDENCE', 'NO_ACTIVE_EVIDENCE'].includes(previous.reason) && this.backing(expectedStation, [shipment])) {
-              this.update(id, { status: 'pending', reason: '', error: '' });
+              this.update(id, { status: 'pending', eventPending: true, reason: '', error: '' });
             }
             result.duplicates++; continue;
           }
           if (count >= QUEUE_LIMIT) { result.rejected++; continue; }
-          const backed = this.backing(expectedStation, [shipment]);
-          const candidate = { id, kind: 'logistics_rule', fragment, expectedStation, source: 'platform', status: backed ? 'pending' : 'review',
+          const candidate = { id, kind: 'logistics_rule', fragment, expectedStation, source: 'platform', status: backed ? 'pending' : 'review', eventPending: backed,
             reason: backed ? '' : 'NO_STATION_EVIDENCE', eventTime: event.time, attempts: 0, retryAt: 0,
             error: backed ? '' : '尚无已确认的公开站点依据，未发送给AI', rule: null, evidence: [], createdAt: this.now(), updatedAt: this.now(), appliedAt: 0, rolledBackAt: 0, applyCheckedKey: '' };
           this.db.prepare('INSERT INTO logistics_ai_candidates VALUES(?,?)').run(id, JSON.stringify(candidate)); count++; result.accepted++;
@@ -172,9 +175,9 @@ export class LogisticsAiJobs {
     const review = config.autoApply && all.some(candidate => candidate.status === 'review' && candidate.rule && candidate.applyCheckedKey !== key);
     const pending = all.filter(candidate => ['pending', 'failed'].includes(candidate.status) && candidate.attempts < 3);
     if (!review && !pending.length) return;
-    let due = review ? this.now() : Math.max(this.nextRunAt(), Math.min(...pending.map(candidate => candidate.retryAt)));
+    let due = review ? this.now() : Math.min(...pending.map(candidate => aiCandidateDueAt(candidate, this.nextRunAt(), config.nextEventAt)));
     if (!review && config.usageToday >= config.dailyLimit) {
-      due = Math.max(due, Math.floor((this.now() + 8 * 3600000) / 86400000) * 86400000 + 86400000 - 8 * 3600000);
+      due = Math.max(due, nextAiDay(this.now()));
     }
     this.scheduled = setTimeout(() => { this.scheduled = null; this.runDue(); }, Math.min(2147483647, Math.max(0, due - this.now()))).unref();
   }
@@ -187,9 +190,10 @@ export class LogisticsAiJobs {
     if (!work.length) { this.schedule(); return response('AI_NO_PENDING'); }
     const config = this.stations.aiConfig();
     if (!reviews.length && config.usageToday >= config.dailyLimit) { this.schedule(); return response('AI_DAILY_LIMIT'); }
-    if (!reviews.length && this.nextRunAt() > this.now()) { this.schedule(); return response('AI_NOT_DUE', { retryAt: this.nextRunAt() }); }
+    const due = work.filter(candidate => candidate.status === 'review' || aiCandidateDueAt(candidate, this.nextRunAt(), config.nextEventAt) <= this.now());
+    if (!due.length) { this.schedule(); return response('AI_NOT_DUE', { retryAt: Math.min(...work.map(candidate => aiCandidateDueAt(candidate, this.nextRunAt(), config.nextEventAt))) }); }
     this.controller = new AbortController();
-    const context = this.context = { generation: this.generation, channelId: config.channelId, signal: this.controller.signal };
+    const context = this.context = { candidateIds: due.map(candidate => candidate.id), generation: this.generation, channelId: config.channelId, signal: this.controller.signal };
     this.running = Promise.resolve().then(() => this.run(context)).finally(() => { this.running = null; this.context = null; this.controller = null; this.schedule(); });
     this.running.catch(() => {});
     return response('AI_ACCEPTED', { queued: work.length });
@@ -222,7 +226,7 @@ export class LogisticsAiJobs {
   async run(context) {
     const counts = { analyzed: 0, applied: 0, failed: 0 };
     let marked = false;
-    for (const original of this.work()) {
+    for (const original of this.work().filter(candidate => context.candidateIds.includes(candidate.id))) {
       if (!this.active(context)) break;
       let candidate = this.candidate(original.id), called = false;
       const attemptsBefore = candidate.attempts;
@@ -231,8 +235,12 @@ export class LogisticsAiJobs {
         if (!this.sourcePresent(candidate, this.cached())) {
           this.update(candidate.id, { status: 'review', reason: 'NO_ACTIVE_EVIDENCE', error: '原始包裹已不在启用账号的近期未完成记录中，未发送给AI' }, context); continue;
         }
-        if (this.nextRunAt() > this.now() && !marked || this.stations.aiConfig().usageToday >= this.stations.aiConfig().dailyLimit) break;
-        if (!marked) { this.db.prepare('UPDATE logistics_ai_state SET last_run_at=? WHERE id=1').run(this.now()); marked = true; }
+        if (this.stations.aiConfig().usageToday >= this.stations.aiConfig().dailyLimit) break;
+        if (!marked) {
+          if (this.nextRunAt() <= this.now()) this.db.prepare('UPDATE logistics_ai_state SET last_run_at=? WHERE id=1').run(this.now());
+          this.stations.markAiRun({ event: true }); marked = true;
+        }
+        this.update(candidate.id, { eventPending: false }, context);
         called = true;
         const response = await this.call(candidate, context);
         if (!this.active(context) || !['pending', 'failed'].includes(this.candidate(candidate.id).status)) continue;

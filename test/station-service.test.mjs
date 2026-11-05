@@ -55,7 +55,7 @@ test('manual run HTTP responses explain rejection and permit configured AI while
   const run = () => request('/v1/admin/station-ai/run', { method: 'POST', admin: true, body: {} });
   assert.equal((await run()).data.code, 'AI_NOT_CONFIGURED');
   const saved = await request('/v1/admin/station-ai', { method: 'PATCH', admin: true, body: { ...aiConfig, enabled: false, dailyLimit: 60 } });
-  assert.equal(saved.status, 200); assert.equal(saved.data.config.dailyLimit, 60);
+  assert.equal(saved.status, 200); assert.equal(saved.data.config.dailyLimit, 20);
   assert.equal((await run()).data.code, 'AI_NO_PENDING');
   await request('/v1/station-candidates', { method: 'POST', token: device.token, body: { items: [{ id: 'manual-1', stationName: '4卡2号柜', fragment: '4卡2号柜', source: 'sms' }] } });
   const started = await run(); assert.equal(started.status, 202); assert.equal(started.data.accepted, true); assert.equal(started.data.code, 'AI_ACCEPTED'); assert.ok(started.data.message);

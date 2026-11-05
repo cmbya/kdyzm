@@ -87,8 +87,9 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 - 管理员 `GET/POST /v1/admin/stations`，`PATCH /v1/admin/stations/:id`，字段 `name,region,enabled,aliases:[{id?,name,source,subLocation}]`，保存增加规则版本。
 - 管理员 `GET /v1/admin/station-candidates`，`POST /v1/admin/station-candidates/:id/approve`（`stationId?,alias?,subLocation?,name?,region?`）或 `/ignore`（空对象）。只有批准写规则。
-- 管理员 `GET/PATCH /v1/admin/station-ai`，设置 `channelName,baseUrl,model,apiKey?,clearApiKey?,enabled,intervalMinutes,dailyLimit`。密钥加密；GET 只返回 `hasApiKey/apiKeyMasked`，空值保留，清除须显式指定。`enabled`只控制定期分析，已完整配置时即使关闭定期也可手动分析。`dailyLimit`默认20，可调高，只接受正安全整数；`usageToday`为上海时区当天调用数，含连接测试和每次重试。上传每批20条、候选队列2000条的限制独立于每日额度。
-- 管理员 `POST /v1/admin/station-ai/test` 和 `/run` 均为空对象；测试只发固定无隐私JSON。运行返回202及 `{accepted,running,code,message,retryAt?}`。`code`包括 `AI_ACCEPTED/AI_NOT_CONFIGURED/AI_RUNNING/AI_DAILY_LIMIT/AI_NO_PENDING/AI_RETRY_COOLDOWN/SERVICE_STOPPING`；定时器还可能返回 `AI_AUTOMATIC_DISABLED/AI_NOT_DUE`。`retryAt`为等待截止毫秒。请求未接受时不调用模型、不扣额度。临时失败最多即时重试一次，每候选累计最多3次非取消尝试；`attempts`累计实际调用，`cancelledAttempts`单独记录取消的调用，取消仍扣每日额度，但不耗尽失败重试次数。其余结果仍需人工确认。
+- 管理员 `GET/PATCH /v1/admin/station-ai`，设置 `channelName,baseUrl,model,apiKey?,clearApiKey?,enabled,intervalMinutes,dailyLimit`。密钥加密；GET 只返回 `hasApiKey/apiKeyMasked`，空值保留，清除须显式指定。`enabled`控制定期及新证据自动分析，已完整配置时关闭自动仍可手动分析。后台3.1.24起 `intervalMinutes` 固定360；兼容接收旧5/60/1440并规范为360。`dailyLimit`默认20且硬上限20，更小额度保留；旧大额度及旧频率在启动时迁移，开关、渠道与凭据不变。`usageToday`为上海时区当天所有渠道、站点、物流、手机模板、连接测试和重试的实际调用数。上传每批20条、候选队列2000条的限制独立于每日额度。
+- 管理员 `POST /v1/admin/station-ai/test` 和 `/run` 均为空对象；测试只发固定无隐私JSON。运行返回202及 `{accepted,running,code,message,retryAt?}`。`code`包括 `AI_ACCEPTED/AI_NOT_CONFIGURED/AI_RUNNING/AI_DAILY_LIMIT/AI_NO_PENDING/AI_RETRY_COOLDOWN/SERVICE_STOPPING`；定时器还可能返回 `AI_AUTOMATIC_DISABLED/AI_NOT_DUE`。`retryAt`为等待截止毫秒。请求未接受时不调用模型、不扣额度。失败等待6小时后重试，每候选累计最多3次非取消尝试；`attempts`累计实际调用，`cancelledAttempts`单独记录取消的调用，取消仍扣每日额度，但不耗尽失败重试次数。其余结果按已授权自动调优与校验边界处理。
+- 新站名、物流片段或新增独立站点依据持久记录事件，可提前触发；站点和物流共用60秒事件冷却。重复快照、重复候选与重复回执不构成新事件。未知物流的公开站名可进入站点队列，但未确认前不允许物流AI凭空构造依据或直接关联包裹。空队列不调用；额度耗尽后等待上海时区次日恢复。
 - 设备 `POST /v1/station-candidates`，`{items:[{id,stationName,fragment,source:'sms'}]}`，最多20项，只允许脱敏站名，返回 `acceptedIds` 供客户端确认。
 - 设备 `POST /v1/station-proposals`，`{stationName,otherStationName,subLocation?}`，主动记忆名称关系；两个候选仍待管理员分别确认。设备不能直接写入共享别名、获取后台AI配置或其他人的候选。
 

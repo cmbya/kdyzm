@@ -1,10 +1,10 @@
 import { request as httpsRequest } from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { setTimeout as delay } from 'node:timers/promises';
 import { fail } from './security.mjs';
 import { validateStationSuggestion } from './station-text.mjs';
 import { testAiCapabilities } from './ai-templates.mjs';
+import { aiCandidateDueAt, nextAiDay } from './ai-policy.mjs';
 
 const TIMEOUT = 12000, RESPONSE_LIMIT = 65536;
 const messages = {
@@ -111,16 +111,20 @@ export class StationAiJobs {
     this.schedule();
   }
   schedule() {
-    clearTimeout(this.scheduled);
-    this.scheduled = null;
-    if (!this.automaticEvents || this.closed || !this.ready(true)) return;
-    this.stations.autoApplyReviewed();
-    const config = this.stations.aiConfig();
-    if (config.usageToday >= config.dailyLimit) return;
-    const pending = this.stations.candidates().filter(c => retryAttempts(c) < 3 && (c.status === 'pending' || c.status === 'failed' && c.retryAt > 0));
-    if (!pending.length) return;
-    const candidateAt = Math.min(...pending.map(c => c.status === 'failed' ? c.retryAt : this.now()));
-    this.scheduled = setTimeout(() => { this.scheduled = null; this.runDue(); }, Math.max(0, config.nextRunAt - this.now(), candidateAt - this.now())).unref();
+    if (this.scheduling) return;
+    this.scheduling = true;
+    try {
+      clearTimeout(this.scheduled);
+      this.scheduled = null;
+      if (!this.automaticEvents || this.closed || this.running || !this.ready(true)) return;
+      this.stations.autoApplyReviewed();
+      const config = this.stations.aiConfig();
+      const pending = this.stations.candidates().filter(c => retryAttempts(c) < 3 && (c.status === 'pending' || c.status === 'failed' && c.retryAt > 0));
+      if (!pending.length) return;
+      let due = Math.min(...pending.map(c => aiCandidateDueAt(c, config.nextRunAt, config.nextEventAt)));
+      if (config.usageToday >= config.dailyLimit) due = Math.max(due, nextAiDay(this.now()));
+      this.scheduled = setTimeout(() => { this.scheduled = null; this.runDue(); }, Math.min(2147483647, Math.max(0, due - this.now()))).unref();
+    } finally { this.scheduling = false; }
   }
   ready(requireEnabled = true) {
     const config = this.stations.aiConfig();
@@ -157,22 +161,24 @@ export class StationAiJobs {
       const retries = this.stations.candidates().filter(c => c.status === 'failed' && retryAttempts(c) < 3 && c.retryAt > this.now());
       return retries.length ? response('AI_RETRY_COOLDOWN', { retryAt: Math.min(...retries.map(c => c.retryAt)) }) : response('AI_NO_PENDING');
     }
-    if (automatic && config.nextRunAt > this.now()) return response('AI_NOT_DUE', { retryAt: config.nextRunAt });
-    this.stations.markAiRun();
-    const controller = new AbortController(), context = { automatic, generation: this.cancelGeneration, signal: controller.signal };
+    const eligible = this.eligible(), due = automatic ? eligible.filter(c => aiCandidateDueAt(c, config.nextRunAt, config.nextEventAt) <= this.now()) : eligible;
+    if (!due.length) return response('AI_NOT_DUE', { retryAt: Math.min(...eligible.map(c => aiCandidateDueAt(c, config.nextRunAt, config.nextEventAt))) });
+    this.stations.markAiRun({ event: automatic && config.nextRunAt > this.now() });
+    const controller = new AbortController(), context = { automatic, candidateIds: due.map(c => c.id), generation: this.cancelGeneration, signal: controller.signal };
     this.batch = { ...context, controller };
     this.running = Promise.resolve().then(() => this.run(context)).catch(() => {}).finally(() => { this.running = null; this.batch = null; this.schedule(); });
     return response('AI_ACCEPTED');
   }
   runDue() {
-    return this.request({ automatic: true });
+    try { return this.request({ automatic: true }); }
+    finally { this.schedule(); }
   }
   async call(requestMessages, { candidateId, input, automatic = false, generation = this.cancelGeneration, signal } = {}) {
     const context = { automatic, generation, signal }; this.assertActive(context);
     if (!this.stations.reserveAiCall()) throw aiError('AI_DAILY_LIMIT', true);
     const config = this.stations.aiCredentials(), controller = new AbortController(); this.controllers.set(controller, { automatic });
     if (candidateId) {
-      this.stations.updateCandidate(candidateId, { attempts: (this.stations.candidate(candidateId).attempts || 0) + 1 });
+      this.stations.updateCandidate(candidateId, { attempts: (this.stations.candidate(candidateId).attempts || 0) + 1, eventPending: false });
       this.stations.recordAnalysis(candidateId, { startedAt: this.now(), finishedAt: 0, input, result: null, error: null });
     }
     let timer, onAbort;
@@ -198,7 +204,7 @@ export class StationAiJobs {
     return input;
   }
   async run(context) {
-    const pending = this.eligible().reverse();
+    const pending = this.eligible().filter(candidate => context.candidateIds.includes(candidate.id)).reverse();
     for (const candidate of pending) {
       try {
         this.assertActive(context);
@@ -206,17 +212,7 @@ export class StationAiJobs {
         if (!this.eligibleCandidate(this.stations.candidate(candidate.id))) continue;
         this.stations.updateCandidate(candidate.id, { status: 'pending', retryAt: 0, error: '' });
         const input = this.input(candidate), requestMessages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(input) }];
-        let response;
-        for (let attempt = 0; attempt < 2; attempt++) {
-          this.assertActive(context);
-          if (this.stations.candidate(candidate.id).status !== 'pending') return;
-          try { response = await this.call(requestMessages, { candidateId: candidate.id, input, ...context }); break; }
-          catch (error) {
-            if (!error.retryable || attempt || this.closed || retryAttempts(this.stations.candidate(candidate.id)) >= 3) throw error;
-            try { await delay(300, undefined, { signal: context.signal }); }
-            catch (error) { this.assertActive(context); throw error; }
-          }
-        }
+        const response = await this.call(requestMessages, { candidateId: candidate.id, input, ...context });
         this.assertActive(context);
         const result = validateStationSuggestion(this.stations.candidate(candidate.id), contentJson(response), this.stations.stations());
         this.stations.recordAnalysis(candidate.id, { ...this.stations.candidate(candidate.id).analysis, finishedAt: this.now(), result, error: null });

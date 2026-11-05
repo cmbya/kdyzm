@@ -183,9 +183,9 @@ test('failed calls retry at the independently persisted interval and stop after 
   assert.equal(f.jobs.candidates()[0].attempts, 1); assert.equal(f.calls.length, 1);
   assert.equal((await f.run()).accepted, false);
   f.stations.markAiRun();
-  for (let i = 0; i < 2; i++) { f.advance(5 * 60000); await f.run(); }
+  for (let i = 0; i < 2; i++) { f.advance(360 * 60000); await f.run(); }
   assert.equal(f.calls.length, 3); assert.equal(f.jobs.candidates()[0].attempts, 3);
-  f.advance(5 * 60000); assert.equal((await f.run()).code, 'AI_NO_PENDING'); assert.equal(f.calls.length, 3);
+  f.advance(360 * 60000); assert.equal((await f.run()).code, 'AI_NO_PENDING'); assert.equal(f.calls.length, 3);
   assert.doesNotMatch(JSON.stringify(f.jobs.candidates()), /PRIVATE_ERROR/u);
 });
 
@@ -268,8 +268,8 @@ test('worker restart retains candidates and its own interval independently from 
   f.ingest(); await f.run(); await f.jobs.close();
   const jobs = new LogisticsAiJobs({ stations: f.stations, rules: f.rules, store: f.store, assistance: f.assistance, now: f.now, automaticEvents: false });
   try {
-    assert.equal(jobs.candidates()[0].attempts, 1); assert.equal(jobs.nextRunAt(), NOW + 5 * 60000);
-    f.advance(5 * 60000); f.stations.markAiRun();
+    assert.equal(jobs.candidates()[0].attempts, 1); assert.equal(jobs.nextRunAt(), NOW + 360 * 60000);
+    f.advance(360 * 60000); f.stations.markAiRun();
     assert.equal(jobs.runDue().accepted, true); await jobs.running;
     assert.equal(f.calls.length, 2); assert.equal(jobs.candidates()[0].attempts, 2);
   } finally { await jobs.close(); }
