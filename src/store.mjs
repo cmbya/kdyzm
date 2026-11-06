@@ -7,6 +7,7 @@ import { serverVersion, capabilities } from './version.mjs';
 import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus } from './collector-enrichment.mjs';
 import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
+import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
@@ -169,7 +170,54 @@ export class Store {
         changed = changed || identifierChanged;
       }
     }
+    if (this.reconcileDuplicateShipments()) changed = true;
     if (changed) this.revision();
+  }
+  reconcileDuplicateShipments(accountId = '') {
+    const rows = (accountId ? this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId)
+      : this.db.prepare('SELECT data FROM shipments').all()).map(parse).filter(shipment => this.shipmentAlias(shipment.id).id === shipment.id);
+    const accounts = new Map(this.accounts().map(account => [account.id, account]));
+    const knownCarriers = new Set(['ZTO', 'YTO', 'STO', 'SF', 'YUNDA', 'JTSD', 'YZPY', 'EMS', 'JD', 'HTKY']);
+    const groups = new Map();
+    for (const shipment of rows) {
+      const carrier = carrierKey(shipment.carrier), waybill = waybillKey(shipment.waybillNo), account = accounts.get(shipment.accountId);
+      if (!account || !shipment.orderId || !knownCarriers.has(carrier) || !waybill) continue;
+      const key = JSON.stringify([shipment.accountId, account.platform, shipment.orderId, carrier, waybill]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(shipment);
+    }
+    const identifiers = this.db.prepare('SELECT shipment_id,platform_package_key FROM shipment_identifiers').all();
+    const operated = new Set(this.db.prepare('SELECT data FROM operations').all().map(parse).map(operation => operation.shipmentId).filter(Boolean));
+    const confirmedTargets = new Set(this.db.prepare('SELECT target_shipment_id FROM shipment_aliases').all().map(alias => alias.target_shipment_id));
+    const location = value => String(value || '').normalize('NFKC').replace(/[\s\p{P}]/gu, '');
+    const observedAt = shipment => Math.max(validTime(shipment.logisticsCheckedAt), ...(shipment.logisticsEvents || [])
+      .map(event => validTime(event.time)).filter(at => at <= this.now()), 0);
+    let changed = 0;
+    for (const members of groups.values()) {
+      if (members.length < 2) continue;
+      // Only repair unused legacy duplicates. Explicit decisions, distinct platform boxes,
+      // a later delivery cycle or conflicting pickup locations require a separate review.
+      if (members.some(shipment => shipment.picked || shipment.hidden || shipment.deleted || shipment.manualAt || shipment.pickupManualAt
+        || shipment.pickupManualOperation || shipment.pickupCompletion?.manualOverride || operated.has(shipment.id) || confirmedTargets.has(shipment.id)
+        || shipment.pickupCycleHistory?.length || shipment.pickupCycle?.evidenceKey !== 'initial')) continue;
+      const ids = new Set(members.map(shipment => shipment.id));
+      const packageKeys = new Set(identifiers.filter(item => ids.has(item.shipment_id)).map(item => item.platform_package_key).filter(Boolean));
+      const codes = new Set(members.map(shipment => String(shipment.pickupCode || '').trim()).filter(Boolean));
+      const stations = new Set(members.map(shipment => location(shipment.station)).filter(Boolean));
+      if (packageKeys.size > 1 || codes.size > 1 || stations.size > 1 || new Set(members.map(shipment => shipment.familyId || '')).size > 1) continue;
+      const sorted = members.slice().sort((left, right) => observedAt(right) - observedAt(left) || left.id.localeCompare(right.id));
+      const target = sorted[0], newest = observedAt(target);
+      const sameObservation = shipment => JSON.stringify([shipment.status, String(shipment.pickupCode || '').trim(), location(shipment.station)]);
+      if (sorted.some(shipment => observedAt(shipment) === newest && sameObservation(shipment) !== sameObservation(target))) continue;
+      const account = accounts.get(target.accountId);
+      for (const old of sorted.slice(1)) {
+        this.db.prepare(`INSERT INTO shipment_aliases(old_shipment_id,target_shipment_id,account_id,platform,reason,evidence,created_at,source_cycle_id,target_cycle_id) VALUES(?,?,?,?,?,?,?,?,?)`)
+          .run(old.id, target.id, target.accountId, account.platform, 'normalized_legacy_identity',
+            'Same account, order, known carrier and normalized waybill; no conflicting package or manual decision', this.now(), old.pickupCycle.id, target.pickupCycle.id);
+        changed++;
+      }
+    }
+    return changed;
   }
   saveShipmentIdentifier(shipment, platform, input = {}, at = this.now()) {
     const packageKey = platformPackageKey(input) || platformPackageKey(shipment);
@@ -429,6 +477,7 @@ export class Store {
     this.transaction(() => {
       const orderIds = new Map();
       const identityWarnings = [];
+      this.reconcileDuplicateShipments(accountId);
       const admittedIds = new Set(result.orders.map(input => String(input.platformOrderId)));
       for (const input of [...(result.orderUpdates || []), ...result.orders]) {
         const platformOrderId = String(input.platformOrderId);
@@ -469,7 +518,7 @@ export class Store {
         const waybill = waybillKey(input.waybillNo);
         const packageKey = platformPackageKey(input);
         const indexed = packageKey ? [...new Set(this.db.prepare('SELECT shipment_id FROM shipment_identifiers WHERE account_id=? AND platform=? AND order_id=? AND platform_package_key=?')
-          .all(accountId, account.platform, orderId, packageKey).map(row => row.shipment_id))] : [];
+          .all(accountId, account.platform, orderId, packageKey).map(row => this.shipmentAlias(row.shipment_id).id))] : [];
         if (indexed.length > 1) {
           identityWarnings.push('多个包裹候选使用相同平台包裹键，未自动新增包裹，请核对');
           continue;
@@ -485,11 +534,12 @@ export class Store {
           continue;
         }
         const previous = indexed.length === 1 ? [{ id: this.shipmentAlias(indexed[0]).id }] : carrier ? (exact.length ? exact : unknown) : unknown;
-        if (previous.length > 1 || (sameWaybill.length > 1 && !previous.length)) {
+        const canonicalIds = [...new Set(previous.map(candidate => this.shipmentAlias(candidate.id).id))];
+        const sameWaybillIds = new Set(sameWaybill.map(candidate => this.shipmentAlias(candidate.id).id));
+        if (canonicalIds.length > 1 || (sameWaybillIds.size > 1 && !canonicalIds.length)) {
           identityWarnings.push('多个包裹候选使用相同规范运单，未自动新增包裹，请核对承运商');
           continue;
         }
-        const canonicalIds = [...new Set(previous.map(candidate => this.shipmentAlias(candidate.id).id))];
         const canonicalCandidates = canonicalIds.map(candidateId => this.shipment(candidateId)).filter(candidate => candidate
           && candidate.accountId === accountId && candidate.orderId === orderId);
         if (canonicalIds.length > 1 || canonicalCandidates.length !== canonicalIds.length) {
@@ -537,21 +587,42 @@ export class Store {
       this.updateAccount(accountId, { status: 'ok', lastSuccessAt: this.now(), error: '', warnings: [...(result.warnings || []), ...identityWarnings] });
     });
   }
+  applyOrderRetention() {
+    return this.transaction(() => {
+      let changed = 0;
+      for (const row of this.db.prepare('SELECT data FROM orders').all()) {
+        const order = parse(row), retained = normalizeRetentionFields(order, this.now());
+        if (JSON.stringify(order) === JSON.stringify(retained)) continue;
+        this.db.prepare('UPDATE orders SET data=? WHERE id=?').run(JSON.stringify(retained), order.id);
+        changed++;
+      }
+      if (changed) this.revision();
+      return changed;
+    });
+  }
   snapshot(scope, accountFilter, additionalBytes = 0) {
     const device = Array.isArray(scope) ? { accountIds: scope, legacyAccountIds: scope, familyIds: [] } : scope;
     const narrowed = accountFilter && new Set(accountFilter);
     const visible = record => this.canRead(device, record) && (!narrowed || narrowed.has(record.accountId));
+    this.applyOrderRetention();
     const accounts = this.accounts(device.accountIds).filter(account => !narrowed || narrowed.has(account.id));
     const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(visible)
-      .map(o => ({ ...o, familyId: o.familyId || '', familyName: o.familyName || '', orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
-        dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '' }));
+      .map(o => {
+        const { archiveAnchorDate, archiveAnchorSource, archivedAt, archiveRestoredAnchor, archiveRestoredAt, ...publicOrder } = o;
+        return { ...publicOrder, familyId: o.familyId || '', familyName: o.familyName || '', orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
+          dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '', archived: !!o.archived,
+          retention: orderRetention(o, this.now()) };
+      });
+    const orderById = new Map(orders.map(order => [order.id, order]));
     const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible)
       .filter(shipment => this.shipmentAlias(shipment.id).id === shipment.id).map(s => {
       // Configured services publish evidence persisted by imports or explicit rule changes.
       const pickup = pickupData({}, s, this.getLogisticsRules ? [] : s.logisticsEvents || [], undefined, this.now());
       const { pickupManualAt, pickupManualOperation, pickupCycleHistory, ...publicShipment } = s;
       const compactCycle = s.pickupCycle ? { id: s.pickupCycle.id, startedAt: s.pickupCycle.startedAt, evidenceKey: s.pickupCycle.evidenceKey, status: s.pickupCycle.status } : undefined;
-      return { ...publicShipment, ...(compactCycle ? { pickupCycle: compactCycle } : {}), ...(pickupCycleHistory?.length ? { pickupCycleHistory } : {}), ...pickup, pickupCompletion: pickupCompletionState(s), pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
+      const archived = !!orderById.get(s.orderId)?.archived;
+      const receipt = retainedSignedShipment(s, archived, this.now());
+      return { ...publicShipment, ...(archived ? { archived: true } : {}), ...(receipt || {}), ...(compactCycle ? { pickupCycle: compactCycle } : {}), ...(pickupCycleHistory?.length ? { pickupCycleHistory } : {}), ...pickup, pickupCompletion: pickupCompletionState(s), pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
         familyId: s.familyId || '', familyName: s.familyName || '' };
     });
     const visibleShipmentIds = new Set(shipments.map(shipment => shipment.id));
@@ -578,6 +649,13 @@ export class Store {
       events: shipments.filter(s => s.arrivalAt).map(s => ({ id: stableId(s.id, 'arrival', s.arrivalAt), shipmentId: s.id, arrivedAt: s.arrivalAt, code: s.pickupCode, stationKey: s.station })),
       syncWarnings: accounts.flatMap(a => (a.warnings || []).map(message => ({ accountId: a.id, message }))) };
     const responseLimit = Math.max(0, 1900000 - additionalBytes);
+    if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > responseLimit) {
+      // Clients treat these absent optional values as empty; retain every non-default fact.
+      for (const order of orders) {
+        for (const field of ['dateError', 'tradeStatus', 'orderStatus', 'refundStatus']) if (order[field] === '') delete order[field];
+        if (order.dateCheckedAt === 0) delete order.dateCheckedAt;
+      }
+    }
     if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > responseLimit) {
       // Optional cycle metadata is retained in SQLite and omitted only when the complete response is already over Android's cap.
       for (const shipment of shipments) {
@@ -615,6 +693,29 @@ export class Store {
     return this.transaction(() => {
       const appliedIds = [];
       for (const input of operations) {
+        if (input?.action === 'restoreExpiredOrder') {
+          onlyKeys(input, ['id', 'orderId', 'action', 'anchorDate', 'occurredAt']);
+          const operation = { id: text(input.id, '操作ID', 128), orderId: text(input.orderId, '订单ID', 128), action: input.action,
+            anchorDate: text(input.anchorDate, '归档锚点日期', 10), occurredAt: input.occurredAt };
+          if (!validRetentionDate(operation.anchorDate) || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt <= 0 || operation.occurredAt > this.now() + 5 * 60000) fail(400, 'INVALID_OPERATION', '归档恢复日期或操作时间无效');
+          const order = this.order(operation.orderId);
+          if (!this.canRead(device, order)) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
+          const digest = hash(JSON.stringify(operation));
+          const old = this.db.prepare('SELECT payload_hash FROM operations WHERE device_id=? AND id=?').get(device.id, operation.id);
+          if (old && old.payload_hash !== digest) fail(409, 'OPERATION_CONFLICT', '相同操作ID不能用于不同内容');
+          if (!old) {
+            const retention = orderRetention(order, this.now());
+            const stale = retention.anchorDate !== operation.anchorDate || order.archiveRestoredAt && operation.occurredAt <= order.archiveRestoredAt;
+            if (!stale) {
+              const restored = { ...order, archived: false, archiveAnchorDate: retention.anchorDate, archiveAnchorSource: retention.anchorSource,
+                archivedAt: retention.archivedAt, archiveRestoredAnchor: operation.anchorDate, archiveRestoredAt: operation.occurredAt };
+              this.db.prepare('UPDATE orders SET data=? WHERE id=?').run(JSON.stringify(restored), order.id);
+            }
+            this.updateAccount(order.accountId, {});
+            this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
+          }
+          appliedIds.push(operation.id); continue;
+        }
         if (input?.action === 'setOrderDate') {
           onlyKeys(input, ['id', 'orderId', 'action', 'date', 'occurredAt']);
           const operation = { id: text(input.id, '操作ID', 128), orderId: text(input.orderId, '订单ID', 128), action: input.action, date: input.date, occurredAt: input.occurredAt };

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAnalysisDetails } from '../public/station-admin.js';
+import { candidateOf, candidateSourceLabel, createAnalysisDetails } from '../public/station-admin.js';
 
 class Element {
   constructor(tag) { this.tagName = tag; this.children = []; this.textContent = ''; this.className = ''; }
@@ -25,4 +25,24 @@ test('analysis detail view distinguishes absent, unfinished and validated data a
   const completed = createAnalysisDetails({ ...analysis, finishedAt: Date.now(), result: { kind: 'unknown', evidence: [] } });
   assert.match(content(completed), /校验后的返回结构/); assert.match(content(completed), /unknown/);
   assert.match(content(createAnalysisDetails(analysis)), /任务已停止或中断/);
+});
+
+test('candidate rendering keeps source evidence separate from logistics and marks a missing source explicitly', () => {
+  const candidate = candidateOf({
+    fragment: '',
+    feedback: { kind: 'station_correction', sourceStationName: '短信原站名', otherStationName: '物流已知站', targetStationId: 'target' },
+  });
+  assert.equal(candidate.rawText, '短信原站名');
+  assert.equal(candidate.logistics, '物流已知站');
+  assert.equal(candidate.sourceMissing, false);
+  assert.equal(candidateSourceLabel(candidate), '短信原站名');
+
+  const missing = candidateOf({
+    fragment: '',
+    feedback: { kind: 'station_correction', sourceStationName: '', otherStationName: '物流已知站', targetStationId: 'target' },
+  });
+  assert.equal(missing.rawText, '');
+  assert.equal(missing.logistics, '物流已知站');
+  assert.equal(missing.sourceMissing, true);
+  assert.equal(candidateSourceLabel(missing), '未提交（无可学习的原站名）');
 });

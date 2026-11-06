@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createService } from '../src/service.mjs';
 import { MatchingFeedbackStore } from '../src/matching-feedback.mjs';
+import { candidateOf } from '../public/station-admin.js';
 
 const NOW = Date.parse('2026-11-06T12:00:00+08:00');
 const ADMIN = 'synthetic-admin-token-at-least-32-characters';
@@ -209,6 +210,23 @@ test('missing source or unmatched logistics is retained for review without an AI
   f.submit(f.sample({ id: 'already-known', kind: 'manual_match', shipmentId: f.shipment.id, stationName: '海棠小区驿站', targetStationId: '', reason: 'manual_match', subLocation: '' }));
   assert.ok(f.service.matchingFeedback.summary(f.device).items.every(item => item.status === 'review' && item.error));
   await f.run(); assert.equal(f.calls.length, 0); assert.equal(f.service.stations.station('target').aliases.length, 0);
+});
+
+test('admin candidate projection never substitutes known logistics for a missing original source', async t => {
+  const f = await fixture(t);
+  const result = f.submit(f.sample({ id: 'missing-source', stationName: '', otherStationName: '客户端物流文字不作为证据', subLocation: '' }));
+  const candidateId = result.items[0].candidateId;
+  const candidate = f.service.stations.candidate(candidateId);
+  const history = f.service.matchingFeedback.adminQuery({ limit: 100 }).items.find(item => item.id === 'missing-source');
+  const view = candidateOf(candidate);
+  assert.equal(candidate.fragment, '');
+  assert.equal(history.receipt.stationName, '');
+  assert.equal(history.receipt.otherStationName, '客户端物流文字不作为证据');
+  assert.equal(view.rawText, '');
+  assert.equal(view.logistics, '客户端物流文字不作为证据');
+  assert.equal(view.sourceMissing, true);
+  assert.equal(view.suggestedStationId, 'target');
+  assert.equal(history.reasonCode, 'MISSING_SOURCE_STATION');
 });
 
 test('AI receives separate sanitized mapping, preserves cabinet evidence and applies an audited alias', async t => {

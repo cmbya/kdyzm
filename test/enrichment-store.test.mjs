@@ -91,7 +91,9 @@ test('history budget includes the complete snapshot and stays under the Android 
     const addShipment = store.db.prepare('INSERT INTO shipments VALUES(?,?,?)');
     for (let i = 1; i < 1200; i++) {
       const id = 'large-order-' + String(i).padStart(32, '0'), sid = 'large-ship-' + String(i).padStart(32, '0');
-      addOrder.run(id, account.id, JSON.stringify({ ...seed.orders[0], id, platformOrderId: 'large-' + i }));
+      const detail = i === 1 ? { dateCheckedAt: NOW, dateError: '保留日期说明', tradeStatus: '待收货', orderStatus: '已发货', refundStatus: '未退款',
+        archiveRestoredAnchor: '2026-10-30', archiveRestoredAt: NOW } : {};
+      addOrder.run(id, account.id, JSON.stringify({ ...seed.orders[0], ...detail, id, platformOrderId: 'large-' + i }));
       addShipment.run(sid, account.id, JSON.stringify({ ...seed.shipments[0], id: sid, orderId: id, waybillNo: 'TRACK-' + i }));
     }
   });
@@ -99,6 +101,12 @@ test('history budget includes the complete snapshot and stays under the Android 
   const result = store.snapshot([account.id], undefined, Buffer.byteLength(JSON.stringify(additional), 'utf8'));
   assert.ok(Buffer.byteLength(JSON.stringify({ ...result, ...additional }), 'utf8') <= 1900000);
   assert.equal(result.orders.length, 1200);
+  assert.ok(result.orders.every(o => o.retention.version === 1 && o.retention.anchorDate === '2026-10-30' && o.retention.archived === false));
+  assert.ok(result.orders.every(o => !Object.hasOwn(o, 'archiveAnchorDate') && !Object.hasOwn(o, 'archiveRestoredAt')));
+  const detail = result.orders.find(o => o.platformOrderId === 'large-1');
+  assert.deepEqual([detail.dateCheckedAt, detail.dateError, detail.tradeStatus, detail.orderStatus, detail.refundStatus], [NOW, '保留日期说明', '待收货', '已发货', '未退款']);
+  assert.equal(detail.retention.restoredAt, NOW);
+  assert.ok(result.orders.filter(o => o !== detail).every(o => o.retention.restoredAt === 0));
   assert.ok(result.shipments.some(s => s.logisticsTruncated));
   const raw = store.db.prepare('SELECT data FROM shipments WHERE id=?').get(result.shipments.at(-1).id);
   assert.equal(JSON.parse(raw.data).logisticsEvents.length, 20);

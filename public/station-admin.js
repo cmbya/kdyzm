@@ -28,16 +28,19 @@ function stationOf(value) {
   };
 }
 
-function candidateOf(value) {
+export function candidateOf(value) {
   const suggested = value?.suggestedStation || value?.targetStation || {};
   const suggestion = value?.suggestion || {};
   const source = value?.source || {};
+  const rawText = first(value?.rawText, value?.fragment, value?.snippet, value?.rawSnippet, value?.sms, value?.sourceText, value?.feedback?.sourceStationName);
+  const sms = first(value?.sms, value?.smsName, value?.messageSnippet, source.sms);
   return {
     id: first(value?.id, value?.candidateId),
     status: first(value?.status, value?.state, 'pending_review'),
     title: first(value?.title, value?.suggestedName, suggestion?.suggestedName, value?.name, value?.stationName, value?.rawSnippet, value?.snippet, '待核对站点片段'),
-    rawText: first(value?.rawText, value?.fragment, value?.snippet, value?.rawSnippet, value?.sms, value?.sourceText),
-    sms: first(value?.sms, value?.smsName, value?.messageSnippet, source.sms),
+    rawText,
+    sourceMissing: Boolean(value?.feedback) && !first(rawText, sms),
+    sms,
     logistics: first(value?.logistics, value?.logisticsName, value?.platformStation, source.logistics, value?.feedback?.otherStationName),
     region: first(value?.sourceRegion, value?.region, value?.regionName, source.region),
     suggestedStationId: first(value?.stationId, value?.suggestedStationId, suggestion?.targetStationId, suggested.id, value?.feedback?.targetStationId),
@@ -48,6 +51,11 @@ function candidateOf(value) {
     occurrenceCount: Number(first(value?.occurrenceCount, value?.occurrences, value?.count, value?.times, 1)) || 1,
     raw: value,
   };
+}
+
+export function candidateSourceLabel(candidate) {
+  const sourceText = candidate?.rawText || candidate?.sms;
+  return sourceText || (candidate?.sourceMissing ? '未提交（无可学习的原站名）' : '未提供');
 }
 
 function cloneStation(station) {
@@ -235,7 +243,8 @@ export function initStationAdmin({ api, notice }) {
     const head = document.createElement('div'); head.className = 'candidate-head';
     const title = document.createElement('div'); title.className = 'candidate-title';
     const heading = document.createElement('h3'); heading.textContent = candidate.title;
-    const sourceLine = document.createElement('p'); sourceLine.textContent = `${candidate.raw.feedback ? candidate.raw.feedback.kind === 'manual_match' ? '人工匹配样本 · ' : '站点修正样本 · ' : ''}原文：${candidate.rawText || candidate.sms || '未提供'}${candidate.region ? ` · 地区：${candidate.region}` : ''}`;
+    const sourceLine = document.createElement('p');
+    sourceLine.textContent = `${candidate.raw.feedback ? candidate.raw.feedback.kind === 'manual_match' ? '人工匹配样本 · ' : '站点修正样本 · ' : ''}原文：${candidateSourceLabel(candidate)}${candidate.region ? ` · 地区：${candidate.region}` : ''}`;
     title.append(heading, sourceLine);
     const status = document.createElement('span'); status.className = `candidate-status ${candidate.suggestedStationId ? '' : 'neutral'}`; status.textContent = ({ pending: '待分析', unknown: '待核对', approved: '已应用', withdrawn: '已撤回', ignored: candidate.raw.application?.rolledBackAt ? '已回滚' : '已忽略', failed: '分析失败' })[candidate.status] || (candidate.suggestedStationId ? '建议归入已有站点' : '需选择站点'); head.append(title, status); article.append(head);
     const path = document.createElement('div'); path.className = 'candidate-path';
