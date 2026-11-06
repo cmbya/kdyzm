@@ -105,7 +105,21 @@ AI 复用后台默认渠道、全局启用、共享调用额度与冷却，从�
 - 管理员 `POST /v1/admin/station-ai/test` 和 `/run` 均为空对象；测试只发固定无隐私JSON。运行返回202及 `{accepted,running,code,message,retryAt?}`。`code`包括 `AI_ACCEPTED/AI_NOT_CONFIGURED/AI_RUNNING/AI_DAILY_LIMIT/AI_NO_PENDING/AI_RETRY_COOLDOWN/SERVICE_STOPPING`；定时器还可能返回 `AI_AUTOMATIC_DISABLED/AI_NOT_DUE`。`retryAt`为等待截止毫秒。请求未接受时不调用模型、不扣额度。失败等待6小时后重试，每候选累计最多3次非取消尝试；`attempts`累计实际调用，`cancelledAttempts`单独记录取消的调用，取消仍扣每日额度，但不耗尽失败重试次数。其余结果按已授权自动调优与校验边界处理。
 - 新站名、物流片段或新增独立站点依据持久记录事件，可提前触发；站点和物流共用60秒事件冷却。重复快照、重复候选与重复回执不构成新事件。未知物流的公开站名可进入站点队列，但未确认前不允许物流AI凭空构造依据或直接关联包裹。空队列不调用；额度耗尽后等待上海时区次日恢复。
 - 设备 `POST /v1/station-candidates`，`{items:[{id,stationName,fragment,source:'sms'}]}`，最多20项，只允许脱敏站名，返回 `acceptedIds` 供客户端确认。
-- 设备 `POST /v1/station-proposals`，`{stationName,otherStationName,subLocation?}`，主动记忆名称关系；两个候选仍待管理员分别确认。设备不能直接写入共享别名、获取后台AI配置或其他人的候选。
+- 设备 `POST /v1/station-proposals`，`{stationName,otherStationName,subLocation?}`，兼容旧客户端的主动记忆名称关系入口；生成一个保留源→目标与柜号的候选，目标名称不拼入原文充当证据。返回结构保持 `{accepted,duplicates,rejected,acceptedIds,rejectedIds}`。设备不能直接写入共享别名、获取后台AI配置或其他人的候选。
+
+### 人工匹配与站点修正反馈
+
+`matching_feedback_v1` 表示支持设备 `GET/POST /v1/matching-feedback`。未声明能力的旧后台不接收此接口；客户端保留本地修正与待传反馈。无需为每次成功的手动匹配再次勾选上传；常用站点修正立即在本机生效，上传与AI处理异步进行。
+
+POST 请求为 `{items:[{id,revision,action,kind,shipmentId,stationName,otherStationName,targetStationId,subLocation,reason}]}`，每批1–20条。`id`为1–128位字母、数字、下划线或连字符，`revision`为正安全整数，`action`为`upsert/withdraw`；撤回只需`id/revision/action`。upsert的`kind`为`station_correction/manual_match`；前者必须指定已启用的`targetStationId`，后者必须指定授权范围内的内部`shipmentId`。两种反馈均允许空原站名；无原文或目标不明确时保存待核对记录，不能制造证据。站名最多120字，柜号最多60字，后台再次脱敏；不提交短信全文、取件码、手机号、运单号或姓名。`reason`只允许空值或`station_correction/manual_match/station_mismatch/missing_station/ambiguous_match/user_confirmed/other`固定短码。
+
+提交`shipmentId`时按当前设备与历史记录的`canRead`权限核对运单；物流侧站名从该运单读取，不信任客户端的替代文字。手动匹配只有物流站名唯一对应启用站点、目标一致且原站名可学习时才进入站点AI队列。两端已有同站规则但仍无法自动匹配的反馈留待核对，不声称已修复时间、运单或唯一性等其他原因，不改动匹配硬约束。
+
+响应为`{accepted:[{id,revision}],items:[{id,revision,status,candidateId,error,updatedAt}],configured,enabled,autoApply}`。GET省略`accepted`。状态为`pending/applied/review/failed/withdrawn`；POST中不合法单项为`rejected`且不出现在ACK中，`error`为安全短码；其他合法项仍可成功。只返回当前设备的收据状态，不返回原文、内部运单ID、其他设备收据或AI密钥。`/v1/snapshot.matchingFeedback`使用相同摘要结构、省略`accepted`，与GET/POST一样返回当前设备全部记录（最多500条），避免离线期间旧样本的最终状态永久遗漏；快照预算预留此元数据大小。状态变更参与快照ETag。
+
+SQLite按认证设备ID+反馈ID保存持久收据。相同版本、相同内容只ACK不重复计数；相同版本不同upsert内容拒绝；较旧版本ACK但不覆盖新状态，同版本撤回优先。`accepted`对应收到的版本，`items`对应当前服务端版本；客户端只能把相同本地版本的结果用于当前展示，旧响应不得覆盖较新的撤回。相同脱敏映射共用候选，每条收据单独计入来源，撤回只移除本条贡献；最后一份确认撤回时停用候选，若其自动生成别名未被人工修改且没有其他确认来源，则原子回滚该别名。人工修改冲突留管理员核对，其他规则保持不变。取件完成不撤回确认样本；解除或重新匹配必须发送更高版本撤回或替代反馈。
+
+分析复用后台默认AI渠道、6小时周期及新证据触发、共享每日最多20次额度和有限重试。AI输入用`confirmedMapping`独立保存脱敏源站名、真实物流站名、目标ID、柜号和固定原因；内部运单/设备/反馈ID不送AI。别名与证据须逐字来自脱敏源片段，不能用目标站名伪造证据。自动应用继续受`enabled/autoApply`配置控制；目标不符、位置编号冲突、已有别名位置不同、原站名不完整或证据不足均留待核对。后台既有AI候选列表显示人工样本、确认关系、状态与原因；已有自动优化记录入口支持审计和保护人工后续修改的回滚。
 
 平台候选仅从有效末端已到站、非已取/隐藏/归档的近期记录收集；AI异步处理与订单采集隔离。短信端默认关闭，开启后本地仅保留7天/200项队列。候选和传输均不含完整短信、取件码、运单、Cookie。修改密码与撤权后接口沿用原认证边界。
 

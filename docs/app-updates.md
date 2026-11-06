@@ -2,11 +2,11 @@
 
 手机优先读取已绑定后台内置的 `app-update.json`，后台缺包、不可用或没有更新版本时读取本仓库Latest Release，下载安装包后交给Android确认。更新不依赖Docker账号或Cookie。App 3.1.4首次需手动覆盖安装，后续使用「我的 → 检查更新」。旧私人版不要卸载；覆盖安装保留绑定、短信和领取记录。
 
-当前App版本标签为 `app-v3.1.29`，服务端为 `3.1.25`，插件为 `1.2.0`。本轮落实取件自动监测与大卡片整页切换，详见[取件自动监测说明](app-pickup-monitoring-3.1.29.md)。App保留包裹单页总览、采集状态一致性、启动缓存和后台下发的可信局域网HTTPS地址，更新检查与下载保留摘要及签名校验。配置与限制见 [缓存与局域网说明](local-cache-and-lan.md)。稳定App Release公开后会触发容器流水线重建，内置刚发布的升级包；历史App不覆盖当前main镜像。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。已有NAS需拉取新镜像并重建容器，保留数据卷、加密密钥和绑定。固定下载入口：
+当前App版本标签为 `app-v3.1.30`，服务端为 `3.1.26`，插件为 `1.2.0`。本轮增加代收包裹、卡内站点筛选与滚动、常用站点纠正及人工匹配自动学习，详见[站点选择与人工修正学习](manual-matching-learning.md)。App保留包裹单页总览、取件自动监测、采集状态一致性、启动缓存和后台下发的可信局域网HTTPS地址，更新检查与下载保留摘要及签名校验。配置与限制见 [缓存与局域网说明](local-cache-and-lan.md)。稳定App Release公开后会触发容器流水线重建，内置刚发布的升级包；历史App不覆盖当前main镜像。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。已有NAS需拉取新镜像并重建容器，保留数据卷、加密密钥和绑定。固定下载入口：
 
 `https://github.com/zsdd2/kdyzm/releases/latest/download/app-update.json`
 
-本轮App版本为 `3.1.29` / `30129`，沿用原签名。按下方步骤发布为Latest后，旧App即可检查并下载更新。
+本轮App版本为 `3.1.30` / `30130`，沿用原签名。按下方步骤发布为Latest后，旧App即可检查并下载更新。
 
 自App3.1.18起优先从已绑定后台检查与下载，后台缺包、不可用或版本不高于已安装App时查询GitHub；内置目录由构建期脚本完整校验。详见 [后台优先升级](backend-app-updates-3.1.15.md)。
 

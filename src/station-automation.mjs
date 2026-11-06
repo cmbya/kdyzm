@@ -27,14 +27,25 @@ export function stationAutomationDecision(candidate, stations) {
   const target = stations.find(station => station.enabled && station.id === suggestion.targetStationId);
   if (!target) return { reason: '目标站点已停用或不存在' };
   const aliasKey = stationKey(suggestion.alias), fragmentKey = stationKey(candidate.fragment);
+  if (candidate.feedback && (!candidate.feedback.active || !candidate.feedback.verified || candidate.feedback.targetStationId !== target.id))
+    return { reason: '人工样本已撤回、证据不足或目标不一致，请核对' };
   const matches = stations.filter(station => station.enabled && [station.name, ...station.aliases.map(alias => alias.name)]
     .some(name => distinctive(name) && aliasKey.includes(stationKey(name)) && fragmentKey.includes(stationKey(name))));
-  if (matches.length !== 1 || matches[0].id !== target.id) return { reason: '缺少唯一且逐字对应的已知站点名称' };
+  if (!candidate.feedback && (matches.length !== 1 || matches[0].id !== target.id)) return { reason: '缺少唯一且逐字对应的已知站点名称' };
+  if (candidate.feedback) {
+    const sourceKey = stationKey(candidate.feedback.sourceStationName);
+    if (!sourceKey || !aliasKey.includes(sourceKey)) return { reason: '人工样本的原站名未完整保留' };
+    const owners = stations.filter(station => station.enabled && [station.name, ...station.aliases.map(alias => alias.name)].some(name => stationKey(name) === aliasKey));
+    if (owners.some(station => station.id !== target.id)) return { reason: '原站名已属于其他启用站点' };
+    const confirmedParts = placeParts([candidate.feedback.sourceStationName, candidate.feedback.subLocation, candidate.feedback.otherStationName, target.name].join('，'));
+    if ([...confirmedParts.values()].some(values => values.size > 1)) return { reason: '人工确认两端的位置编号冲突，请核对' };
+  }
   const parts = placeParts(suggestion.alias), required = placeParts(candidate.stationName), extra = placeParts(suggestion.subLocation), fragmentParts = placeParts(candidate.fragment);
   if ([...parts.values(), ...required.values(), ...extra.values(), ...fragmentParts.values()].some(values => values.size > 1)) return { reason: '片段包含冲突的位置编号' };
   for (const [kind, values] of [...required, ...extra]) {
     if (!parts.has(kind) || [...values].some(number => !parts.get(kind).has(number))) return { reason: '别名未完整保留位置编号' };
   }
+  if (candidate.feedback?.subLocation && stationKey(candidate.feedback.subLocation) !== stationKey(suggestion.subLocation)) return { reason: '人工样本的柜号未完整保留' };
   const existing = target.aliases.find(alias => stationKey(alias.name) === aliasKey);
   if (existing && existing.subLocation !== suggestion.subLocation) return { reason: '已有别名的位置说明不同' };
   return { target, existing, alreadyKnown: aliasKey === stationKey(target.name) || !!existing, reason: '' };

@@ -14,10 +14,11 @@ test('analysis detail view distinguishes absent, unfinished and validated data a
   t.after(() => { if (original === undefined) delete globalThis.document; else globalThis.document = original; });
   assert.match(content(createAnalysisDetails(null)), /尚未分析/);
   const hostile = '<img src=x onerror=alert(1)>';
-  const analysis = { startedAt: Date.now(), finishedAt: 0, input: { fragment: hostile, region: '', knownStations: [], headers: { Authorization: 'MUST_NOT_RENDER' } }, result: null, error: null };
+  const analysis = { startedAt: Date.now(), finishedAt: 0, input: { fragment: hostile, region: '', knownStations: [], confirmedMapping: { sourceStationName: hostile, targetStationId: 'target' }, headers: { Authorization: 'MUST_NOT_RENDER' } }, result: null, error: null };
   const pending = createAnalysisDetails(analysis, { running: true });
   assert.match(content(pending), /后台任务仍在运行/); assert.match(content(pending), /尚无通过校验的返回结构/);
   assert.ok(content(pending).includes(hostile)); assert.ok(!content(pending).includes('MUST_NOT_RENDER'));
+  assert.match(content(pending), /confirmedMapping/); assert.match(content(pending), /sourceStationName/);
   assert.ok(pending.children.every(child => child.tagName !== 'img'));
   const failed = createAnalysisDetails({ ...analysis, finishedAt: Date.now(), error: { code: 'AI_INVALID_RESULT', message: 'AI结果未通过校验' } });
   assert.match(content(failed), /安全错误/); assert.match(content(failed), /AI_INVALID_RESULT/);

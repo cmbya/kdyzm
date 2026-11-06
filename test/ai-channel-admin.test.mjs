@@ -77,6 +77,21 @@ test('统一渠道列表保留暂停项并显示六小时频率，密钥不回�
   assert.equal(get('ai-test').disabled,false);assert.match(get('ai-usage').textContent,/0 次 \/ 20 次/);
 });
 
+test('人工样本显示来源、待核对原因与关闭状态，已应用和撤回仍可审计',async t=>{
+  const page=await browser(t),get=id=>page.elements.get(id);
+  page.state.candidates=[
+    {id:'manual-review',status:'unknown',stationName:'海棠2号柜',fragment:'海棠2号柜',automationReason:'其他匹配条件需核对',feedback:{kind:'manual_match',otherStationName:'物流海棠站',targetStationId:'target',subLocation:'2号柜'}},
+    {id:'applied',status:'approved',stationName:'已学站名',fragment:'已学站名',feedback:{kind:'station_correction'}},
+    {id:'withdrawn',status:'withdrawn',stationName:'撤回站名',fragment:'撤回站名',feedback:{kind:'manual_match'}},
+  ];
+  await page.click('station-settings-tab'); await page.click('station-queue-entry');
+  const shown=content(get('candidate-list'));
+  for(const expected of ['人工匹配样本','站点修正样本','其他匹配条件需核对','物流海棠站','2号柜','已应用','已撤回'])assert.ok(shown.includes(expected),expected);
+  const articles=get('candidate-list').children;
+  assert.equal(articles[1].querySelectorAll().filter(element=>element.tagName==='BUTTON').length,0);
+  assert.equal(articles[2].querySelectorAll().filter(element=>element.tagName==='BUTTON').length,0);
+});
+
 test('自动调优必须显式勾选，保存后自动更新两种能力和修改记录',async t=>{
   const page=await browser(t,true),get=id=>page.elements.get(id);
   assert.equal(get('ai-auto-apply').checked,false);assert.equal(get('ai-auto-apply-row').hidden,false);

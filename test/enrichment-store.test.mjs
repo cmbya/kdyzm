@@ -95,8 +95,9 @@ test('history budget includes the complete snapshot and stays under the Android 
       addShipment.run(sid, account.id, JSON.stringify({ ...seed.shipments[0], id: sid, orderId: id, waybillNo: 'TRACK-' + i }));
     }
   });
-  const result = store.snapshot([account.id]);
-  assert.ok(Buffer.byteLength(JSON.stringify(result), 'utf8') <= 1900000);
+  const additional = { matchingFeedback: { items: Array.from({ length: 500 }, (_, i) => ({ id: `feedback-${i}`, revision: 1, status: 'review', error: '缺少可学习原文'.repeat(5), updatedAt: NOW })) } };
+  const result = store.snapshot([account.id], undefined, Buffer.byteLength(JSON.stringify(additional), 'utf8'));
+  assert.ok(Buffer.byteLength(JSON.stringify({ ...result, ...additional }), 'utf8') <= 1900000);
   assert.equal(result.orders.length, 1200);
   assert.ok(result.shipments.some(s => s.logisticsTruncated));
   const raw = store.db.prepare('SELECT data FROM shipments WHERE id=?').get(result.shipments.at(-1).id);

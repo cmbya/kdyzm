@@ -87,7 +87,7 @@ export class StationStore {
   }
   candidates() { return this.db.prepare('SELECT data FROM station_candidates ORDER BY rowid DESC LIMIT 2000').all().map(parse); }
   candidate(id) { const value = parse(this.db.prepare('SELECT data FROM station_candidates WHERE id=?').get(id)); if (!value) fail(404, 'NOT_FOUND', '待核对片段不存在'); return value; }
-  enqueue(items, { deviceId, source = 'sms' } = {}) {
+  enqueue(items, { deviceId, source = 'sms', relationship } = {}) {
     if (!Array.isArray(items) || items.length > 20) fail(400, 'INVALID_CANDIDATES', '每次最多提交20条站点片段');
     if (!sources.includes(source) || deviceId !== undefined && !validId(deviceId)) fail(400, 'INVALID_CANDIDATES', '片段来源无效');
     const result = { accepted: 0, duplicates: 0, rejected: 0, acceptedIds: [], rejectedIds: [] };
@@ -98,7 +98,7 @@ export class StationStore {
           if (!validId(item.id) || (item.source !== undefined && item.source !== source)) fail(400, 'INVALID_FRAGMENT', '片段来源或ID无效');
           const fragment = redactStationFragment(item.fragment), stationName = redactStationFragment(item.stationName ?? ''), region = redactStationFragment(item.region ?? '');
           if (stationName.length > 120 || region.length > 80 || !fragment || !/[\p{L}]/u.test(fragment) || nonPickupPlace(fragment) || nonPickupPlace(stationName)) fail(400, 'INVALID_FRAGMENT', '片段不是取件站点');
-          const fingerprint = hash(JSON.stringify([stationKey(stationName), stationKey(fragment), stationKey(region)]));
+          const fingerprint = hash(JSON.stringify([stationKey(stationName), stationKey(fragment), stationKey(region), ...(relationship ? [relationship] : [])]));
           const receipt = hash(JSON.stringify([source, deviceId || '', item.id]));
           if (this.db.prepare('SELECT id FROM station_candidate_receipts WHERE id=?').get(receipt)) { result.duplicates++; result.acceptedIds.push(item.id); continue; }
           const existing = parse(this.db.prepare('SELECT data FROM station_candidates WHERE fingerprint=?').get(fingerprint));
@@ -106,7 +106,7 @@ export class StationStore {
             this.updateCandidate(existing.id, { occurrences: Math.min(1000000, existing.occurrences + 1), updatedAt: this.now() }); result.duplicates++;
           } else {
             if (this.db.prepare('SELECT COUNT(*) AS count FROM station_candidates').get().count >= 2000) fail(429, 'STATION_QUEUE_FULL', '站点队列已满');
-            const id = randomUUID(), candidate = { id, stationName, fragment, source, region, status: 'pending', eventPending: true, suggestion: null, evidence: [], occurrences: 1, attempts: 0, cancelledAttempts: 0, retryAt: 0, error: '', analysis: null, createdAt: this.now(), updatedAt: this.now() };
+            const id = randomUUID(), candidate = { id, stationName, fragment, source, region, status: 'pending', eventPending: true, suggestion: null, evidence: [], occurrences: 1, attempts: 0, cancelledAttempts: 0, retryAt: 0, error: '', analysis: null, createdAt: this.now(), updatedAt: this.now(), ...(relationship ? { feedback: relationship } : {}) };
             this.db.prepare('INSERT INTO station_candidates VALUES(?,?,?)').run(id, fingerprint, JSON.stringify(candidate)); result.accepted++;
           }
           this.db.prepare('INSERT INTO station_candidate_receipts VALUES(?)').run(receipt);
@@ -134,7 +134,8 @@ export class StationStore {
     const candidate = this.candidate(id);
     if (candidate.status !== 'pending') return candidate;
     const suggestion = validateStationSuggestion(candidate, raw, this.stations());
-    return this.updateCandidate(id, { suggestion, evidence: suggestion.evidence, status: ['home', 'hub'].includes(suggestion.kind) ? 'ignored' : suggestion.kind === 'unknown' ? 'unknown' : 'review', error: '' });
+    return this.updateCandidate(id, { suggestion, evidence: suggestion.evidence, status: ['home', 'hub'].includes(suggestion.kind) ? 'ignored' : suggestion.kind === 'unknown' ? 'unknown' : 'review', error: '',
+      ...(candidate.feedback && !['pickup_station', 'locker'].includes(suggestion.kind) ? { automationReason: '当前站点别名分析无法优化此人工样本，请核对原因' } : {}) });
   }
   approveCandidate(id, body) {
     onlyKeys(body, ['stationId', 'alias', 'subLocation', 'name', 'region']);
@@ -153,7 +154,7 @@ export class StationStore {
     return this.transaction(() => {
       station = this.saveStation(station?.id, { name: station?.name || body.name || candidate.suggestion?.suggestedName || candidate.stationName, region: station?.region || body.region || candidate.region,
         enabled: true, aliases: existing ? aliases : [...aliases, { name: alias, subLocation, source: candidate.suggestion ? 'ai' : 'manual' }] });
-      return { station, candidate: this.updateCandidate(id, { status: 'approved', stationId: station.id, error: '' }) };
+      return { station, candidate: this.updateCandidate(id, { status: 'approved', stationId: station.id, approvedAlias: { name: alias, subLocation }, error: '' }) };
     });
   }
   autoApplyCandidate(id) {
@@ -320,10 +321,14 @@ export function enqueuePlatformCandidates(stations, snapshot, now = stations.now
 
 export function enqueueStationProposal(stations, body, deviceId) {
   onlyKeys(body, ['stationName', 'otherStationName', 'subLocation']);
-  const stationName = stationText(body.stationName, '站名'), otherStationName = stationText(body.otherStationName, '另一站名');
-  stationText(body.subLocation ?? '', '柜号', 60, false);
-  return stations.enqueue([stationName, otherStationName].map(name => {
-    const fragment = name;
-    return { id: `proposal-${hash(fragment).slice(0, 48)}`, stationName: name, fragment, source: 'manual' };
-  }), { deviceId, source: 'manual' });
+  const stationName = redactStationFragment(stationText(body.stationName, '站名')), otherStationName = redactStationFragment(stationText(body.otherStationName, '另一站名'));
+  const subLocation = redactStationFragment(stationText(body.subLocation ?? '', '柜号', 60, false));
+  const owner = value => stations.stationRules().stations.filter(station => [station.name, ...station.aliases.map(alias => alias.name)].some(name => stationKey(name) && stationKey(name) === stationKey(value)));
+  const first = owner(stationName), second = owner(otherStationName), target = first.length === 1 ? first[0] : second.length === 1 ? second[0] : null;
+  const sourceStationName = first.length === 1 ? otherStationName : stationName;
+  const relationship = { key: `proposal-${hash(JSON.stringify([stationName, otherStationName, subLocation]))}`, active: true, kind: 'station_correction',
+    sourceStationName, otherStationName: first.length === 1 ? stationName : otherStationName, targetStationId: target?.id || '', subLocation, reason: 'user_confirmed',
+    verified: !!target && !(first.length && second.length && first[0].id !== second[0].id) };
+  const fragment = [sourceStationName, subLocation && !sourceStationName.includes(subLocation) ? subLocation : ''].filter(Boolean).join('，');
+  return stations.enqueue([{ id: relationship.key, stationName: sourceStationName, fragment, source: 'manual' }], { deviceId, source: 'manual', relationship });
 }

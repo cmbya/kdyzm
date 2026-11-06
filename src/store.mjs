@@ -367,7 +367,7 @@ export class Store {
       this.updateAccount(accountId, { status: 'ok', lastSuccessAt: this.now(), error: '', warnings: result.warnings || [] });
     });
   }
-  snapshot(scope, accountFilter) {
+  snapshot(scope, accountFilter, additionalBytes = 0) {
     const device = Array.isArray(scope) ? { accountIds: scope, legacyAccountIds: scope, familyIds: [] } : scope;
     const narrowed = accountFilter && new Set(accountFilter);
     const visible = record => this.canRead(device, record) && (!narrowed || narrowed.has(record.accountId));
@@ -396,7 +396,7 @@ export class Store {
       syncWarnings: accounts.flatMap(a => (a.warnings || []).map(message => ({ accountId: a.id, message }))) };
     // Android caps the entire response at 2,000,000 bytes, not just the histories.
     // Reserve headroom and trim this response only; the SQLite cache remains intact.
-    let historyBudget = Math.max(0, 1900000 - Buffer.byteLength(JSON.stringify(snapshot), 'utf8'));
+    let historyBudget = Math.max(0, 1900000 - additionalBytes - Buffer.byteLength(JSON.stringify(snapshot), 'utf8'));
     histories.sort((a, b) => Number(a.shipment.picked || a.shipment.hidden) - Number(b.shipment.picked || b.shipment.hidden));
     for (const { shipment, events } of histories) {
       for (const event of events) {

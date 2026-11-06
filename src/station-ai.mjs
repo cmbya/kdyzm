@@ -196,6 +196,10 @@ export class StationAiJobs {
   }
   input(candidate) {
     const input = { fragment: candidate.fragment, region: candidate.region, knownStations: [], knownStationsTruncated: false };
+    if (candidate.feedback) {
+      const { kind, sourceStationName, otherStationName, targetStationId, subLocation, reason } = candidate.feedback;
+      input.confirmedMapping = { kind, sourceStationName, otherStationName, targetStationId, subLocation, reason };
+    }
     for (const station of this.stations.stationRules().stations) {
       const entry = { id: station.id, name: station.name, region: station.region, aliases: station.aliases.map(a => a.name) };
       input.knownStations.push(entry);
@@ -211,7 +215,7 @@ export class StationAiJobs {
         if (this.stations.aiConfig().usageToday >= this.stations.aiConfig().dailyLimit) break;
         if (!this.eligibleCandidate(this.stations.candidate(candidate.id))) continue;
         this.stations.updateCandidate(candidate.id, { status: 'pending', retryAt: 0, error: '' });
-        const input = this.input(candidate), requestMessages = [{ role: 'system', content: SYSTEM }, { role: 'user', content: JSON.stringify(input) }];
+        const input = this.input(candidate), requestMessages = [{ role: 'system', content: SYSTEM + (candidate.feedback ? ' confirmedMapping是人工确认的原站名到目标站点映射，不是原文；可以据此核对targetStationId，但alias、subLocation、evidence仍必须来自fragment。映射与位置编号冲突时返回unknown；不得添加目标站名来制造证据。' : '') }, { role: 'user', content: JSON.stringify(input) }];
         const response = await this.call(requestMessages, { candidateId: candidate.id, input, ...context });
         this.assertActive(context);
         const result = validateStationSuggestion(this.stations.candidate(candidate.id), contentJson(response), this.stations.stations());

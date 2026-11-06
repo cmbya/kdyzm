@@ -87,21 +87,21 @@ test('AI settings encrypt the backend key and never expose it in HTTP settings, 
   assert.equal(service.stations.aiCredentials().apiKey, API_KEY);
 });
 
-test('device station relationship proposals require separate administrator confirmations', async t => {
+test('device station relationship proposals retain one paired candidate for administrator confirmation', async t => {
   const { service, request, device } = await fixture(t);
   const created = await request('/v1/admin/stations', { method: 'POST', admin: true, body: { name: '四卡驿站', region: '合成地区' } });
   const station = created.data.station;
   const proposal = await request('/v1/station-proposals', { method: 'POST', token: device.token,
     body: { stationName: '四卡驿站', otherStationName: '4卡2号柜', subLocation: '2号柜' } });
-  assert.equal(proposal.status, 202); assert.equal(proposal.data.accepted, 2);
+  assert.equal(proposal.status, 202); assert.equal(proposal.data.accepted, 1);
   const candidates = (await request('/v1/admin/station-candidates', { admin: true })).data.candidates;
-  assert.equal(candidates.length, 2); assert.ok(candidates.every(c => c.status === 'pending' && c.source === 'manual'));
+  assert.equal(candidates.length, 1); assert.ok(candidates.every(c => c.status === 'pending' && c.source === 'manual'));
   assert.equal(service.stations.station(station.id).aliases.length, 0);
   const candidate = candidates.find(c => c.stationName === '4卡2号柜');
   const approved = await request(`/v1/admin/station-candidates/${candidate.id}/approve`, { method: 'POST', admin: true, body: { stationId: station.id, alias: '4卡2号柜', subLocation: '2号柜' } });
   assert.equal(approved.status, 200); assert.equal(approved.data.candidate.status, 'approved');
   assert.equal(approved.data.station.aliases[0].subLocation, '2号柜');
-  assert.equal(service.stations.candidates().filter(c => c.status === 'pending').length, 1);
+  assert.equal(service.stations.candidates().filter(c => c.status === 'pending').length, 0);
 });
 
 test('station rule edits invalidate snapshot ETags and disabled stations disappear without leaking candidate evidence', async t => {

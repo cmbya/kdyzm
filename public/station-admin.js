@@ -38,12 +38,12 @@ function candidateOf(value) {
     title: first(value?.title, value?.suggestedName, suggestion?.suggestedName, value?.name, value?.stationName, value?.rawSnippet, value?.snippet, '待核对站点片段'),
     rawText: first(value?.rawText, value?.fragment, value?.snippet, value?.rawSnippet, value?.sms, value?.sourceText),
     sms: first(value?.sms, value?.smsName, value?.messageSnippet, source.sms),
-    logistics: first(value?.logistics, value?.logisticsName, value?.platformStation, source.logistics),
+    logistics: first(value?.logistics, value?.logisticsName, value?.platformStation, source.logistics, value?.feedback?.otherStationName),
     region: first(value?.sourceRegion, value?.region, value?.regionName, source.region),
-    suggestedStationId: first(value?.stationId, value?.suggestedStationId, suggestion?.targetStationId, suggested.id),
+    suggestedStationId: first(value?.stationId, value?.suggestedStationId, suggestion?.targetStationId, suggested.id, value?.feedback?.targetStationId),
     suggestedName: first(value?.suggestedStationName, value?.target, value?.targetName, suggestion?.suggestedName, suggested.name),
     alias: first(value?.alias, suggestion?.alias),
-    subLocation: first(value?.subLocation, value?.sub, value?.locker, value?.lockerNo, suggestion?.subLocation),
+    subLocation: first(value?.subLocation, value?.sub, value?.locker, value?.lockerNo, suggestion?.subLocation, value?.feedback?.subLocation),
     evidence: Array.isArray(value?.evidence) ? value.evidence.join('；') : Array.isArray(suggestion?.evidence) ? suggestion.evidence.join('；') : first(value?.evidence, suggestion?.evidence, value?.reason, value?.basis, '请核对原文与地区信息。'),
     occurrenceCount: Number(first(value?.occurrenceCount, value?.occurrences, value?.count, value?.times, 1)) || 1,
     raw: value,
@@ -95,7 +95,7 @@ export function createAnalysisDetails(analysis, { running = false } = {}) {
   };
   if (analysis.input && typeof analysis.input === 'object') {
     const input = {};
-    for (const key of ['fragment', 'region', 'knownStations', 'knownStationsTruncated']) if (Object.prototype.hasOwnProperty.call(analysis.input, key)) input[key] = analysis.input[key];
+    for (const key of ['fragment', 'region', 'confirmedMapping', 'knownStations', 'knownStationsTruncated']) if (Object.prototype.hasOwnProperty.call(analysis.input, key)) input[key] = analysis.input[key];
     json('实际脱敏输入', input);
   } else note('没有已记录的实际脱敏输入。');
   if (analysis.result !== null && analysis.result !== undefined) json('校验后的返回结构', analysis.result);
@@ -172,7 +172,7 @@ export function initStationAdmin({ api, notice }) {
       item.append(nameRow, meta, status); item.addEventListener('click', () => selectStation(station.id)); list.append(item);
     }
     setText('station-queue-count', state.candidates.length);
-    setText('candidate-count', `${state.candidates.length} 条待核对`);
+    setText('candidate-count', `${state.candidates.length} 条候选与人工样本`);
   }
 
   function renderAliases() {
@@ -232,9 +232,9 @@ export function initStationAdmin({ api, notice }) {
     const head = document.createElement('div'); head.className = 'candidate-head';
     const title = document.createElement('div'); title.className = 'candidate-title';
     const heading = document.createElement('h3'); heading.textContent = candidate.title;
-    const sourceLine = document.createElement('p'); sourceLine.textContent = `原文：${candidate.rawText || candidate.sms || '未提供'}${candidate.region ? ` · 地区：${candidate.region}` : ''}`;
+    const sourceLine = document.createElement('p'); sourceLine.textContent = `${candidate.raw.feedback ? candidate.raw.feedback.kind === 'manual_match' ? '人工匹配样本 · ' : '站点修正样本 · ' : ''}原文：${candidate.rawText || candidate.sms || '未提供'}${candidate.region ? ` · 地区：${candidate.region}` : ''}`;
     title.append(heading, sourceLine);
-    const status = document.createElement('span'); status.className = `candidate-status ${candidate.suggestedStationId ? '' : 'neutral'}`; status.textContent = candidate.status === 'pending' ? '待分析' : candidate.status === 'unknown' ? '无法判断' : candidate.suggestedStationId ? '建议归入已有站点' : '需选择站点'; head.append(title, status); article.append(head);
+    const status = document.createElement('span'); status.className = `candidate-status ${candidate.suggestedStationId ? '' : 'neutral'}`; status.textContent = ({ pending: '待分析', unknown: '待核对', approved: '已应用', withdrawn: '已撤回', ignored: candidate.raw.application?.rolledBackAt ? '已回滚' : '已忽略', failed: '分析失败' })[candidate.status] || (candidate.suggestedStationId ? '建议归入已有站点' : '需选择站点'); head.append(title, status); article.append(head);
     const path = document.createElement('div'); path.className = 'candidate-path';
     const logistics = document.createElement('span'); logistics.textContent = `物流已知：${candidate.logistics || '未提供'}`;
     const targetName = candidate.suggestedName || state.stations.find(station => station.id === candidate.suggestedStationId)?.name;
@@ -244,10 +244,11 @@ export function initStationAdmin({ api, notice }) {
     article.append(path);
     const evidence = document.createElement('p'); evidence.className = 'evidence'; evidence.textContent = `证据：${candidate.evidence} · 出现 ${candidate.occurrenceCount} 次`; article.append(evidence);
     if (candidate.raw.error) { const error = document.createElement('p'); error.className = 'warning-note'; error.textContent = candidate.raw.error + (candidate.raw.retryAt ? ' · 下次重试：' + new Date(candidate.raw.retryAt).toLocaleString('zh-CN') : ''); article.append(error); }
+    if (candidate.raw.automationReason) { const reason = document.createElement('p'); reason.className = 'warning-note'; reason.textContent = candidate.raw.automationReason; article.append(reason); }
     const analysis = createAnalysisDetails(candidate.raw.analysis, { running: state.aiRunning }); analysis.open = state.analysisOpen.has(candidate.id);
     analysis.addEventListener('toggle', () => { if (analysis.open) state.analysisOpen.add(candidate.id); else state.analysisOpen.delete(candidate.id); }); article.append(analysis);
     const actions = document.createElement('div'); actions.className = 'candidate-actions';
-    actions.append(button('忽略', () => ignoreCandidate(candidate), 'textbtn'), button(candidate.suggestedStationId ? '核对并加入' : '核对并选择', () => openReview(candidate), 'primary')); article.append(actions);
+    if (!['approved', 'withdrawn', 'ignored'].includes(candidate.status)) actions.append(button('忽略', () => ignoreCandidate(candidate), 'textbtn'), button(candidate.suggestedStationId ? '核对并加入' : '核对并选择', () => openReview(candidate), 'primary')); article.append(actions);
     if (!candidate.suggestedStationId) { const warning = document.createElement('p'); warning.className = 'warning-note'; warning.textContent = '无法唯一确定时必须选择站点；住宅地址和物流中转站不会加入规则。'; article.append(warning); }
     return article;
   }
@@ -289,7 +290,7 @@ export function initStationAdmin({ api, notice }) {
 
   async function loadCandidates() {
     const session = state.session, data = await api('/v1/admin/station-candidates'); if (session !== state.session) return;
-    state.candidates = (data.candidates || []).map(candidateOf).filter(candidate => !['ignored', 'approved'].includes(candidate.status)); if (data.running !== undefined) state.aiRunning = Boolean(data.running); renderDirectory(); renderCandidates(); scheduleAiPoll();
+    state.candidates = (data.candidates || []).map(candidateOf).filter(candidate => candidate.raw.feedback || !['ignored', 'approved', 'withdrawn'].includes(candidate.status)); if (data.running !== undefined) state.aiRunning = Boolean(data.running); renderDirectory(); renderCandidates(); scheduleAiPoll();
   }
 
   function channelOptions(id, selected, editing = false) {
