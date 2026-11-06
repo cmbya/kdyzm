@@ -139,6 +139,9 @@ export function initStationAdmin({ api, notice }) {
     optimizationBusy: false,
     reviewCandidate: null,
     analysisOpen: new Set(),
+    feedbackItems: [],
+    feedbackCursor: '',
+    feedbackLoading: false,
   };
 
   const setHidden = (id, hidden) => { get(id).hidden = hidden; };
@@ -224,7 +227,7 @@ export function initStationAdmin({ api, notice }) {
     state.selectedId = ''; state.draft = { id: '', name: '', region: '', enabled: true, aliases: [] }; state.newStation = true; state.dirty = false; state.queueOpen = false; renderDirectory(); renderDetail(); get('station-name').focus();
   }
 
-  function showQueue() { state.queueOpen = true; setText('station-detail-name', 'AI 待核对'); setText('station-detail-subtitle', '自动分析，确认后加入站点别名'); renderDirectory(); renderDetail(); renderCandidates(); }
+  function showQueue() { state.queueOpen = true; setText('station-detail-name', 'AI 待核对'); setText('station-detail-subtitle', '自动分析，确认后加入站点别名'); renderDirectory(); renderDetail(); renderCandidates(); renderFeedback(); }
   function showStation() { state.queueOpen = false; if (!state.draft && state.stations[0]) selectStation(state.stations[0].id); else { renderDirectory(); renderDetail(); } }
 
   function renderCandidate(candidate) {
@@ -257,6 +260,60 @@ export function initStationAdmin({ api, notice }) {
     const list = get('candidate-list'); list.replaceChildren();
     if (!state.candidates.length) { const empty = document.createElement('p'); empty.className = 'candidate-empty'; empty.textContent = '当前没有待核对候选'; list.append(empty); return; }
     state.candidates.forEach(candidate => list.append(renderCandidate(candidate)));
+  }
+
+  function feedbackStatus(value) {
+    return ({ pending: '待分析', applied: '规则已应用', review: '待核对', failed: '分析失败', withdrawn: '已撤回', rejected: '已拒收' })[value.status] || value.status || '未知';
+  }
+
+  function renderFeedbackItem(value) {
+    const article = document.createElement('article'); article.className = `candidate ${value.status === 'withdrawn' ? 'muted' : ''}`;
+    const head = document.createElement('div'); head.className = 'candidate-head';
+    const title = document.createElement('div'); title.className = 'candidate-title';
+    const heading = document.createElement('h3'); heading.textContent = value.receipt?.kind === 'manual_match' ? '人工匹配反馈' : '站点修正反馈';
+    const receiptLine = document.createElement('p'); receiptLine.textContent = `${value.device?.name || '未命名设备'} · 收据 ${value.id || value.receipt?.id || '未提供'} · 版本 ${value.revision || value.receipt?.revision || 0}`;
+    title.append(heading, receiptLine);
+    const status = document.createElement('span'); status.className = `candidate-status ${value.status === 'applied' ? '' : 'neutral'}`; status.textContent = feedbackStatus(value); head.append(title, status); article.append(head);
+    const path = document.createElement('div'); path.className = 'candidate-path';
+    for (const label of [`原因：${value.message || value.error || '未提供'}`, `入口：${value.receipt?.reason || value.receipt?.kind || '未提供'}`, `收据版本：${value.revision || value.receipt?.revision || 0}`]) { const item = document.createElement('span'); item.textContent = label; path.append(item); }
+    article.append(path);
+    const evidence = document.createElement('p'); evidence.className = 'evidence'; evidence.textContent = `状态码：${value.reasonCode || '未分类'} · 更新时间：${value.updatedAt ? new Date(value.updatedAt).toLocaleString('zh-CN') : '尚无'}`; article.append(evidence);
+    const chain = document.createElement('details'); chain.className = 'analysis-details'; const summary = document.createElement('summary'); summary.textContent = '查看收据关联链路'; chain.append(summary);
+    const note = text => { const row = document.createElement('p'); row.textContent = text; chain.append(row); };
+    note(`候选：${value.candidateId || '无候选（收据仍保留）'}${value.candidate?.status ? ` · ${value.candidate.status}` : ''}`);
+    if (value.candidate?.fragment) note(`候选片段：${value.candidate.fragment}`);
+    const deviceReceipt = value.deviceRuleReceipt;
+    note(`设备规则确认：${deviceReceipt?.received ? `已确认站点规则 ${deviceReceipt.stationRulesVersion}、物流规则 ${deviceReceipt.serverLogisticsRulesVersion}` : '未确认（设备尚未上报规则回执）'} · 效果：未验证`);
+    if (value.analysisAttempts?.length) {
+      note(`分析历史：${value.analysisAttempts.length} 次（失败与成功均保留）`);
+      for (const attempt of value.analysisAttempts) note(`分析 ${attempt.startedAt ? new Date(attempt.startedAt).toLocaleString('zh-CN') : '未开始'}：${attempt.error?.message || attempt.error?.code || (attempt.result ? '已返回并通过校验' : '未完成')} · 效果：未验证`);
+    }
+    if (value.analysis) chain.append(createAnalysisDetails(value.analysis)); else note('分析：尚无分析记录。');
+    if (value.rule) note(`规则：${value.rule.stationName || value.rule.stationId || '未提供'} · 版本 ${value.rule.revision || 0} · ${value.rule.status === 'rolled_back' ? '已回滚' : '当前记录'}`);
+    else note('规则：没有可追踪的规则变更；“规则已应用”之外的状态不代表识别效果已验证。');
+    article.append(chain); return article;
+  }
+
+  function renderFeedback() {
+    const list = get('matching-feedback-list'); if (!list) return; list.replaceChildren();
+    if (!state.feedbackItems.length) { const empty = document.createElement('p'); empty.className = 'candidate-empty'; empty.textContent = '尚无后台反馈收据。'; list.append(empty); }
+    else state.feedbackItems.forEach(value => list.append(renderFeedbackItem(value)));
+    setText('matching-feedback-count', state.feedbackItems.length ? `${state.feedbackItems.length} 条已读取` : '尚无记录');
+    const more = get('matching-feedback-more'); if (more) more.hidden = !state.feedbackCursor || state.feedbackLoading;
+  }
+
+  async function loadFeedback(reset = true) {
+    if (state.feedbackLoading || !get('matching-feedback-list')) return;
+    const session = state.session; state.feedbackLoading = true; const before = reset ? '' : state.feedbackCursor;
+    try {
+      const query = new URLSearchParams({ limit: '50' }); if (before) query.set('before', before);
+      const value = id => get(id)?.value?.trim() || '';
+      for (const [id, key] of [['matching-feedback-status', 'status'], ['matching-feedback-kind', 'kind'], ['matching-feedback-reason', 'reasonCode'], ['matching-feedback-device', 'device'], ['matching-feedback-station', 'station']]) if (value(id)) query.set(key, value(id));
+      const from = value('matching-feedback-from'), to = value('matching-feedback-to');
+      if (from) query.set('from', String(Date.parse(`${from}T00:00:00`))); if (to) query.set('to', String(Date.parse(`${to}T23:59:59.999`)));
+      const data = await api(`/v1/admin/matching-feedback?${query}`); if (session !== state.session) return;
+      state.feedbackItems = reset ? (data.items || []) : [...state.feedbackItems, ...(data.items || [])]; state.feedbackCursor = data.nextCursor || ''; renderFeedback();
+    } finally { state.feedbackLoading = false; renderFeedback(); }
   }
 
   function fillReviewStations(selectedId = '') {
@@ -417,7 +474,7 @@ export function initStationAdmin({ api, notice }) {
     state.aiPollTimer = setTimeout(async () => {
       state.aiPollTimer = null; if (!stationWorkspaceVisible()) return;
       const session = state.session; state.aiPolling = true;
-      const results = await Promise.allSettled([loadCandidates(), loadAiConfig()]);
+      const results = await Promise.allSettled([loadCandidates(), loadAiConfig(), loadFeedback(true)]);
       if (session !== state.session) return;
       state.aiPolling = false;
       const failure = results.find(result => result.status === 'rejected');
@@ -428,7 +485,7 @@ export function initStationAdmin({ api, notice }) {
 
   async function loadWorkspace() {
     if (!state.open) return;
-    try { await Promise.all([loadStations(), loadCandidates(), loadAiConfig(), loadChannels()]); } catch (error) { notice(error.message || '站点管理暂时无法读取。', true); }
+    try { await Promise.all([loadStations(), loadCandidates(), loadFeedback(true), loadAiConfig(), loadChannels()]); } catch (error) { notice(error.message || '站点管理暂时无法读取。', true); }
   }
 
   async function saveStation(event) {
@@ -522,7 +579,7 @@ export function initStationAdmin({ api, notice }) {
     const body = { stationId: stationId === '__new__' ? '' : stationId, alias: get('review-alias').value.trim(), subLocation: get('review-sub-location').value.trim() };
     if (!body.alias) throw new Error('请填写原文中真实的站点别名。');
     if (stationId === '__new__') { body.name = get('review-new-name').value.trim(); body.region = get('review-new-region').value.trim(); if (!body.name || !body.region) throw new Error('新建站点必须填写标准名称和地区。'); }
-    await api(`/v1/admin/station-candidates/${encodeURIComponent(candidate.id)}/approve`, { method: 'POST', body: JSON.stringify(body) }); get('station-review-dialog').close(); state.reviewCandidate = null; await Promise.all([loadStations(), loadCandidates()]); notice('候选已人工确认并加入站点规则。');
+    await api(`/v1/admin/station-candidates/${encodeURIComponent(candidate.id)}/approve`, { method: 'POST', body: JSON.stringify(body) }); get('station-review-dialog').close(); state.reviewCandidate = null; await Promise.all([loadStations(), loadCandidates(), loadFeedback(true)]); notice('候选已人工确认并加入站点规则。');
   }
 
   function switchSettings(view) {
@@ -538,6 +595,8 @@ export function initStationAdmin({ api, notice }) {
   get('station-add').addEventListener('click', newStation);
   get('station-search-input').addEventListener('input', event => { state.query = event.target.value.trim(); renderDirectory(); });
   get('station-queue-entry').addEventListener('click', showQueue);
+  get('matching-feedback-more').addEventListener('click', () => loadFeedback(false).catch(error => notice(error.message || '反馈流水暂时无法读取。', true)));
+  get('matching-feedback-filter').addEventListener('click', () => loadFeedback(true).catch(error => notice(error.message || '反馈筛选暂时无法读取。', true)));
   get('ai-open-settings').addEventListener('click', () => { showQueue(); get('ai-settings-panel').open = true; get('ai-settings-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
   const guarded = (id, handler) => get(id).addEventListener('click', async () => { const element = get(id); if (element.disabled) return; element.disabled = true; try { await handler(); } catch (error) { notice(error.message || '操作未完成，请重试。', true); } finally { if (id === 'ai-test' || id === 'ai-clear-key') channelActions(); else element.disabled = false; } });
   guarded('ai-run', runAi);

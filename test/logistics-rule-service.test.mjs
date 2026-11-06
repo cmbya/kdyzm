@@ -83,9 +83,9 @@ test('edited rules immediately reparse cached tracks, preserve locker and manual
   const { service, account } = await fixture(t);
   const getRules = () => service.logisticsRules.read().rules;
   const saveRules = rules => service.logisticsRules.save({ revision: service.logisticsRules.read().revision, rules });
-  let time = NOW, description = custom.sample;
+  let time = NOW, description = custom.sample, eventTime = '2026-11-03 11:00:00';
   const collect = createCollector({ now: () => ++time, getLogisticsRules: getRules, fetchImpl: async () => new Response(JSON.stringify({ shipping: {
-    tracking_number: 'A', traces: [{ time: '2026-11-03 11:00:00', info: description }] } })) });
+    tracking_number: 'A', traces: [{ time: eventTime, info: description }] } })) });
   const order = { platformOrderId: 'o', title: '测试' };
   const refresh = async () => {
     const result = await collect({ platform: 'pdd' }, 'pdd_user_id=SYNTHETIC', { targetOrder: { platformOrderId: 'o', shipments: [{ waybillNo: 'A', status: 'transit' }] } });
@@ -101,11 +101,12 @@ test('edited rules immediately reparse cached tracks, preserve locker and manual
   saveRules([]); assert.equal(service.store.snapshot([account.id]).shipments[0].arrivalAt, 0);
   const cleared = await refresh(); assert.equal(cleared.arrivalAt, 0); assert.equal(cleared.station, '');
   service.store.importResult(account.id, { orders: [order], shipments: [{ platformOrderId: 'o', waybillNo: 'A', status: 'arrived', station: '幸福丰巢快递柜',
-    stationSource: 'locker', arrivalAt: NOW - 3600000, arrivalAtSource: 'locker_arrival', arrivalAtPrecision: 'second', pickupCode: '123456' }], logisticsRules: [] });
+    stationSource: 'locker', arrivalAt: NOW - 3600000, arrivalAtSource: 'locker_arrival', arrivalAtPrecision: 'second', pickupCode: '123456', logisticsCheckedAt: ++time }], logisticsRules: [] });
   const stored = service.store.snapshot([account.id]).shipments[0];
   service.store.applyOperations({ accountIds: [account.id], legacyAccountIds: [account.id], familyIds: [], id: service.store.devices()[0].id },
     [{ id: 'mark-picked', shipmentId: stored.id, action: 'pick', occurredAt: NOW }]);
   const locker = await refresh(); assert.equal(locker.arrivalAtSource, 'locker_arrival'); assert.equal(locker.station, '幸福丰巢快递柜'); assert.equal(locker.picked, true);
-  description = '快件退回后重新派送中';
-  const returned = await refresh(); assert.equal(returned.arrivalAt, 0); assert.equal(returned.station, ''); assert.equal(returned.picked, true);
+  description = '快件退回后重新派送中'; eventTime = '2026-11-03 11:30:00';
+  const returned = await refresh(); assert.equal(returned.arrivalAt, 0); assert.equal(returned.station, ''); assert.equal(returned.picked, false);
+  assert.equal(returned.pickupCycleHistory.at(-1).picked, true);
 });

@@ -44,6 +44,8 @@ test('feedback API requires device auth, scopes receipts, advertises capability 
   const posted = await f.request('/v1/matching-feedback', { method: 'POST', body: { items: [f.sample()] } });
   assert.deepEqual(posted.data.accepted, [{ id: 'sample-1', revision: 1 }]);
   assert.equal(posted.data.items[0].status, 'pending');
+  assert.equal(posted.data.items[0].reasonCode, 'AI_NOT_CONFIGURED');
+  assert.match(posted.data.items[0].message, /AI/);
   assert.equal(posted.data.configured, false);
   assert.equal((await f.request('/v1/snapshot', { etag: before.etag })).status, 200);
   const snapshot = await f.request('/v1/snapshot');
@@ -67,6 +69,110 @@ test('feedback is durable, idempotent by revision, and withdrawal wins over reor
   assert.equal(f.service.stations.candidate(id).status, 'withdrawn');
   const next = f.submit(f.sample({ revision: 3 }));
   assert.equal(next.items[0].status, 'pending'); assert.notEqual(next.items[0].candidateId, id);
+});
+
+test('rejected feedback receipts persist safely across reloads without replacing valid feedback', async t => {
+  const f = await fixture(t);
+  f.submit(f.sample({ id: 'kept' }));
+  const malformed = { id: 'not valid PRIVATE_ID', revision: 0, action: 'upsert', kind: 'PRIVATE_KIND', shipmentId: 'PRIVATE_SHIPMENT',
+    stationName: 'PRIVATE_STATION', otherStationName: 'PRIVATE_OTHER', targetStationId: 'PRIVATE_TARGET', subLocation: 'PRIVATE_LOCKER', reason: 'other' };
+  const first = f.submit(malformed), duplicate = f.submit(malformed);
+  assert.equal(first.items.at(-1).status, 'rejected'); assert.equal(first.items.at(-1).error, 'INVALID_FEEDBACK');
+  assert.equal(duplicate.items.at(-1).status, 'rejected');
+  const conflict = f.submit(f.sample({ id: 'kept', stationName: '冲突柜' }));
+  assert.equal(conflict.items.at(-1).error, 'FEEDBACK_CONFLICT');
+  const stored = f.service.store.db.prepare('SELECT * FROM matching_feedback_rejections ORDER BY sequence').all();
+  assert.equal(stored.length, 2); assert.equal(stored[0].id, ''); assert.equal(stored[1].id, 'kept');
+  assert.doesNotMatch(JSON.stringify(stored), /PRIVATE_/u);
+  assert.ok(f.service.matchingFeedback.read(f.device.id, 'kept').candidateId);
+  const latest = f.service.matchingFeedback.adminQuery({ limit: 1 });
+  assert.equal(latest.items[0].status, 'rejected'); assert.ok(latest.nextCursor);
+  const older = f.service.matchingFeedback.adminQuery({ limit: 100, before: Number(latest.nextCursor) });
+  assert.ok(older.items.some(item => item.id === 'kept' && item.status !== 'rejected'));
+  const reloaded = new MatchingFeedbackStore({ store: f.service.store, stations: f.service.stations, now: () => NOW });
+  const afterReload = reloaded.adminQuery({ limit: 100, status: 'rejected' });
+  assert.equal(afterReload.items.length, 2); assert.ok(afterReload.items.every(item => item.candidateId === '' && item.status === 'rejected'));
+  assert.doesNotMatch(JSON.stringify(afterReload), /PRIVATE_/u);
+});
+
+test('admin feedback history keeps withdraw-only receipts, exposes reasons and paginates the receipt chain', async t => {
+  const f = await fixture(t);
+  f.submit({ id: 'withdraw-only', revision: 1, action: 'withdraw' });
+  f.submit(f.sample({ id: 'known-rule', kind: 'manual_match', reason: 'manual_match', shipmentId: f.shipment.id,
+    stationName: '海棠小区驿站', otherStationName: '海棠小区驿站', targetStationId: 'target', subLocation: '' }));
+  f.submit(f.sample({ id: 'candidate-receipt' }));
+  for (let start = 0; start < 55; start += 20) f.submit(Array.from({ length: Math.min(20, 55 - start) }, (_, index) => f.sample({ id: `page-${start + index}` })));
+  assert.equal((await f.request('/v1/admin/matching-feedback')).status, 401);
+  const first = await f.request('/v1/admin/matching-feedback?limit=1', { token: '', admin: true });
+  assert.equal(first.status, 200); assert.equal(first.data.items.length, 1); assert.ok(first.data.nextCursor);
+  const older = await f.request(`/v1/admin/matching-feedback?limit=100&before=${encodeURIComponent(first.data.nextCursor)}`, { token: '', admin: true });
+  assert.equal(older.status, 200);
+  const withdrawn = [first.data.items, older.data.items].flat().find(item => item.id === 'withdraw-only');
+  assert.equal(withdrawn.status, 'withdrawn'); assert.equal(withdrawn.reasonCode, 'WITHDRAWN_NO_CANDIDATE'); assert.equal(withdrawn.candidateId, '');
+  const known = older.data.items.find(item => item.id === 'known-rule');
+  assert.equal(known.reasonCode, 'NO_NEW_RULE'); assert.match(known.message, /现有规则/);
+  const candidate = older.data.items.find(item => item.id === 'candidate-receipt');
+  assert.ok(candidate.candidateId); assert.equal(candidate.receipt.id, 'candidate-receipt'); assert.equal(candidate.candidate.id, candidate.candidateId);
+  assert.equal(candidate.analysis, null); assert.equal(candidate.rule, null); assert.equal(candidate.deviceRuleReceipt.received, false); assert.equal(candidate.deviceRuleReceipt.effectStatus, 'unverified');
+  const filtered = await f.request('/v1/admin/matching-feedback?status=withdrawn&limit=100', { token: '', admin: true });
+  assert.deepEqual(filtered.data.items.map(item => item.id), ['withdraw-only']);
+});
+
+test('station rule receipts are device-authenticated, bounded, idempotent and visible without claiming effect', async t => {
+  const f = await fixture(t), snapshot = await f.request('/v1/snapshot');
+  assert.ok(snapshot.data.capabilities.includes('station_rule_receipts_v1'));
+  assert.equal((await f.request('/v1/station-rule-receipts', { token: '' })).status, 401);
+  const payload = { stationRulesVersion: snapshot.data.stationRulesVersion, serverLogisticsRulesVersion: snapshot.data.serverLogisticsRulesVersion };
+  const first = await f.request('/v1/station-rule-receipts', { method: 'POST', body: payload });
+  assert.equal(first.status, 200); assert.equal(first.data.accepted, true); assert.equal(first.data.receipt.effectStatus, 'unverified');
+  const duplicate = await f.request('/v1/station-rule-receipts', { method: 'POST', body: payload });
+  assert.deepEqual(duplicate.data.receipt, first.data.receipt);
+  const ahead = await f.request('/v1/station-rule-receipts', { method: 'POST', body: { ...payload, stationRulesVersion: payload.stationRulesVersion + 1 } });
+  assert.equal(ahead.status, 409);
+  const candidateId = f.submit(f.sample()).items[0].candidateId;
+  f.service.stations.recordAnalysis(candidateId, { startedAt: NOW, finishedAt: NOW + 1, error: { code: 'AI_TIMEOUT', message: 'AI请求超时，请稍后重试' }, result: null });
+  f.service.matchingFeedback.summary(f.device);
+  f.service.stations.recordAnalysis(candidateId, { startedAt: NOW + 2, finishedAt: NOW + 3, error: null, result: { kind: 'unknown', evidence: [] } });
+  f.service.matchingFeedback.summary(f.device);
+  const history = await f.request('/v1/admin/matching-feedback?limit=100', { token: '', admin: true });
+  const item = history.data.items.find(value => value.id === 'sample-1');
+  assert.equal(item.deviceRuleReceipt.received, true); assert.equal(item.deviceRuleReceipt.effectStatus, 'unverified');
+  assert.equal(item.analysisAttempts.length, 2); assert.equal(item.analysisAttempts[0].error.code, 'AI_TIMEOUT'); assert.equal(item.analysisAttempts[1].result.kind, 'unknown');
+});
+
+test('analysis attempts persist at the candidate write boundary without an intervening read', async t => {
+  const f = await fixture(t);
+  const candidateId = f.submit(f.sample()).items[0].candidateId;
+  f.service.stations.recordAnalysis(candidateId, { startedAt: NOW, finishedAt: NOW + 1, error: { code: 'AI_TIMEOUT', message: '分析超时' }, result: null });
+  f.service.stations.recordAnalysis(candidateId, { startedAt: NOW + 2, finishedAt: NOW + 3, error: null, result: { kind: 'unknown', evidence: [] } });
+  const attempts = f.service.matchingFeedback.attempts(candidateId);
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0].error.code, 'AI_TIMEOUT');
+  assert.equal(attempts[1].result.kind, 'unknown');
+  assert.equal(f.service.matchingFeedback.attempts(candidateId).length, 2);
+});
+
+test('analysis attempts ignore unrelated candidate updates and preserve identical write-boundary events', async t => {
+  const f = await fixture(t);
+  const candidateId = f.submit(f.sample()).items[0].candidateId;
+  const analysis = { startedAt: NOW, finishedAt: NOW + 1, error: null, result: { kind: 'unknown', evidence: [] } };
+  f.service.stations.recordAnalysis(candidateId, analysis);
+  f.service.stations.recordAnalysis(candidateId, analysis);
+  f.service.stations.updateCandidate(candidateId, { status: 'unknown' });
+  f.service.matchingFeedback.summary(f.device);
+  assert.equal(f.service.matchingFeedback.attempts(candidateId).length, 2);
+  assert.deepEqual(f.service.matchingFeedback.attempts(candidateId).map(attempt => attempt.result.kind), ['unknown', 'unknown']);
+});
+
+test('reading an in-progress analysis does not create a second completed attempt', async t => {
+  const f = await fixture(t);
+  const candidateId = f.submit(f.sample()).items[0].candidateId;
+  f.service.stations.recordAnalysis(candidateId, { startedAt: NOW, finishedAt: 0, error: null, result: null });
+  f.service.matchingFeedback.summary(f.device);
+  assert.equal(f.service.matchingFeedback.attempts(candidateId).length, 0);
+  f.service.stations.recordAnalysis(candidateId, { startedAt: NOW, finishedAt: NOW + 1, error: null, result: { kind: 'unknown', evidence: [] } });
+  f.service.matchingFeedback.summary(f.device);
+  assert.equal(f.service.matchingFeedback.attempts(candidateId).length, 1);
 });
 
 test('snapshot carries every retained receipt so offline clients can settle more than one hundred samples', async t => {

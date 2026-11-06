@@ -230,6 +230,18 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
           send(res, 200, { station: stations.saveStation(stationPath[1], body) }); return;
         }
+        if (path === '/v1/admin/matching-feedback' && req.method === 'GET') {
+          const number = (name, fallback = 0) => {
+            const raw = url.searchParams.get(name);
+            if (raw === null || raw === '') return fallback;
+            const value = Number(raw); if (!Number.isSafeInteger(value) || value < 0) fail(400, 'INVALID_FEEDBACK_QUERY', `${name}参数无效`); return value;
+          };
+          const limit = number('limit', 50);
+          if (limit < 1 || limit > 100) fail(400, 'INVALID_FEEDBACK_QUERY', '每页反馈数须为1到100');
+          send(res, 200, matchingFeedback.adminQuery({ limit, before: number('before'), from: number('from'), to: number('to'),
+            status: url.searchParams.get('status') || '', kind: url.searchParams.get('kind') || '', reasonCode: url.searchParams.get('reasonCode') || '',
+            device: url.searchParams.get('device') || '', station: url.searchParams.get('station') || '' })); return;
+        }
         if (path === '/v1/admin/station-candidates' && req.method === 'GET') { send(res, 200, { candidates: stations.candidates(), running: !!stationAi.running }); return; }
         const candidatePath = path.match(/^\/v1\/admin\/station-candidates\/([^/]+)\/(approve|ignore)$/);
         if (candidatePath && req.method === 'POST') {
@@ -357,6 +369,11 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         rate.check(`matching-feedback:${authorized.id}`, 60, 3600000);
         send(res, 200, matchingFeedback.submit(authorized, body)); return;
       }
+      if (path === '/v1/station-rule-receipts' && req.method === 'POST') {
+        const body = await bodyOf(req), authorized = device(req);
+        rate.check(`station-rule-receipts:${authorized.id}`, 120, 3600000);
+        send(res, 200, matchingFeedback.submitRuleReceipt(authorized, body, { stationRulesVersion: stations.revision, serverLogisticsRulesVersion: logisticsRules.read().revision })); return;
+      }
       if (path === '/v1/devices/current' && req.method === 'DELETE') { send(res, 200, store.revoke(current.id)); return; }
       if (path === '/v1/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts(current.accountIds), familyIds: current.familyIds, legacyAccountIds: current.legacyAccountIds, families: store.families(current.familyIds) }); return; }
       if (path === '/v1/accounts/sync' && req.method === 'POST') {
@@ -392,6 +409,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           serverLogisticsRules: logistics.rules.map(({ id, name, enabled, kind, starts, end, keywords, origin }) => ({ id, name, enabled, kind, starts, end, keywords, origin })),
           ...jobs.snapshot(current, requested.length ? requested : undefined) };
         const snapshot = Object.assign(store.snapshot(current, requested.length ? requested : undefined, Buffer.byteLength(JSON.stringify(additional), 'utf8')), additional);
+        snapshot.capabilities = [...new Set([...(snapshot.capabilities || []), 'station_rule_receipts_v1'])];
         const etag = `"${hash(JSON.stringify(snapshot))}"`;
         const matches = (req.headers['if-none-match'] || '').split(',').map(t => t.trim().replace(/^W\//, '')).includes(etag);
         send(res, matches ? 304 : 200, matches ? undefined : snapshot, { ETag: etag }); return;

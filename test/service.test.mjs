@@ -248,6 +248,45 @@ test('carrier labels can improve without duplicating shipments, distinct carrier
   assert.equal(service.store.snapshot([a.id]).shipments.length, 3);
 });
 
+test('waybill formatting and carrier aliases reuse the existing shipment identity', async t => {
+  const { service, account } = await setup(t); const a = await account();
+  const initial = data(); initial.shipments[0].waybillNo = '123456'; initial.shipments[0].carrier = 'YTO';
+  service.store.importResult(a.id, initial);
+  const before = service.store.snapshot([a.id]).shipments.find(shipment => shipment.waybillNo === '123456');
+  const formatted = data(); formatted.shipments[0].waybillNo = '123 456'; formatted.shipments[0].carrier = 'YTO EXPRESS';
+  service.store.importResult(a.id, formatted);
+  const rows = service.store.snapshot([a.id]).shipments;
+  assert.equal(rows.length, 2);
+  const after = rows.find(shipment => shipment.id === before.id);
+  assert.equal(after.waybillNo, '123456');
+  assert.equal(after.carrier, 'YTO EXPRESS');
+});
+
+test('ambiguous normalized waybills do not create another shipment', async t => {
+  const { service, account } = await setup(t); const a = await account();
+  const zto = data(); zto.shipments[0].waybillNo = '123456'; zto.shipments[0].carrier = 'ZTO'; service.store.importResult(a.id, zto);
+  const yto = data(); yto.shipments[0].waybillNo = '123 456'; yto.shipments[0].carrier = 'YTO'; service.store.importResult(a.id, yto);
+  const before = service.store.snapshot([a.id]).shipments.map(shipment => shipment.id).sort();
+  const unknown = data(); unknown.shipments[0].waybillNo = '123456'; unknown.shipments[0].carrier = ''; service.store.importResult(a.id, unknown);
+  assert.deepEqual(service.store.snapshot([a.id]).shipments.map(shipment => shipment.id).sort(), before);
+  assert.match(service.store.account(a.id).warnings[0], /未自动新增包裹/);
+});
+
+test('stale logistics input preserves status and the complete newer pickup projection', async t => {
+  const { service, account } = await setup(t); const a = await account();
+  const current = data(); Object.assign(current.shipments[0], { status: 'arrived', pickupCode: '7-6-7042', station: '测试驿站', stationSource: 'platform_event', arrivalAt: TIME, arrivalAtSource: 'platform_event', arrivalAtPrecision: 'second', logisticsCheckedAt: TIME, logisticsState: 'ok', logisticsEvents: [{ time: TIME, description: '已到测试驿站' }] });
+  service.store.importResult(a.id, current);
+  const stale = data(); Object.assign(stale.shipments[0], { status: 'transit', pickupCode: '', station: '', stationSource: 'unknown', arrivalAt: 0, arrivalAtSource: 'unknown', logisticsCheckedAt: TIME - 60000, logisticsState: 'ok', logisticsEvents: [{ time: TIME - 60000, description: '运输中' }] });
+  service.store.importResult(a.id, stale);
+  const shipment = service.store.snapshot([a.id]).shipments.find(item => item.waybillNo === 'FIRST001');
+  assert.equal(shipment.status, 'arrived');
+  assert.equal(shipment.pickupCode, '7-6-7042');
+  assert.equal(shipment.station, '测试驿站');
+  assert.equal(shipment.arrivalAt, TIME);
+  assert.equal(shipment.logisticsCheckedAt, TIME);
+  assert.deepEqual(shipment.logisticsEvents, [{ time: TIME, timeText: '', description: '已到测试驿站', location: '' }]);
+});
+
 test('an in-flight collection cannot overwrite a newly updated Cookie', async t => {
   let finish; const deferred = new Promise(resolve => { finish = resolve; });
   const { service, account } = await setup(t, { collector: async () => { await deferred; return { ...data(), refreshedCookie: 'old-platform-refreshed-cookie' }; } });

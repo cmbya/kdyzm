@@ -10,7 +10,14 @@ var PickCodeLogistics = (function () {
   function text(value) { return typeof value === 'string' || typeof value === 'number' ? String(value).replace(/^\s+|\s+$/g, '') : ''; }
   function stationKey(value) { return text(value).replace(/[\s!"#$%&'()*+,\-./:;<>?=@[\]\\^_`{|}~，。；：！？、（）【】「」“”‘’《》〈〉…·—]/g, ''); }
   function genericPickupStation(value) { return /^(?:菜鸟驿站|驿站|代收点|自提点|自提站|自提柜|快递柜|智能柜|丰巢|丰巢快递柜|快递代收点|代收站|快递站)$/.test(stationKey(value)); }
-  function pickupCycleReset(value) { return /退回|退件|退货|退签|拒签|拒绝?签收|改投|改派|转投|重新(?:派送|投递|揽收)|取出(?:了)?(?:快递柜|自提柜)|离开[^，,。；;！？!?]*(?:驿站|代收点|快递柜)/.test(text(value)); }
+  function pickupCycleReset(value) {
+    return text(value).split(SPLIT).some(function (part) {
+      return /退回|退件|退货|退签|拒签|拒绝?签收|改投|改派|转投|重新(?:派送|投递|揽收)|取出(?:了)?(?:快递柜|自提柜)|离开[^，,。；;！？!?]*(?:驿站|代收点|快递柜)/.test(part)
+        && !/预计|预定|计划|即将|将于|申请|预约|准备|等待|待审核|审核中|是否|疑似|可能|取消|撤销|希望|要求|请/.test(part)
+        && !/(?:未(?:能|曾|有)?|没有|没能|无法|无需)(?:退回|退件|退货|退签|拒签|改投|改派|转投|重新|取出|离开)/.test(part)
+        && !/(?:退回|退件|退货|退签|拒签|改投|改派|转投|投递|派送|揽收)[^，,。；;！？!?]{0,8}(?:失败|未成功)/.test(part);
+    });
+  }
   function homeDeliveryCompleted(value) {
     var description = text(value);
     return /已(?:经)?(?:成功)?(?:送达|妥投)|妥投成功|已(?:经)?(?:送(?:到|至)|派送(?:到|至)|投递(?:到|至)|放(?:在|到|至)?)[^，,。；;！？!?]{0,12}门口|(?:^|[：:\s])(?:送达|妥投)(?:$|[：:\s])/.test(description)

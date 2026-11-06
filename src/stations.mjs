@@ -14,6 +14,7 @@ const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.
 export class StationStore {
   constructor({ db, key, now = Date.now }) {
     this.db = db; this.key = key; this.now = now;
+    this.analysisListeners = new Set();
     this.aiConfigListeners = new Set();
     this.aiQueueListeners = new Set();
     this.stationRulesListeners = new Set();
@@ -126,9 +127,17 @@ export class StationStore {
     const candidate = { ...this.candidate(id), ...fields, updatedAt: this.now() };
     this.db.prepare('UPDATE station_candidates SET data=? WHERE id=?').run(JSON.stringify(candidate), id); return candidate;
   }
+  onAnalysis(listener) {
+    if (typeof listener !== 'function') throw new TypeError('analysis listener must be a function');
+    this.analysisListeners.add(listener);
+    return () => this.analysisListeners.delete(listener);
+  }
   recordAnalysis(id, analysis) {
     if (Buffer.byteLength(JSON.stringify(analysis), 'utf8') > 24576) fail(400, 'AI_DETAIL_LIMIT', '分析详情超过大小限制');
-    return this.updateCandidate(id, { analysis });
+    const old = this.candidate(id), candidate = { ...old, analysis, updatedAt: Math.max(this.now(), (old.updatedAt || 0) + 1) };
+    this.db.prepare('UPDATE station_candidates SET data=? WHERE id=?').run(JSON.stringify(candidate), id);
+    for (const listener of this.analysisListeners) listener(candidate);
+    return candidate;
   }
   recordSuggestion(id, raw) {
     const candidate = this.candidate(id);

@@ -12,6 +12,7 @@ export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32)
 const parse = row => row && JSON.parse(row.data);
 const validTime = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000 ? value : 0;
 const shortText = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
+const waybillKey = value => String(value || '').normalize('NFKC').replace(/\s+/gu, '').toUpperCase();
 function logisticsData(input, old = {}) {
   const checkedAt = validTime(input.logisticsCheckedAt);
   if (checkedAt && checkedAt < (old.logisticsCheckedAt || 0)) return logisticsData({}, old);
@@ -33,8 +34,8 @@ function logisticsData(input, old = {}) {
     logisticsUpdatedAt: Math.max(old.logisticsUpdatedAt || 0, state === 'ok' && supplied.some(e => e?.description) ? validTime(input.logisticsUpdatedAt) || checkedAt : 0),
     logisticsTruncated: !!(input.logisticsTruncated || old.logisticsTruncated || events.length > 100) };
 }
-function pickupData(input = {}, old = {}, events = [], rules) {
-  if (input.logisticsCheckedAt && input.logisticsCheckedAt < (old.logisticsCheckedAt || 0)) return pickupData({}, old, [], rules);
+function pickupData(input = {}, old = {}, events = [], rules, now = Date.now()) {
+  if (input.logisticsCheckedAt && input.logisticsCheckedAt < (old.logisticsCheckedAt || 0)) return pickupData({}, old, [], rules, now);
   const source = value => ['platform_event', 'locker_arrival', 'locker_created'].includes(value) ? value : 'unknown';
   const precision = value => ['second', 'minute'].includes(value) ? value : 'unknown';
   const explicitArrival = validTime(input.arrivalAt) && source(input.arrivalAtSource) !== 'unknown';
@@ -46,8 +47,8 @@ function pickupData(input = {}, old = {}, events = [], rules) {
     stationSource: station ? ['platform_event', 'locker'].includes(input.stationSource) && input.station ? input.stationSource
       : station === old.station && ['platform_event', 'locker'].includes(old.stationSource) ? old.stationSource : 'unknown' : 'unknown' };
   const evidence = pickupEvidence(events, rules);
-  const reset = events.some(event => pickupCycleReset(event.description || '') && (!event.time || !arrivalAt || event.time >= arrivalAt));
-  const newCycle = events.some(event => pickupCycleReset(event.description || '') && (!event.time || event.time >= validTime(old.arrivalAt)));
+  const reset = events.some(event => pickupCycleReset(event.description || '') && (!event.time || event.time <= now) && (!event.time || !arrivalAt || event.time >= arrivalAt));
+  const newCycle = events.some(event => pickupCycleReset(event.description || '') && (!event.time || event.time <= now) && (!event.time || event.time >= validTime(old.arrivalAt)));
   const stationConflict = input.station && old.station && ['platform_event', 'locker'].includes(input.stationSource)
     && input.station.replace(/[\s\p{P}]/gu, '') !== old.station.replace(/[\s\p{P}]/gu, '');
   if (evidence.arrivalAt && (!explicitArrival || evidence.arrivalAt >= arrivalAt)) {
@@ -66,9 +67,40 @@ function pickupData(input = {}, old = {}, events = [], rules) {
   return result;
 }
 const carrierKey = value => {
-  const name = String(value || '').toUpperCase().replace(/\s/g, '');
-  for (const [pattern, key] of [[/中通|^ZTO$/, 'ZTO'], [/圆通|^YTO$/, 'YTO'], [/申通|^STO$/, 'STO'], [/顺丰|^SF$/, 'SF'], [/韵达|^YUNDA$/, 'YUNDA'], [/极兔|^JTSD$/, 'JTSD']]) if (pattern.test(name)) return key;
+  const name = String(value || '').normalize('NFKC').toUpperCase().replace(/[\s._-]+/gu, '');
+  for (const [pattern, key] of [[/中通|^ZTO(?:EXPRESS)?$/, 'ZTO'], [/圆通|^YTO(?:EXPRESS)?$/, 'YTO'],
+    [/申通|^STO(?:EXPRESS)?$/, 'STO'], [/顺丰|^SF(?:EXPRESS)?$/, 'SF'], [/韵达|^YUNDA(?:EXPRESS)?$/, 'YUNDA'],
+    [/极兔|^JT(?:S?D)?(?:EXPRESS)?$/, 'JTSD'], [/邮政快递包裹|^YZPY$/, 'YZPY'], [/^EMS$/, 'EMS'],
+    [/邮政/, 'EMS'], [/京东|^JD(?:EXPRESS)?$/, 'JD'], [/百世|^HTKY(?:EXPRESS)?$/, 'HTKY']]) if (pattern.test(name)) return key;
   return name;
+};
+
+const platformPackageKey = input => String(input?.platformPackageKey || input?.platformPackageId || input?.packageKey || input?.packageId || '').trim();
+const identifierSource = input => shortText(input?.identifierSource || input?.source || 'import', 80) || 'import';
+const cycleReset = (events, current, now) => {
+  const start = validTime(current?.startedAt);
+  return (events || []).filter(event => pickupCycleReset(event?.description || '') && validTime(event?.time) > start && validTime(event?.time) <= validTime(now))
+    .sort((a, b) => validTime(b.time) - validTime(a.time))[0] || null;
+};
+const pickupCycleData = (shipmentId, input, old, events, now) => {
+  const existing = old?.pickupCycle && typeof old.pickupCycle === 'object' ? old.pickupCycle : null;
+  const history = Array.isArray(old?.pickupCycleHistory) ? old.pickupCycleHistory.filter(item => item && typeof item === 'object') : [];
+  const latestEvidenceAt = (events || []).reduce((latest, event) => Math.max(latest, validTime(event?.time)), 0);
+  const initialStartedAt = validTime(old?.arrivalAt) || validTime(input?.arrivalAt) || validTime(old?.logisticsCheckedAt)
+    || latestEvidenceAt || validTime(old?.updatedAt) || validTime(now) || 1;
+  const current = existing && existing.id ? { id: String(existing.id), startedAt: validTime(existing.startedAt) || initialStartedAt,
+    evidenceKey: shortText(existing.evidenceKey, 300) || 'initial', status: existing.status === 'closed' ? 'closed' : 'active' } :
+    { id: stableId(shipmentId, 'pickup-cycle', 'initial'), startedAt: initialStartedAt, evidenceKey: 'initial', status: 'active' };
+  // A legacy record gets one deterministic initial cycle; only later imports may rotate it.
+  const reset = existing ? cycleReset(events, current, now) : null;
+  if (!reset) return { pickupCycle: current, pickupCycleHistory: history, cycleChanged: false };
+  const evidenceKey = `${validTime(reset.time)}:${shortText(reset.description, 300)}`;
+  if (current.evidenceKey === evidenceKey) return { pickupCycle: current, pickupCycleHistory: history, cycleChanged: false };
+  const previous = { ...current, status: 'closed', pickupCompletion: old?.pickupCompletion || null, picked: !!old?.picked,
+    pickupManualAt: validTime(old?.pickupManualAt), pickupManualOperation: shortText(old?.pickupManualOperation, 200) };
+  const next = { id: stableId(shipmentId, 'pickup-cycle', evidenceKey), startedAt: validTime(reset.time), evidenceKey, status: 'active' };
+  const seen = new Set(history.map(item => item.id));
+  return { pickupCycle: next, pickupCycleHistory: seen.has(previous.id) ? history : [...history, previous].slice(-20), cycleChanged: true };
 };
 
 export class Store {
@@ -87,6 +119,11 @@ export class Store {
       CREATE TABLE IF NOT EXISTS pairing (code_hash TEXT PRIMARY KEY, account_ids TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER);
       CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS shipments (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), data TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS order_natural_keys (account_id TEXT NOT NULL REFERENCES accounts(id), platform TEXT NOT NULL, platform_order_id TEXT NOT NULL, order_id TEXT NOT NULL REFERENCES orders(id), PRIMARY KEY(account_id,platform,platform_order_id));
+      CREATE TABLE IF NOT EXISTS shipment_identifiers (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id TEXT NOT NULL REFERENCES accounts(id), platform TEXT NOT NULL, shipment_id TEXT NOT NULL REFERENCES shipments(id), order_id TEXT NOT NULL REFERENCES orders(id), platform_package_key TEXT NOT NULL DEFAULT '', carrier_raw TEXT NOT NULL DEFAULT '', carrier_key TEXT NOT NULL DEFAULT '', waybill_raw TEXT NOT NULL DEFAULT '', waybill_key TEXT NOT NULL DEFAULT '', source TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS shipment_identifiers_platform_package_idx ON shipment_identifiers(account_id,platform,platform_package_key);
+      CREATE INDEX IF NOT EXISTS shipment_identifiers_waybill_idx ON shipment_identifiers(account_id,order_id,carrier_key,waybill_key);
+      CREATE TABLE IF NOT EXISTS shipment_aliases (old_shipment_id TEXT PRIMARY KEY, target_shipment_id TEXT NOT NULL REFERENCES shipments(id), account_id TEXT NOT NULL REFERENCES accounts(id), platform TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', evidence TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, CHECK(old_shipment_id <> target_shipment_id));
       CREATE TABLE IF NOT EXISTS operations (device_id TEXT NOT NULL REFERENCES devices(id), id TEXT NOT NULL, payload_hash TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(device_id,id));`);
     this.transaction(() => {
       for (const table of ['devices', 'pairing']) {
@@ -94,6 +131,12 @@ export class Store {
           this.db.exec(`ALTER TABLE ${table} ADD COLUMN family_ids TEXT NOT NULL DEFAULT '[]'`);
         }
       }
+      for (const column of ['source_cycle_id', 'target_cycle_id']) {
+        if (!this.db.prepare('PRAGMA table_info(shipment_aliases)').all().some(item => item.name === column)) {
+          this.db.exec(`ALTER TABLE shipment_aliases ADD COLUMN ${column} TEXT NOT NULL DEFAULT ''`);
+        }
+      }
+      this.migrateIdentityState();
     });
     new PickupCompletionStore({ store: this, now });
   }
@@ -103,6 +146,90 @@ export class Store {
     try { const result = fn(); this.db.exec('COMMIT'); return result; }
     catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
+  migrateIdentityState() {
+    let changed = false;
+    for (const row of this.db.prepare('SELECT data FROM orders').all()) {
+      const order = parse(row), account = this.account(order.accountId);
+      if (!account || !order.platformOrderId) continue;
+      const result = this.db.prepare('INSERT OR IGNORE INTO order_natural_keys(account_id,platform,platform_order_id,order_id) VALUES(?,?,?,?)')
+        .run(order.accountId, account.platform, String(order.platformOrderId), order.id);
+      changed ||= !!result.changes;
+    }
+    for (const row of this.db.prepare('SELECT data FROM shipments').all()) {
+      const shipment = parse(row), account = this.account(shipment.accountId);
+      if (!account) continue;
+      const { cycleChanged, ...cycle } = pickupCycleData(shipment.id, {}, shipment, shipment.logisticsEvents || [], this.now());
+      if (JSON.stringify(cycle.pickupCycle) !== JSON.stringify(shipment.pickupCycle) || JSON.stringify(cycle.pickupCycleHistory) !== JSON.stringify(shipment.pickupCycleHistory)) {
+        Object.assign(shipment, cycle);
+        this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id);
+        changed = true;
+      }
+      if (!this.db.prepare('SELECT 1 FROM shipment_identifiers WHERE shipment_id=? LIMIT 1').get(shipment.id)) {
+        const identifierChanged = this.saveShipmentIdentifier(shipment, account.platform, { source: 'legacy' }, this.now());
+        changed = changed || identifierChanged;
+      }
+    }
+    if (changed) this.revision();
+  }
+  saveShipmentIdentifier(shipment, platform, input = {}, at = this.now()) {
+    const packageKey = platformPackageKey(input) || platformPackageKey(shipment);
+    const carrierRaw = String(input.carrier || shipment.carrier || '');
+    const waybillRaw = String(input.waybillNo || shipment.waybillNo || '');
+    const carrier = carrierKey(carrierRaw), waybill = waybillKey(waybillRaw);
+    if (!packageKey && !waybill) return false;
+    const source = identifierSource(input);
+    const existing = this.db.prepare(`SELECT id FROM shipment_identifiers WHERE shipment_id=? AND platform=? AND platform_package_key=? AND carrier_key=? AND waybill_key=? LIMIT 1`)
+      .get(shipment.id, platform, packageKey, carrier, waybill);
+    if (existing) {
+      this.db.prepare(`UPDATE shipment_identifiers SET carrier_raw=?,waybill_raw=?,source=?,updated_at=? WHERE id=?`)
+        .run(carrierRaw, waybillRaw, source, at, existing.id);
+      return false;
+    } else {
+      this.db.prepare(`INSERT INTO shipment_identifiers(account_id,platform,shipment_id,order_id,platform_package_key,carrier_raw,carrier_key,waybill_raw,waybill_key,source,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(shipment.accountId, platform, shipment.id, shipment.orderId, packageKey, carrierRaw, carrier, waybillRaw, waybill, source, at, at);
+      return true;
+    }
+  }
+  shipmentAlias(id, max = 20) {
+    let current = String(id || ''), seen = new Set(), alias = null;
+    for (let i = 0; i < max; i++) {
+      if (seen.has(current)) fail(500, 'ALIAS_CYCLE', '包裹历史别名存在循环');
+      seen.add(current);
+      const row = this.db.prepare('SELECT * FROM shipment_aliases WHERE old_shipment_id=?').get(current);
+      if (!row) return { id: current, alias };
+      alias ||= row;
+      current = row.target_shipment_id;
+    }
+    fail(500, 'ALIAS_CYCLE', '包裹历史别名层级过深');
+  }
+  saveShipmentAlias(oldId, targetId, { reason = '', evidence = '' } = {}) {
+    if (!shortText(reason, 300) && !shortText(evidence, 2000)) fail(400, 'INVALID_ALIAS', '包裹别名必须提供确认依据');
+    const existingAlias = this.db.prepare('SELECT old_shipment_id FROM shipment_aliases WHERE old_shipment_id=?').get(String(oldId));
+    if (existingAlias) fail(409, 'INVALID_ALIAS', '包裹别名已经确认，不能重复改写');
+    const old = this.shipment(String(oldId));
+    const target = this.shipment(String(targetId));
+    if (!old || !target || old.accountId !== target.accountId || old.orderId !== target.orderId) fail(400, 'INVALID_ALIAS', '包裹别名必须属于同一账号和订单');
+    if (old.picked || target.picked || old.pickupCompletion?.manualOverride || target.pickupCompletion?.manualOverride) fail(409, 'INVALID_ALIAS', '已有领取决定的包裹不能建立别名');
+    const account = this.account(target.accountId);
+    if (!account || this.shipmentAlias(target.id).id !== target.id) fail(409, 'INVALID_ALIAS', '包裹别名不能形成循环');
+    const sourceCycleId = old.pickupCycle?.id || '', targetCycleId = target.pickupCycle?.id || '';
+    return this.transaction(() => {
+      this.db.prepare(`INSERT INTO shipment_aliases(old_shipment_id,target_shipment_id,account_id,platform,reason,evidence,created_at,source_cycle_id,target_cycle_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(old_shipment_id) DO UPDATE SET target_shipment_id=excluded.target_shipment_id,reason=excluded.reason,evidence=excluded.evidence,source_cycle_id=excluded.source_cycle_id,target_cycle_id=excluded.target_cycle_id`)
+        .run(old.id, target.id, target.accountId, account.platform, shortText(reason, 300), shortText(evidence, 2000), this.now(), sourceCycleId, targetCycleId);
+      this.revision();
+      return { oldShipmentId: old.id, targetShipmentId: target.id };
+    });
+  }
+  operationShipmentResolution(device, originalId) {
+    const resolved = this.shipmentAlias(originalId);
+    const shipment = this.shipment(resolved.id);
+    if (!shipment) fail(resolved.alias ? 409 : 403, resolved.alias ? 'UNRESOLVED_TARGET' : 'SCOPE_FORBIDDEN', resolved.alias ? '包裹目标已无法解析，请重新同步后重试' : '运单不在授权范围内');
+    const alias = resolved.alias;
+    if (alias && (alias.account_id !== shipment.accountId || !this.canRead(device, shipment))) fail(403, 'SCOPE_FORBIDDEN', '运单不在授权范围内');
+    if (!this.canRead(device, shipment)) fail(403, 'SCOPE_FORBIDDEN', '运单不在授权范围内');
+    return { shipment, alias: resolved.alias };
+  }
+  operationShipment(device, originalId) { return this.operationShipmentResolution(device, originalId).shipment; }
   revision() {
     this.db.exec('UPDATE meta SET revision=revision+1 WHERE id=1');
     return this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision;
@@ -116,7 +243,7 @@ export class Store {
         const old = parse(row), events = old.logisticsEvents || [];
         if (!events.length || old.stationSource === 'locker' || ['locker_arrival', 'locker_created'].includes(old.arrivalAtSource)) continue;
         const evidence = pickupEvidence(events, rules);
-        const pickup = evidence.arrivalAt ? pickupData({ logisticsState: 'ok', logisticsEvents: events, arrivalAt: 0 }, old, events, rules) : evidence;
+        const pickup = evidence.arrivalAt ? pickupData({ logisticsState: 'ok', logisticsEvents: events, arrivalAt: 0 }, old, events, rules, this.now()) : evidence;
         const fallback = old.status === 'arrived' && old.arrivalAtSource === 'platform_event' ? 'unknown' : old.status;
         const status = eventStatus(events[0].description, fallback, rules);
         if (status === old.status && Object.keys(pickup).every(key => pickup[key] === old[key])) continue;
@@ -149,6 +276,7 @@ export class Store {
   }
   account(id) { return this.accountFamily(parse(this.db.prepare('SELECT data FROM accounts WHERE id=?').get(id))); }
   order(id) { return parse(this.db.prepare('SELECT data FROM orders WHERE id=?').get(id)); }
+  shipment(id) { return parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id)); }
   accounts(ids) {
     const allowed = ids && new Set(ids);
     return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !allowed || allowed.has(a.id)).map(a => this.accountFamily(a));
@@ -300,6 +428,7 @@ export class Store {
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
     this.transaction(() => {
       const orderIds = new Map();
+      const identityWarnings = [];
       const admittedIds = new Set(result.orders.map(input => String(input.platformOrderId)));
       for (const input of [...(result.orderUpdates || []), ...result.orders]) {
         const platformOrderId = String(input.platformOrderId);
@@ -327,6 +456,8 @@ export class Store {
           orderStatus: input.orderStatus || old?.orderStatus || '',
           refundStatus: input.refundStatus || old?.refundStatus || '' };
         this.db.prepare('INSERT INTO orders VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, accountId, JSON.stringify(order));
+        this.db.prepare('INSERT OR REPLACE INTO order_natural_keys(account_id,platform,platform_order_id,order_id) VALUES(?,?,?,?)')
+          .run(accountId, account.platform, platformOrderId, id);
       }
       for (const input of result.shipments) {
         if (!input.waybillNo) continue;
@@ -335,23 +466,62 @@ export class Store {
         if (!order) continue;
         // Order + carrier + waybill keeps every split parcel and prevents cross-account collisions.
         const carrier = carrierKey(input.carrier);
-        const previous = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse)
-          .filter(s => s.orderId === orderId && s.waybillNo === String(input.waybillNo) && (!carrier || !s.carrier || carrierKey(s.carrier) === carrier));
-        const id = previous.length === 1 ? previous[0].id : stableId(accountId, account.platform, orderId, carrier, String(input.waybillNo));
+        const waybill = waybillKey(input.waybillNo);
+        const packageKey = platformPackageKey(input);
+        const indexed = packageKey ? [...new Set(this.db.prepare('SELECT shipment_id FROM shipment_identifiers WHERE account_id=? AND platform=? AND order_id=? AND platform_package_key=?')
+          .all(accountId, account.platform, orderId, packageKey).map(row => row.shipment_id))] : [];
+        if (indexed.length > 1) {
+          identityWarnings.push('多个包裹候选使用相同平台包裹键，未自动新增包裹，请核对');
+          continue;
+        }
+        const sameWaybill = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse)
+          .filter(s => s.orderId === orderId && waybillKey(s.waybillNo) === waybill);
+        // Prefer one exact carrier or one previously unknown carrier. Multiple candidates are
+        // ambiguous: do not manufacture another shipment while trying to resolve the identity.
+        const exact = carrier ? sameWaybill.filter(s => s.carrier && carrierKey(s.carrier) === carrier) : [];
+        const unknown = sameWaybill.filter(s => !s.carrier);
+        if (!indexed.length && !carrier && !unknown.length && sameWaybill.length) {
+          identityWarnings.push('承运商未知且已有其他承运商同号包裹，未自动新增包裹，请核对');
+          continue;
+        }
+        const previous = indexed.length === 1 ? [{ id: this.shipmentAlias(indexed[0]).id }] : carrier ? (exact.length ? exact : unknown) : unknown;
+        if (previous.length > 1 || (sameWaybill.length > 1 && !previous.length)) {
+          identityWarnings.push('多个包裹候选使用相同规范运单，未自动新增包裹，请核对承运商');
+          continue;
+        }
+        const canonicalIds = [...new Set(previous.map(candidate => this.shipmentAlias(candidate.id).id))];
+        const canonicalCandidates = canonicalIds.map(candidateId => this.shipment(candidateId)).filter(candidate => candidate
+          && candidate.accountId === accountId && candidate.orderId === orderId);
+        if (canonicalIds.length > 1 || canonicalCandidates.length !== canonicalIds.length) {
+          identityWarnings.push('包裹历史别名解析后存在多个或越权候选，未自动新增包裹，请核对');
+          continue;
+        }
+        const id = canonicalIds.length === 1 ? canonicalIds[0] : stableId(accountId, account.platform, orderId, carrier, waybill);
         const old = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id));
+        const inputCheckedAt = validTime(input.logisticsCheckedAt), oldCheckedAt = validTime(old?.logisticsCheckedAt);
+        const trustedEvent = Array.isArray(input.logisticsEvents) && input.logisticsEvents.some(event => validTime(event?.time) > oldCheckedAt);
+        const hasPersistedLogistics = oldCheckedAt > 0 || validTime(old?.arrivalAt) > 0 || (old?.logisticsEvents || []).length > 0;
+        const staleLogistics = !!old && ((inputCheckedAt > 0 && oldCheckedAt > 0 && inputCheckedAt < oldCheckedAt)
+          || (inputCheckedAt === 0 && hasPersistedLogistics && !trustedEvent));
         const status = ['transit', 'arrived', 'signed', 'unknown'].includes(input.status) ? input.status : 'unknown';
-        const logistics = logisticsData(input, old);
-        const pickup = pickupData(input, old || {}, logistics.logisticsEvents, rules);
+        const logistics = staleLogistics ? logisticsData({}, old) : logisticsData(input, old);
+        const pickup = staleLogistics ? pickupData({}, old || {}, old?.logisticsEvents || [], rules, this.now()) : pickupData(input, old || {}, logistics.logisticsEvents, rules, this.now());
+        const cycleState = staleLogistics ? pickupCycleData(id, input, old || {}, old?.logisticsEvents || [], this.now())
+          : pickupCycleData(id, input, old || {}, logistics.logisticsEvents, this.now());
+        const { cycleChanged, ...cycle } = cycleState;
         let shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
-          familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: String(input.waybillNo), carrier: input.carrier || old?.carrier || '', status,
-          pickupCode: input.pickupCode || (!pickup.arrivalAt && (old?.arrivalAt || logistics.logisticsEvents.some(event => pickupCycleReset(event.description))) ? '' : old?.pickupCode) || '', ...pickup,
-          updatedAt: input.updatedAt || this.now(), picked: old?.picked || false, hidden: old?.hidden || false,
+          familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: old?.waybillNo || String(input.waybillNo), carrier: input.carrier || old?.carrier || '', status: staleLogistics ? old.status : status,
+          pickupCode: staleLogistics ? old.pickupCode || '' : input.pickupCode || (!pickup.arrivalAt && (old?.arrivalAt || logistics.logisticsEvents.some(event => pickupCycleReset(event.description) && (!event.time || event.time <= this.now()))) ? '' : old?.pickupCode) || '', ...pickup,
+          updatedAt: input.updatedAt || this.now(), picked: cycleChanged ? false : old?.picked || false, hidden: old?.hidden || false,
           deleted: old?.deleted || false, manualAt: old?.manualAt || 0,
-          pickupCompletion: pickupCompletionState(old), pickupManualAt: old?.pickupManualAt || 0,
-          pickupManualOperation: old?.pickupManualOperation || '',
+          pickupCompletion: cycleChanged ? pickupCompletionState({}) : pickupCompletionState(old), pickupManualAt: cycleChanged ? 0 : old?.pickupManualAt || 0,
+          pickupManualOperation: cycleChanged ? '' : old?.pickupManualOperation || '',
+          ...cycle,
           ...logistics };
+        if (staleLogistics) shipment.updatedAt = old.updatedAt || shipment.updatedAt;
         shipment = this.pickupCompletion.project(shipment);
         this.db.prepare('INSERT INTO shipments VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, accountId, JSON.stringify(shipment));
+        this.saveShipmentIdentifier(shipment, account.platform, input, this.now());
       }
       for (const failure of result.logisticsFailures || []) {
         if (!['error', 'unavailable', 'empty'].includes(failure.state)) continue;
@@ -364,7 +534,7 @@ export class Store {
         }
       }
       // Absence, pagination, refunds and source signatures never change manual state or tombstones.
-      this.updateAccount(accountId, { status: 'ok', lastSuccessAt: this.now(), error: '', warnings: result.warnings || [] });
+      this.updateAccount(accountId, { status: 'ok', lastSuccessAt: this.now(), error: '', warnings: [...(result.warnings || []), ...identityWarnings] });
     });
   }
   snapshot(scope, accountFilter, additionalBytes = 0) {
@@ -375,13 +545,26 @@ export class Store {
     const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(visible)
       .map(o => ({ ...o, familyId: o.familyId || '', familyName: o.familyName || '', orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
         dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '' }));
-    const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible).map(s => {
+    const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible)
+      .filter(shipment => this.shipmentAlias(shipment.id).id === shipment.id).map(s => {
       // Configured services publish evidence persisted by imports or explicit rule changes.
-      const pickup = pickupData({}, s, this.getLogisticsRules ? [] : s.logisticsEvents || []);
-      const { pickupManualAt, pickupManualOperation, ...publicShipment } = s;
-      return { ...publicShipment, ...pickup, pickupCompletion: pickupCompletionState(s), pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
+      const pickup = pickupData({}, s, this.getLogisticsRules ? [] : s.logisticsEvents || [], undefined, this.now());
+      const { pickupManualAt, pickupManualOperation, pickupCycleHistory, ...publicShipment } = s;
+      const compactCycle = s.pickupCycle ? { id: s.pickupCycle.id, startedAt: s.pickupCycle.startedAt, evidenceKey: s.pickupCycle.evidenceKey, status: s.pickupCycle.status } : undefined;
+      return { ...publicShipment, ...(compactCycle ? { pickupCycle: compactCycle } : {}), ...(pickupCycleHistory?.length ? { pickupCycleHistory } : {}), ...pickup, pickupCompletion: pickupCompletionState(s), pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
         familyId: s.familyId || '', familyName: s.familyName || '' };
     });
+    const visibleShipmentIds = new Set(shipments.map(shipment => shipment.id));
+    const shipmentIdentifiers = this.db.prepare('SELECT account_id,platform,shipment_id,order_id,platform_package_key,carrier_raw,carrier_key,waybill_raw,waybill_key,source,created_at,updated_at FROM shipment_identifiers ORDER BY id').all()
+      .map(row => ({ row, canonicalId: this.shipmentAlias(row.shipment_id).id }))
+      .filter(({ row, canonicalId }) => visibleShipmentIds.has(canonicalId) && this.canRead(device, this.shipment(canonicalId)))
+      .map(({ row, canonicalId }) => ({ accountId: row.account_id, platform: row.platform, shipmentId: canonicalId, ...(canonicalId === row.shipment_id ? {} : { originalShipmentId: row.shipment_id }), orderId: row.order_id,
+        platformPackageKey: row.platform_package_key, carrier: row.carrier_raw, carrierKey: row.carrier_key, waybillNo: row.waybill_raw, waybillKey: row.waybill_key, source: row.source,
+        createdAt: row.created_at, updatedAt: row.updated_at }));
+    const shipmentAliases = this.db.prepare('SELECT old_shipment_id,target_shipment_id,account_id,platform,reason,evidence,created_at,source_cycle_id,target_cycle_id FROM shipment_aliases ORDER BY created_at').all()
+      .filter(row => visibleShipmentIds.has(row.target_shipment_id)).map(row => ({ oldShipmentId: row.old_shipment_id,
+        targetShipmentId: row.target_shipment_id, accountId: row.account_id, platform: row.platform, reason: row.reason, evidence: row.evidence, createdAt: row.created_at,
+        ...(row.source_cycle_id ? { sourceCycleId: row.source_cycle_id } : {}), ...(row.target_cycle_id ? { targetCycleId: row.target_cycle_id } : {}) }));
     const familyIds = device.familyIds || [];
     const families = this.families([...new Set([...familyIds, ...accounts.map(a => a.familyId), ...orders.map(o => o.familyId), ...shipments.map(s => s.familyId)].filter(Boolean))]);
     const histories = shipments.map(shipment => {
@@ -390,10 +573,30 @@ export class Store {
       return { shipment, events };
     });
     const { enabled, aiEnabled } = this.pickupCompletion.config();
-    const snapshot = { schemaVersion: 1, serverVersion, capabilities, pickupCompletion: { version: 1, enabled, aiEnabled }, serverRevision: this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision, familyIds, legacyAccountIds: device.legacyAccountIds || [], families, accounts, orders, shipments,
+    const snapshot = { schemaVersion: 1, serverVersion, capabilities, pickupCompletion: { version: 1, enabled, aiEnabled }, identity: { version: 1 }, serverRevision: this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision, familyIds, legacyAccountIds: device.legacyAccountIds || [], families, accounts, orders, shipments, shipmentIdentifiers, shipmentAliases,
       hiddenIds: shipments.filter(s => s.hidden).map(s => s.id), deletedIds: shipments.filter(s => s.deleted).map(s => s.id),
       events: shipments.filter(s => s.arrivalAt).map(s => ({ id: stableId(s.id, 'arrival', s.arrivalAt), shipmentId: s.id, arrivedAt: s.arrivalAt, code: s.pickupCode, stationKey: s.station })),
       syncWarnings: accounts.flatMap(a => (a.warnings || []).map(message => ({ accountId: a.id, message }))) };
+    const responseLimit = Math.max(0, 1900000 - additionalBytes);
+    if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > responseLimit) {
+      // Optional cycle metadata is retained in SQLite and omitted only when the complete response is already over Android's cap.
+      for (const shipment of shipments) {
+        if (!shipment.pickupCycle || shipment.pickupCycleHistory?.length) continue;
+        delete shipment.pickupCycle;
+        if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') <= responseLimit) break;
+      }
+    }
+    if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > responseLimit && shipmentIdentifiers.length) {
+      const allIdentifiers = snapshot.shipmentIdentifiers;
+      let low = 0, high = allIdentifiers.length;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        snapshot.shipmentIdentifiers = allIdentifiers.slice(0, middle);
+        if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') <= responseLimit) low = middle;
+        else high = middle - 1;
+      }
+      snapshot.shipmentIdentifiers = allIdentifiers.slice(0, low);
+    }
     // Android caps the entire response at 2,000,000 bytes, not just the histories.
     // Reserve headroom and trim this response only; the SQLite cache remains intact.
     let historyBudget = Math.max(0, 1900000 - additionalBytes - Buffer.byteLength(JSON.stringify(snapshot), 'utf8'));
@@ -435,30 +638,39 @@ export class Store {
           }
           appliedIds.push(operation.id); continue;
         }
-        onlyKeys(input, ['id', 'shipmentId', 'action', 'occurredAt']);
+        onlyKeys(input, ['id', 'shipmentId', 'action', 'occurredAt', 'pickupCycleId']);
         const operation = { id: text(input.id, '操作ID', 128), shipmentId: text(input.shipmentId, '运单ID', 128), action: input.action, occurredAt: input.occurredAt };
+        if (Object.hasOwn(input, 'pickupCycleId')) operation.pickupCycleId = text(input.pickupCycleId, '领取周期ID', 128);
         if (!['pick', 'restore', 'resumeAutoPickup', 'hide', 'unhide'].includes(operation.action) || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt < 0 || operation.occurredAt > this.now() + 5 * 60000) fail(400, 'INVALID_OPERATION', '不支持的操作或时间');
-        const shipment = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(operation.shipmentId));
-        if (!this.canRead(device, shipment)) fail(403, 'SCOPE_FORBIDDEN', '运单不在授权范围内');
         const digest = hash(JSON.stringify(operation));
         const old = this.db.prepare('SELECT payload_hash FROM operations WHERE device_id=? AND id=?').get(device.id, operation.id);
         if (old && old.payload_hash !== digest) fail(409, 'OPERATION_CONFLICT', '相同操作ID不能用于不同内容');
-        if (!old) {
-          const pickupAction = ['pick', 'restore', 'resumeAutoPickup'].includes(operation.action);
-          const stale = pickupAction && (shipment.pickupManualOperation || shipment.pickupManualAt) && operation.occurredAt < (shipment.pickupManualAt || 0);
-          if (!stale) {
-            if (pickupAction) {
-              const state = pickupCompletionState(shipment);
-              state.manualOverride = operation.action === 'pick' ? 'picked' : operation.action === 'restore' ? 'pending' : '';
-              Object.assign(shipment, { pickupCompletion: state, picked: effectivePicked(state), pickupManualAt: operation.occurredAt, pickupManualOperation: `${device.id}:${operation.id}` });
-              if (operation.action === 'resumeAutoPickup') Object.assign(shipment, this.pickupCompletion.project(shipment));
-            } else shipment.hidden = operation.action === 'hide';
-            shipment.manualAt = this.now();
-            this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id);
+        if (old) { appliedIds.push(operation.id); continue; }
+        const resolution = this.operationShipmentResolution(device, operation.shipmentId);
+        const shipment = resolution.shipment;
+        const currentCycleId = shipment.pickupCycle?.id || '';
+        if (['pick', 'restore', 'resumeAutoPickup'].includes(operation.action)) {
+          const aliasCycleBridge = resolution.alias && operation.pickupCycleId && operation.pickupCycleId === resolution.alias.source_cycle_id
+            && currentCycleId && currentCycleId === resolution.alias.target_cycle_id;
+          if (operation.pickupCycleId && currentCycleId && operation.pickupCycleId !== currentCycleId && !aliasCycleBridge) fail(409, 'PICKUP_CYCLE_CONFLICT', '领取周期已变化，请刷新后重试');
+          if (!operation.pickupCycleId && currentCycleId && operation.occurredAt < validTime(shipment.pickupCycle?.startedAt) && (shipment.pickupCycleHistory || []).length) {
+            fail(409, 'PICKUP_CYCLE_CONFLICT', '离线领取命令属于旧周期，请刷新后重试');
           }
-          this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
-          this.updateAccount(shipment.accountId, {});
         }
+        const pickupAction = ['pick', 'restore', 'resumeAutoPickup'].includes(operation.action);
+        const stale = pickupAction && (shipment.pickupManualOperation || shipment.pickupManualAt) && operation.occurredAt < (shipment.pickupManualAt || 0);
+        if (!stale) {
+          if (pickupAction) {
+            const state = pickupCompletionState(shipment);
+            state.manualOverride = operation.action === 'pick' ? 'picked' : operation.action === 'restore' ? 'pending' : '';
+            Object.assign(shipment, { pickupCompletion: state, picked: effectivePicked(state), pickupManualAt: operation.occurredAt, pickupManualOperation: `${device.id}:${operation.id}` });
+            if (operation.action === 'resumeAutoPickup') Object.assign(shipment, this.pickupCompletion.project(shipment));
+          } else shipment.hidden = operation.action === 'hide';
+          shipment.manualAt = this.now();
+          this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id);
+        }
+        this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
+        this.updateAccount(shipment.accountId, {});
         appliedIds.push(operation.id);
       }
       return { appliedIds };
@@ -467,7 +679,7 @@ export class Store {
   operation(device, id) {
     const result = parse(this.db.prepare('SELECT data FROM operations WHERE device_id=? AND id=?').get(device.id, id));
     if (!result) fail(404, 'NOT_FOUND', '操作不存在');
-    const record = result.orderId ? this.order(result.orderId) : parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(result.shipmentId));
+    const record = result.orderId ? this.order(result.orderId) : this.operationShipment(device, result.shipmentId);
     if (!this.canRead(device, record)) fail(403, 'SCOPE_FORBIDDEN', '记录不在授权范围内');
     return result;
   }

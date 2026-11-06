@@ -11,6 +11,10 @@ const STATION = '中山石岐远洋风景4卡店';
 const SAMPLE = '【代收点】您的快件已暂存至 中山石岐远洋风景4卡店，地址：员峰振兴路菜鸟驿站中山石岐远洋风景4卡店，请及时领取签收';
 const TIME = '2026-11-03 12:00:00';
 const NOW = Date.parse(TIME.replace(' ', 'T') + '+08:00');
+test('cycle reset requires an actual action in the relevant clause', () => {
+  for (const description of ['用户已申请退回，请等待审核','预计退回发件人','尚未退回','没有改派','改派失败','取消改投申请']) assert.equal(engine.pickupCycleReset(description),false,description);
+  for (const description of ['包裹已退回发件人，请联系卖家','包裹逾期未取件，已退回发件人','包裹已拒绝签收','包裹已改派重新投递']) assert.equal(engine.pickupCycleReset(description),true,description);
+});
 const rule = (overrides = {}) => ({ id: 'custom-arrival', name: '明文测试', enabled: true, kind: 'arrival', starts: ['交付给'], end: '', keywords: ['已入库'],
   sample: '已入库，交付给幸福菜鸟驿站', expectedStation: '幸福菜鸟驿站', origin: 'manual', ...overrides });
 

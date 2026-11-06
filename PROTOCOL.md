@@ -61,7 +61,17 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 订单新增可选字段 `tradeStatus`（平台交易枚举）、`orderDateSource`（`platform/unknown/legacy`）和 `firstSeenAt`（首次记录时间，缺失为0）。新订单没有真实下单日期时 `orderDate=0`，不得用同步时间代替。历史记录没有来源标识时按 `legacy` 展示待确认，保留原数值；以后采集到真实日期可以补正，已验证的日期保持稳定。旧App忽略附加字段仍可同步，但未知日期和历史筛选需要新版App正确展示。
 
-操作请求：`{operations:[{id,shipmentId,action,occurredAt}]}`，action仅为`pick/restore/hide/unhide`，每批1–100条。响应`{appliedIds:[]}`。同设备同ID重放幂等；同ID不同内容返回409；越权批次整体失败。短信正文、解析字段和任意凭证不能经操作接口上行。
+操作请求：`{operations:[{id,shipmentId,action,occurredAt,pickupCycleId?}]}`，action为`pick/restore/resumeAutoPickup/hide/unhide`，每批1–100条。响应`{appliedIds:[]}`。同设备同ID重放幂等；同ID不同内容返回409；越权批次整体失败。短信正文、解析字段和任意凭证不能经操作接口上行。
+
+### 固定身份与取件周期增量（兼容 v1）
+
+快照的`capabilities`包含`pickup_cycles_v1`，并增加`identity:{version:1}`。`shipmentIdentifiers`是已授权记录的身份索引，条目为`{accountId,platform,shipmentId,originalShipmentId?,orderId,platformPackageKey,carrier,carrierKey,waybillNo,waybillKey,source,createdAt,updatedAt}`。`shipmentId`始终指向快照中的规范运单；历史别名对应的索引保留`originalShipmentId`，但不会把旧ID再次当作活动运单输出。
+
+`shipmentAliases`返回已确认的历史映射：`{oldShipmentId,targetShipmentId,accountId,platform,reason,evidence,createdAt,sourceCycleId?,targetCycleId?}`。快照只输出规范运单；旧ID仍可在原授权范围内解析为目标运单，供历史操作和身份索引使用。`sourceCycleId`与`targetCycleId`固定建立别名时两端的取件周期，用于限制离线操作跨周期迁移。
+
+规范运单可带`pickupCycle:{id,startedAt,evidenceKey,status}`及可选的`pickupCycleHistory`。检测到新的、可信的重新投递/退回等周期重置证据时生成新周期，旧周期保留在历史中；仅重放或更旧的证据不会重复推进周期。旧客户端可以忽略这些字段。
+
+`pick`、`restore`和`resumeAutoPickup`可选提交`pickupCycleId`；旧客户端省略该字段仍按旧请求格式工作。提交周期ID时必须等于当前周期，除非请求使用旧别名且同时满足：周期ID等于别名的`sourceCycleId`，目标运单当前周期等于别名的`targetCycleId`。当前周期已变化、目标周期已再次推进、别名周期不匹配，或无周期ID的离线操作已明显属于保留的旧周期时，返回409 `PICKUP_CYCLE_CONFLICT`，且不记录该操作。
 
 3.1.3新增可选字段，schemaVersion仍为1。订单的`orderDateOrigin=list/detail`区分证据来源，`dateCheckedAt`记录实际详情补查时间。详情日期可以纠正旧列表日期，同一详情的新结果不能被更早的补查或列表值覆盖；人工记录不参与此纠正。
 
@@ -115,15 +125,19 @@ POST 请求为 `{items:[{id,revision,action,kind,shipmentId,stationName,otherSta
 
 提交`shipmentId`时按当前设备与历史记录的`canRead`权限核对运单；物流侧站名从该运单读取，不信任客户端的替代文字。手动匹配只有物流站名唯一对应启用站点、目标一致且原站名可学习时才进入站点AI队列。两端已有同站规则但仍无法自动匹配的反馈留待核对，不声称已修复时间、运单或唯一性等其他原因，不改动匹配硬约束。
 
-响应为`{accepted:[{id,revision}],items:[{id,revision,status,candidateId,error,updatedAt}],configured,enabled,autoApply}`。GET省略`accepted`。状态为`pending/applied/review/failed/withdrawn`；POST中不合法单项为`rejected`且不出现在ACK中，`error`为安全短码；其他合法项仍可成功。只返回当前设备的收据状态，不返回原文、内部运单ID、其他设备收据或AI密钥。`/v1/snapshot.matchingFeedback`使用相同摘要结构、省略`accepted`，与GET/POST一样返回当前设备全部记录（最多500条），避免离线期间旧样本的最终状态永久遗漏；快照预算预留此元数据大小。状态变更参与快照ETag。
+响应为`{accepted:[{id,revision}],items:[{id,revision,status,candidateId,error,updatedAt}],configured,enabled,autoApply}`。GET省略`accepted`。正常收据状态为`pending/applied/review/failed/withdrawn`；POST被拒单项以`status:'rejected'`、安全短码`error`和`candidateId:''`返回，不进入`accepted`。拒收持久历史供管理员查询，设备GET与快照仍返回正常收据摘要。服务端对拒收只持久化设备、规范化`id/revision`、白名单错误码和时间等最小字段，不保存被拒原始输入；只返回当前设备的收据状态，不返回原文、内部运单ID、其他设备收据或AI密钥。`/v1/snapshot.matchingFeedback`使用相同摘要结构、省略`accepted`，与GET/POST一样返回当前设备全部记录（最多500条），避免离线期间旧样本的最终状态永久遗漏；快照预算预留此元数据大小。状态变更参与快照ETag。
 
-SQLite按认证设备ID+反馈ID保存持久收据。相同版本、相同内容只ACK不重复计数；相同版本不同upsert内容拒绝；较旧版本ACK但不覆盖新状态，同版本撤回优先。`accepted`对应收到的版本，`items`对应当前服务端版本；客户端只能把相同本地版本的结果用于当前展示，旧响应不得覆盖较新的撤回。相同脱敏映射共用候选，每条收据单独计入来源，撤回只移除本条贡献；最后一份确认撤回时停用候选，若其自动生成别名未被人工修改且没有其他确认来源，则原子回滚该别名。人工修改冲突留管理员核对，其他规则保持不变。取件完成不撤回确认样本；解除或重新匹配必须发送更高版本撤回或替代反馈。
+SQLite按认证设备ID+反馈ID保存持久收据。相同版本、相同内容只ACK不重复计数；同版本不同upsert内容拒绝；较旧版本ACK但不覆盖新状态，同版本撤回优先。`accepted`对应收到的请求版本，`items`对应当前服务端版本；客户端只能把相同本地版本的结果用于当前展示，旧响应不得覆盖较新的撤回。相同脱敏映射共用候选，每条收据单独计入来源，撤回只移除本条贡献；最后一份确认撤回时停用候选，若其自动生成别名未被人工修改且没有其他确认来源，则原子回滚该别名。人工修改冲突留管理员核对，其他规则保持不变。取件完成不撤回确认样本；解除或重新匹配必须发送更高版本撤回或替代反馈。
+
+管理员 `GET /v1/admin/matching-feedback` 返回脱敏后的反馈历史及当前可见关联状态，支持`limit`（1–100，默认50）、`before`游标、`status`、`kind`、`reasonCode`、`device`、`station`、`from`和`to`筛选，并以`nextCursor`继续向前分页。正常反馈与`rejected`拒收记录共用一个全局单调、持久稳定的序列游标；`before`严格取该序列之前的记录，不能按设备分别分页，重复同一拒收不会新建历史序列。设备标识使用不透明短标识，不返回设备token；反馈收据、候选/分析、规则应用和设备规则回执分别展示，缺少关联对象时返回空值，不把缺失事实推断为已分析或已生效。分析详情可包含已记录的`analysisAttempts`；`finishedAt=0`不表示分析成功。规则回执的`effectStatus`为`unverified`，只证明版本回执，不证明识别效果。
+
+支持`station_rule_receipts_v1`的设备可`POST /v1/station-rule-receipts`提交`{stationRulesVersion,serverLogisticsRulesVersion}`。成功返回`{accepted:true,receipt:{deviceId,stationRulesVersion,serverLogisticsRulesVersion,receivedAt,effectStatus:'unverified'}}`；同一设备和版本对的重复提交复用原回执。快照同时声明该 capability，旧设备不提交时不视为已取得规则。
 
 分析复用后台默认AI渠道、6小时周期及新证据触发、共享每日最多20次额度和有限重试。AI输入用`confirmedMapping`独立保存脱敏源站名、真实物流站名、目标ID、柜号和固定原因；内部运单/设备/反馈ID不送AI。别名与证据须逐字来自脱敏源片段，不能用目标站名伪造证据。自动应用继续受`enabled/autoApply`配置控制；目标不符、位置编号冲突、已有别名位置不同、原站名不完整或证据不足均留待核对。后台既有AI候选列表显示人工样本、确认关系、状态与原因；已有自动优化记录入口支持审计和保护人工后续修改的回滚。
 
 平台候选仅从有效末端已到站、非已取/隐藏/归档的近期记录收集；AI异步处理与订单采集隔离。短信端默认关闭，开启后本地仅保留7天/200项队列。候选和传输均不含完整短信、取件码、运单、Cookie。修改密码与撤权后接口沿用原认证边界。
 
-候选可附带 `analysis`，仅管理员读取；未曾调用时为null或缺席。结构为 `{startedAt,finishedAt,input,result,error}`，仅保留最近一次实际调用。`input`与本次发送给模型的user JSON完全相同，包含脱敏 `fragment,region,knownStations,knownStationsTruncated`；站点上下文超过16KiB时，发送前缩减整个站点条目并设置 `knownStationsTruncated:true`，详情不是完整原始HTTP请求。`result`只保存通过字段、站点ID及原文证据校验的结构；无有效返回时为null，不保存供应商原始内容。`error`只含本地白名单 `code,message`，不保存headers、API Key、供应商原文错误或完整短信。每条analysis最多24KiB，重试覆盖上一条记录，不累积请求日志；`finishedAt=0`表示尚未完成或中断，不能当成已返回结果。
+候选可附带 `analysis`，仅管理员读取；未曾调用时为null或缺席。结构为 `{startedAt,finishedAt,input,result,error}`，表示候选当前分析摘要；管理员历史可另附已记录的`analysisAttempts`完成/失败快照。每次完成或失败的分析写入事件在写入边界独立记录，即使内容相同也保留独立事件；之后由读取/轮询补录时按分析内容指纹去重，不会因重复读取追加同一完成事件。仅`finishedAt=0`且无错误的进行中状态不计入完成历史。`input`与本次发送给模型的user JSON完全相同，包含脱敏 `fragment,region,knownStations,knownStationsTruncated`；站点上下文超过16KiB时，发送前缩减整个站点条目并设置 `knownStationsTruncated:true`，详情不是完整原始HTTP请求。`result`只保存通过字段、站点ID及原文证据校验的结构；无有效返回时为null，不保存供应商原始内容。`error`只含本地白名单 `code,message`，不保存headers、API Key、供应商原始错误或完整短信。每条analysis最多24KiB；`finishedAt=0`表示尚未完成或中断，不能当成已返回结果。
 
 更换后台AI地址、模型或密钥会使整个旧批次失效，涵盖在途调用、重试等待与候选间隙；旧批次不能转用新渠道，须重新发起分析。清除密钥和服务关闭也会取消；晚到结果不采纳。取消记录本地安全原因，候选可重新分析，已确认或忽略的候选不会恢复待处理。关闭定期分析会取消该定期批次，手动批次不受自动开关影响。已有候选的人工审核与订单采集继续独立运行。所有实际网络请求沿用公网HTTPS、DNS解析校验并固定地址、禁止重定向、超时和响应大小边界。
 
