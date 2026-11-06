@@ -68,6 +68,8 @@ function pickupData(input = {}, old = {}, events = [], rules, now = Date.now()) 
   return result;
 }
 const genericCarrier = value => /^(?:快递|物流|快递公司|物流公司|其他|其它|其他快递|其它快递|未知|未知快递|未知物流|UNKNOWN|OTHER|EXPRESS)$/iu.test(String(value || '').normalize('NFKC').trim());
+// Older PDD imports stored cabinet.companyName pickup operators in the carrier field.
+const pddCabinetCarrier = (value, platform) => platform === 'pdd' && /(?:代收点|快递超市|驿站|快递柜|自提柜)$/u.test(String(value || '').normalize('NFKC').trim());
 const carrierKey = value => {
   if (genericCarrier(value)) return '';
   const name = String(value || '').normalize('NFKC').toUpperCase().replace(/[\s._-]+/gu, '');
@@ -183,7 +185,7 @@ export class Store {
     const waybillGroups = new Map(), groups = [];
     for (const shipment of rows) {
       const carrier = carrierKey(shipment.carrier), waybill = waybillKey(shipment.waybillNo), account = accounts.get(shipment.accountId);
-      if (!account || !shipment.orderId || carrier && !knownCarriers.has(carrier) || !waybill) continue;
+      if (!account || !shipment.orderId || pddCabinetCarrier(shipment.carrier, account.platform) || carrier && !knownCarriers.has(carrier) || !waybill) continue;
       const key = JSON.stringify([shipment.accountId, account.platform, shipment.orderId, waybill]);
       if (!waybillGroups.has(key)) waybillGroups.set(key, []);
       waybillGroups.get(key).push(shipment);
@@ -546,7 +548,7 @@ export class Store {
         const order = this.order(orderId);
         if (!order) continue;
         // Order + carrier + waybill keeps every split parcel and prevents cross-account collisions.
-        const carrier = carrierKey(input.carrier);
+        const carrier = pddCabinetCarrier(input.carrier, account.platform) ? '' : carrierKey(input.carrier);
         const waybill = waybillKey(input.waybillNo);
         const packageKey = platformPackageKey(input);
         const indexed = packageKey ? [...new Set(this.db.prepare('SELECT shipment_id FROM shipment_identifiers WHERE account_id=? AND platform=? AND order_id=? AND platform_package_key=?')
@@ -571,16 +573,17 @@ export class Store {
         });
         // Prefer one exact carrier or one previously unknown carrier. Multiple candidates are
         // ambiguous: do not manufacture another shipment while trying to resolve the identity.
-        const exact = carrier ? sameWaybill.filter(s => s.carrier && carrierKey(s.carrier) === carrier) : [];
-        const unknown = sameWaybill.filter(s => !carrierKey(s.carrier));
-        const genericCandidate = genericCarrier(input.carrier) && new Set(sameWaybill.map(s => this.shipmentAlias(s.id).id)).size === 1;
+        const sameWaybillIds = new Set(sameWaybill.map(candidate => this.shipmentAlias(candidate.id).id));
+        const exact = carrier ? sameWaybill.filter(s => s.carrier && !pddCabinetCarrier(s.carrier, account.platform) && carrierKey(s.carrier) === carrier) : [];
+        const unknown = sameWaybill.filter(s => !carrierKey(s.carrier) || sameWaybillIds.size === 1 && pddCabinetCarrier(s.carrier, account.platform));
+        const genericCandidate = (genericCarrier(input.carrier) || pddCabinetCarrier(input.carrier, account.platform))
+          && sameWaybillIds.size === 1;
         if (!indexed.length && !carrier && !unknown.length && sameWaybill.length && !genericCandidate) {
           identityWarnings.push('承运商未知且已有其他承运商同号包裹，未自动新增包裹，请核对');
           continue;
         }
         const previous = indexed.length === 1 ? [{ id: this.shipmentAlias(indexed[0]).id }] : carrier ? (exact.length ? exact : unknown) : genericCandidate ? sameWaybill : unknown;
         const canonicalIds = [...new Set(previous.map(candidate => this.shipmentAlias(candidate.id).id))];
-        const sameWaybillIds = new Set(sameWaybill.map(candidate => this.shipmentAlias(candidate.id).id));
         if (canonicalIds.length > 1 || (sameWaybillIds.size > 1 && !canonicalIds.length)) {
           identityWarnings.push('多个包裹候选使用相同规范运单，未自动新增包裹，请核对承运商');
           continue;

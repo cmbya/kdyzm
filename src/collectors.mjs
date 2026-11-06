@@ -430,7 +430,7 @@ export function pddParcels(order, cabinet, rules) {
     const arrivalTime = cabinetMatches && status === 'arrived' ? cabinet.arrival_time || cabinet.create_time : 0;
     const arrivalAt = logisticsTimestamp(arrivalTime, timestamp);
     const station = cabinetMatches && status === 'arrived' ? asText(cabinet.address) : '';
-    return { platformOrderId, waybillNo, carrier: asText(parcel.shipping_name || parcel.company_name || (cabinetMatches && cabinet.companyName)),
+    return { platformOrderId, waybillNo, carrier: asText(parcel.shipping_name || parcel.company_name),
       pickupCode: code, station, stationSource: station ? 'locker' : 'unknown', status, arrivalAt,
       arrivalAtSource: arrivalAt ? cabinet.arrival_time ? 'locker_arrival' : 'locker_created' : 'unknown',
       arrivalAtPrecision: arrivalAt ? logisticsTimePrecision(arrivalTime) : 'unknown' };
@@ -461,6 +461,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
           logisticsFailures.push({ platformOrderId, waybillNo: parcel.waybillNo, state: 'unavailable', logisticsCheckedAt: checkedAt });
           continue;
         }
+        if (waybillNo === parcel.waybillNo) parcel.carrier = asText(shipping.shipping_name || shipping.shippingName) || parcel.carrier;
         const { events, truncated } = pddShippingEvents(shipping, timestamp);
         parcel.logisticsEvents = events;
         parcel.logisticsTruncated = truncated;
