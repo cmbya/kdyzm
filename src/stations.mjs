@@ -12,8 +12,8 @@ const day = now => new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
 
 export class StationStore {
-  constructor({ db, key, now = Date.now }) {
-    this.db = db; this.key = key; this.now = now;
+  constructor({ db, key, now = Date.now, onRulesChanged }) {
+    this.db = db; this.key = key; this.now = now; this.onRulesChanged = onRulesChanged;
     this.analysisListeners = new Set();
     this.aiConfigListeners = new Set();
     this.aiQueueListeners = new Set();
@@ -81,6 +81,7 @@ export class StationStore {
       if (all.length > 100 || all.reduce((sum, s) => sum + s.aliases.length, 0) > 1000 || Buffer.byteLength(JSON.stringify(all), 'utf8') > 100000) fail(400, 'STATION_LIMIT', '站点规则已达到容量上限，请先精简停用站点或别名');
       this.bumpRevision();
       this.db.prepare('INSERT INTO station_catalog VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(station));
+      this.onRulesChanged?.(this.stationRules().stations);
       return station;
     });
     for (const listener of this.stationRulesListeners) { try { listener(); } catch { /* Rules remain authoritative when enrichment is unavailable. */ } }
@@ -316,7 +317,8 @@ export class StationStore {
 
 export function enqueuePlatformCandidates(stations, snapshot, now = stations.now()) {
   const known = new Set(stations.stationRules().stations.flatMap(s => [s.name, ...s.aliases.map(a => a.name)]).map(stationKey));
-  const items = (snapshot?.shipments || []).filter(s => s.status === 'arrived' && !s.picked && !s.hidden && !s.deleted && !s.archived
+  const items = (snapshot?.shipments || []).filter(s => (s.status === 'arrived' || s.status === 'signed' && globalThis.PickCodeLogistics.catalogPickupEvidence(s.logisticsEvents, stations.stationRules().stations).arrivalAt)
+    && !s.picked && !s.pickupCompletion?.autoPicked && !s.hidden && !s.deleted && !s.archived
     && Number.isSafeInteger(s.arrivalAt) && s.arrivalAt > now - 45 * 86400000 && s.arrivalAt <= now
     && ['platform_event', 'locker'].includes(s.stationSource) && typeof s.station === 'string' && s.station.trim() && !nonPickupPlace(s.station) && !known.has(stationKey(s.station)))
     .map(s => ({ id: `platform-${hash(JSON.stringify([s.id, s.station, s.arrivalAt])).slice(0, 48)}`, stationName: s.station, fragment: s.station, source: 'platform' }));

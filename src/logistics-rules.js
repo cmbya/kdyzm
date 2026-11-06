@@ -24,7 +24,7 @@ var PickCodeLogistics = (function () {
       && !/(?:未|待|等待|预计|预定|计划|将|请|要求|希望|安排|同意|约定)[^，,。；;！？!?]{0,12}(?:送达|妥投|送到|送至|投递|放)/.test(description)
       && !/(?:送达|妥投|派送|投递)[^，,。；;！？!?]{0,8}(?:失败|未成功)/.test(description);
   }
-  function clean(candidate) {
+  function clean(candidate, catalogAlias) {
     var raw = text(candidate).replace(/^[：:\s]+/, '');
     // A provider may prepend its brand/action before an explicit pickup address.
     // Stay within the already validated action fragment; never borrow a later destination.
@@ -38,7 +38,7 @@ var PickCodeLogistics = (function () {
     var station = text((bracket ? bracket[1] + (bracket[2] || '') : raw).replace(/^[【「“\s]+|[】」”\s]+$/g, '')
       .split(/(?:[，,。；;！？!?]|请|取件码|取货码|提货码|凭码|等待取件|待取件|已签收|已代收|联系电话|电话)/)[0]);
     return station && station.length <= 120 && !/分拣|转运|分拨|物流中心|营业部|家门口|家中|收件人|本人/.test(station)
-      && (POINT.test(station) || /店$/.test(station)) ? station : '';
+      && (catalogAlias || POINT.test(station) || /店$/.test(station)) ? station : '';
   }
   function defaults() {
     var station = '幸福小区菜鸟驿站';
@@ -68,7 +68,7 @@ var PickCodeLogistics = (function () {
     if (/(?:未|没有|还没|没|不能|不可|不应|不要|不曾|不再|不会|无法|将|即将|准备|待|等待|计划|预计|预定)[^，,。；;！？!?]{0,16}$/.test(value)) return true;
     return kind === 'arrival' && /(?:请|要求|希望|约定|安排|同意|正在)[^，,。；;！？!?]{0,16}$/.test(value);
   }
-  function fragmentMatch(fragment, rules) {
+  function fragmentMatch(fragment, rules, catalogAlias) {
     var current = fragment.value.split(FUTURE)[0], list = ruleList(rules), i, j, rule, at, suffix, endAt, station, extended, address;
     for (i = 0; i < list.length; i++) {
       rule = list[i];
@@ -100,7 +100,7 @@ var PickCodeLogistics = (function () {
             && !/分拣|转运|分拨|物流中心|营业部|门口|门前|家中|家里|住处|收件人|本人/.test(current)
             ? /^[，,]\s*(?:取件|取货|自提)地址\s*[:：]\s*([^，,。；;！？!?\n\r]+)/.exec(fragment.tail.slice(fragment.value.length)) : null;
           if (address && FUTURE.test(address[1])) address = null;
-          station = clean(address ? address[1] : suffix);
+          station = clean(address ? address[1] : suffix, catalogAlias);
           if (station) return { station: station, ruleId: rule.id, kind: rule.kind, origin: rule.origin, pickupAddress: !!address };
           at = current.indexOf(rule.starts[j], at + rule.starts[j].length);
         }
@@ -108,7 +108,7 @@ var PickCodeLogistics = (function () {
     }
     var receipt = current.match(/由(.+?)(?:已(?:签收|代收)|代收)/)
       || current.match(/(?:^|[：:])([^：:]+?)(?:已(?:签收|代收)|代收|等待取件|待取件)/);
-    station = receipt ? clean(receipt[1]) : '';
+    station = receipt ? clean(receipt[1], catalogAlias) : '';
     return station ? { station: station, ruleId: '', kind: /代收|已签收/.test(current) ? 'arrival' : 'location' } : null;
   }
   function stationMatch(description, rules) {
@@ -164,6 +164,85 @@ var PickCodeLogistics = (function () {
         station: station, stationSource: station ? 'platform_event' : 'unknown' };
     }
     empty.station = station; empty.stationSource = station ? 'platform_event' : 'unknown'; return empty;
+  }
+  function catalogStationKey(value) {
+    var digits = {'零':0,'〇':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
+    value = text(value); if (value.normalize) value = value.normalize('NFKC');
+    value = value.replace(/[！-～]/g, function (character) { return String.fromCharCode(character.charCodeAt(0) - 65248); }).replace(/[－—–]/g, '-');
+    return value.replace(/[零〇一二两三四五六七八九十]+(?=卡|号(?:柜|快递柜|自提柜|楼|门)|栋|幢)/g, function (number) {
+      if (number.indexOf('十') >= 0) { var parts = number.split('十'); return String((parts[0] ? digits[parts[0]] : 1) * 10 + (parts[1] ? digits[parts[1]] : 0)); }
+      return number.split('').map(function (character) { return digits[character]; }).join('');
+    }).replace(/[\s，,。()（）【】\[\]·:：；;]/g, '');
+  }
+  function catalogLocationConflict(values) {
+    var seen = {}, conflict = false;
+    values.forEach(function (value) {
+      var key = catalogStationKey(value), pattern = /((?:[A-Za-z]{1,3}区|\d{1,2}区)?[A-Za-z0-9]{1,6})(号?(?:快递柜|自提柜|柜)|卡|号楼|栋|幢)|([东南西北正侧后]{1,2})(?:大)?门/g, match, kind, location;
+      while ((match = pattern.exec(key))) {
+        kind = match[3] ? 'gate' : /柜/.test(match[2]) ? 'cabinet' : /卡/.test(match[2]) ? 'card' : 'building';
+        location = match[3] || match[1].toUpperCase();
+        if (seen[kind] && seen[kind] !== location) conflict = true;
+        seen[kind] = location;
+      }
+    });
+    return conflict;
+  }
+  function catalogEntries(catalog) {
+    var entries = [];
+    (Array.isArray(catalog) ? catalog : []).forEach(function (station) {
+      if (!station || station.enabled === false || !station.id) return;
+      [{name:station.name,subLocation:''}].concat(station.aliases || []).forEach(function (alias) {
+        var key = catalogStationKey(alias.name);
+        if (key && !genericPickupStation(key)) entries.push({id:station.id,name:station.name,alias:alias.name,subLocation:alias.subLocation || '',key:key});
+      });
+    });
+    return entries;
+  }
+  function catalogStation(value, catalog) {
+    var key = catalogStationKey(value), found = [], names = [value], owners = [];
+    catalogEntries(catalog).forEach(function (entry) {
+      if (entry.key !== key) return;
+      found.push(entry); names.push(entry.name,entry.subLocation);
+      if (owners.indexOf(entry.id) < 0) owners.push(entry.id);
+    });
+    var ambiguous = owners.length > 1 || !!found.length && catalogLocationConflict(names);
+    return {id:owners.length === 1 && !ambiguous ? owners[0] : '',name:owners.length === 1 && !ambiguous ? found[0].name : '',ambiguous:ambiguous};
+  }
+  function catalogPickupEvidence(events, catalog, rules) {
+    var empty = pickupEvidence([], rules), entries = catalogEntries(catalog), selected, event, i, parts, j, match, key, candidate, locations, starts = [];
+    var personalCompletion = /(?:本人|收件人|用户|客户)已(?:经)?(?:完成)?(?:签收|领取|取件|取走)/;
+    if (!entries.length) return empty;
+    // The directory confirms identity; only an explicit completed storage action supplies arrival evidence.
+    ['已经成功','已经','已成功','已'].forEach(function (prefix) {
+      ['交付给','交付至','托管至','托管到','托管于','寄存至','寄存到','寄存于','保管至','保管于','收存至','收存于','入库至','入库到','入库于','转存至','转存到','转存于'].forEach(function (action) { starts.push(prefix + action); });
+    });
+    var combined = ruleList(rules).concat([{id:'catalog-completed-pickup',enabled:true,kind:'arrival',origin:'manual',end:'',keywords:[],
+      starts:starts}]);
+    events = Array.isArray(events) ? events : [];
+    if (events.some(function (item) { return !item.time && (pickupCycleReset(item.description) || personalCompletion.test(item.description) || eventStatus(item.description, 'unknown', rules) === 'signed'); })) return empty;
+    for (i = 0; i < events.length; i++) {
+      event = events[i];
+      if (pickupCycleReset(event.description)) break;
+      if (UNREALIZED.test(event.description) || REMINDER.test(event.description)) continue;
+      if (personalCompletion.test(event.description)) return empty;
+      parts = fragments(text(event.description));
+      candidate = null;
+      for (j = 0; j < parts.length; j++) {
+        match = fragmentMatch(parts[j], combined, true);
+        if (!match || match.kind !== 'arrival') continue;
+        key = catalogStationKey(match.station); selected = catalogStation(match.station,catalog);
+        if (!selected.id || candidate && catalogStationKey(candidate.station) !== key) return empty;
+        locations = [match.station,selected.name,event.description];
+        entries.forEach(function (entry) { if (entry.key === key && entry.id === selected.id) locations.push(entry.subLocation); });
+        if (catalogLocationConflict(locations)) return empty;
+        candidate = {arrivalAt:event.time || 0,arrivalAtSource:event.time ? 'platform_event' : 'unknown',
+          arrivalAtPrecision:event.time ? ['second','minute','unknown'].indexOf(event.timePrecision) >= 0 ? event.timePrecision : timePrecision(event.timeText) : 'unknown',
+          station:match.station,stationSource:'platform_event'};
+      }
+      if (candidate) return candidate;
+      if (eventStatus(event.description, 'unknown', rules) === 'signed') return empty;
+    }
+    return empty;
   }
   function eventStatus(description, fallback, rules) {
     var value = text(description), safe = !UNREALIZED.test(value) && !pickupCycleReset(value);
@@ -226,7 +305,7 @@ var PickCodeLogistics = (function () {
     return output;
   }
   return { defaults: defaults, validateRule: validateRule, validateRules: validateRules, pickupStation: pickupStation, pickupArrivalEvent: pickupArrivalEvent,
-    pickupEvidence: pickupEvidence, eventStatus: eventStatus, homeDeliveryCompleted: homeDeliveryCompleted, genericPickupStation: genericPickupStation,
+    pickupEvidence: pickupEvidence, catalogStation: catalogStation, catalogPickupEvidence: catalogPickupEvidence, eventStatus: eventStatus, homeDeliveryCompleted: homeDeliveryCompleted, genericPickupStation: genericPickupStation,
     pickupCycleReset: pickupCycleReset, test: function (rule, sample) {
       var draft = {}, key;
       if (rule && typeof rule === 'object' && !Array.isArray(rule)) {

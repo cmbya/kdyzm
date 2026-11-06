@@ -38,7 +38,7 @@ function regression(candidate, rule, current, shipments) {
     for (const event of events) {
       const before = probe(event.description, current, event.time), after = probe(event.description, combined, event.time);
       if (equal(before, after)) continue;
-      if (shipment.picked || shipment.hidden || shipment.deleted || shipment.status === 'signed'
+      if (shipment.picked || shipment.pickupCompletion?.autoPicked || shipment.hidden || shipment.deleted || shipment.status === 'signed'
         || before.arrival || before.status === 'signed' || before.station && before.station !== station
         || after.station !== station || !after.arrival || !event.description.includes(candidate.fragment)) return false;
     }
@@ -90,7 +90,8 @@ export class LogisticsAiJobs {
     return candidate;
   }
   eligibleShipment(shipment) {
-    if (shipment.picked || shipment.hidden || shipment.deleted || shipment.archived || shipment.status === 'signed' || shipment.logisticsState !== 'ok') return false;
+    if (shipment.picked || shipment.pickupCompletion?.autoPicked || shipment.hidden || shipment.deleted || shipment.archived || shipment.logisticsState !== 'ok') return false;
+    if (shipment.status === 'signed' && !engine.catalogPickupEvidence(shipment.logisticsEvents, this.stations.stationRules().stations, this.rules.read().rules).arrivalAt) return false;
     const account = this.store.account(shipment.accountId), order = this.store.order(shipment.orderId);
     if (!account?.enabled || !order || order.hidden || order.deleted || order.archived) return false;
     const override = typeof order.dateOverride === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(order.dateOverride) ? Date.parse(`${order.dateOverride}T00:00:00+08:00`) : 0;

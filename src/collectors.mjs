@@ -391,6 +391,12 @@ function pddCheck(value) {
   if (value.error_code || value.success === false) upstream();
   return value;
 }
+const PDD_WAYBILL_PLACEHOLDERS = new Set(['待发货', '暂无', '无', '0', 'WAITING_FOR_CARRIER']);
+const pddWaybill = value => asText(value).normalize('NFKC').trim();
+const validPddWaybill = value => {
+  const waybillNo = pddWaybill(value);
+  return !!waybillNo && !PDD_WAYBILL_PLACEHOLDERS.has(waybillNo.toUpperCase());
+};
 // Official orders.html bundle (2026-10-31): UI tab 2/3 -> PATH_TYPE unshipping/unreceived;
 // getOrdersList uses PATH_TYPE and a separate offset per tab. Keep the existing GET transport.
 // https://static.pddpic.com/assets/js/react_orders_7c4eb98c8a268eacd674.js
@@ -415,9 +421,9 @@ export function pddParcels(order, cabinet, rules) {
   const platformOrderId = asText(order.order_sn);
   const listed = order.shipping_list || order.express_list || order.package_list;
   const parcels = Array.isArray(listed) && listed.length ? listed : order.tracking_number ? [order] : [];
-  return parcels.filter(p => p.tracking_number || p.mail_no).map(parcel => {
-    const waybillNo = asText(parcel.tracking_number || parcel.mail_no);
-    const cabinetMatches = parcels.length === 1 || asText(cabinet.tracking_number) === waybillNo;
+  return parcels.filter(parcel => validPddWaybill(parcel.tracking_number || parcel.mail_no)).map(parcel => {
+    const waybillNo = pddWaybill(parcel.tracking_number || parcel.mail_no);
+    const cabinetMatches = parcels.length === 1 || pddWaybill(cabinet.tracking_number) === waybillNo;
     const code = cabinetMatches ? asText(cabinet.code).trim() : '';
     const statusText = asText(parcel.shipping_status_text || order.order_status_text || order.status_text);
     const status = eventStatus(statusText, /交易成功|交易完成/.test(statusText) ? 'signed' : code || (cabinetMatches && cabinet.arrival_time) ? 'arrived' : 'transit', rules);
@@ -446,8 +452,8 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
       const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/order/${encodeURIComponent(platformOrderId)}/shipping?${query}`, cookie, { fetchImpl, headers });
       const shipping = pddCheck(json(response.text)).shipping;
       if (!shipping || !Array.isArray(shipping.traces)) throw new CollectorError('UPSTREAM_FORMAT', '拼多多物流轨迹字段已变化');
-      const waybillNo = asText(shipping.tracking_number || shipping.trackingNumber);
-      if (targetOrder && !parcels.length && waybillNo) parcels.push({ platformOrderId, waybillNo, carrier: '', status: 'unknown' });
+      const waybillNo = pddWaybill(shipping.tracking_number || shipping.trackingNumber);
+      if (targetOrder && !parcels.length && validPddWaybill(waybillNo)) parcels.push({ platformOrderId, waybillNo: pddWaybill(waybillNo), carrier: '', status: 'unknown' });
       const target = waybillNo ? parcels.find(parcel => parcel.waybillNo === waybillNo) : parcels.length === 1 ? parcels[0] : null;
       if (!parcels.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
       for (const parcel of parcels) {
@@ -476,8 +482,8 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
   }
   if (targetOrder) {
     const platformOrderId = asText(targetOrder.platformOrderId);
-    const parcels = (targetOrder.shipments || []).filter(parcel => asText(parcel.waybillNo)).map(parcel => ({
-      platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
+    const parcels = (targetOrder.shipments || []).filter(parcel => validPddWaybill(parcel.waybillNo)).map(parcel => ({
+      platformOrderId, waybillNo: pddWaybill(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
     }));
     if (parcels.length || !TO_SHIP_STATUS_TEXT.test(asText(targetOrder.orderStatus))) await collectLogistics(platformOrderId, parcels);
     const hasDate = targetOrder.orderDateSource === 'platform' && targetOrder.orderDate > 0;

@@ -67,7 +67,9 @@ function pickupData(input = {}, old = {}, events = [], rules, now = Date.now()) 
   // Legacy cache timestamps and station names carry no provenance on their own.
   return result;
 }
+const genericCarrier = value => /^(?:快递|物流|快递公司|物流公司|其他|其它|其他快递|其它快递|未知|未知快递|未知物流|UNKNOWN|OTHER|EXPRESS)$/iu.test(String(value || '').normalize('NFKC').trim());
 const carrierKey = value => {
+  if (genericCarrier(value)) return '';
   const name = String(value || '').normalize('NFKC').toUpperCase().replace(/[\s._-]+/gu, '');
   for (const [pattern, key] of [[/中通|^ZTO(?:EXPRESS)?$/, 'ZTO'], [/圆通|^YTO(?:EXPRESS)?$/, 'YTO'],
     [/申通|^STO(?:EXPRESS)?$/, 'STO'], [/顺丰|^SF(?:EXPRESS)?$/, 'SF'], [/韵达|^YUNDA(?:EXPRESS)?$/, 'YUNDA'],
@@ -178,13 +180,18 @@ export class Store {
       : this.db.prepare('SELECT data FROM shipments').all()).map(parse).filter(shipment => this.shipmentAlias(shipment.id).id === shipment.id);
     const accounts = new Map(this.accounts().map(account => [account.id, account]));
     const knownCarriers = new Set(['ZTO', 'YTO', 'STO', 'SF', 'YUNDA', 'JTSD', 'YZPY', 'EMS', 'JD', 'HTKY']);
-    const groups = new Map();
+    const waybillGroups = new Map(), groups = [];
     for (const shipment of rows) {
       const carrier = carrierKey(shipment.carrier), waybill = waybillKey(shipment.waybillNo), account = accounts.get(shipment.accountId);
-      if (!account || !shipment.orderId || !knownCarriers.has(carrier) || !waybill) continue;
-      const key = JSON.stringify([shipment.accountId, account.platform, shipment.orderId, carrier, waybill]);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(shipment);
+      if (!account || !shipment.orderId || carrier && !knownCarriers.has(carrier) || !waybill) continue;
+      const key = JSON.stringify([shipment.accountId, account.platform, shipment.orderId, waybill]);
+      if (!waybillGroups.has(key)) waybillGroups.set(key, []);
+      waybillGroups.get(key).push(shipment);
+    }
+    for (const members of waybillGroups.values()) {
+      const carriers = new Set(members.map(shipment => carrierKey(shipment.carrier)).filter(Boolean));
+      if (carriers.size === 1) groups.push(members);
+      else for (const carrier of carriers) groups.push(members.filter(shipment => carrierKey(shipment.carrier) === carrier));
     }
     const identifiers = this.db.prepare('SELECT shipment_id,platform_package_key FROM shipment_identifiers').all();
     const operated = new Set(this.db.prepare('SELECT data FROM operations').all().map(parse).map(operation => operation.shipmentId).filter(Boolean));
@@ -193,7 +200,7 @@ export class Store {
     const observedAt = shipment => Math.max(validTime(shipment.logisticsCheckedAt), ...(shipment.logisticsEvents || [])
       .map(event => validTime(event.time)).filter(at => at <= this.now()), 0);
     let changed = 0;
-    for (const members of groups.values()) {
+    for (const members of groups) {
       if (members.length < 2) continue;
       // Only repair unused legacy duplicates. Explicit decisions, distinct platform boxes,
       // a later delivery cycle or conflicting pickup locations require a separate review.
@@ -213,7 +220,7 @@ export class Store {
       for (const old of sorted.slice(1)) {
         this.db.prepare(`INSERT INTO shipment_aliases(old_shipment_id,target_shipment_id,account_id,platform,reason,evidence,created_at,source_cycle_id,target_cycle_id) VALUES(?,?,?,?,?,?,?,?,?)`)
           .run(old.id, target.id, target.accountId, account.platform, 'normalized_legacy_identity',
-            'Same account, order, known carrier and normalized waybill; no conflicting package or manual decision', this.now(), old.pickupCycle.id, target.pickupCycle.id);
+            'Same account, order and normalized waybill with one specific carrier; no conflicting package or manual decision', this.now(), old.pickupCycle.id, target.pickupCycle.id);
         changed++;
       }
     }
@@ -296,6 +303,31 @@ export class Store {
         const status = eventStatus(events[0].description, fallback, rules);
         if (status === old.status && Object.keys(pickup).every(key => pickup[key] === old[key])) continue;
         const updated = this.pickupCompletion.project({ ...old, ...pickup, status, updatedAt: this.now() });
+        this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
+        changed++;
+      }
+      if (changed) this.revision();
+      this.db.exec(`RELEASE ${savepoint}`);
+      return { changed };
+    } catch (error) { this.db.exec(`ROLLBACK TO ${savepoint}`); this.db.exec(`RELEASE ${savepoint}`); throw error; }
+  }
+  refreshStationRecognition(catalog) {
+    const logistics = globalThis.PickCodeLogistics, rules = this.getLogisticsRules?.();
+    const savepoint = `station_projection_${this.projectionSequence = (this.projectionSequence || 0) + 1}`;
+    this.db.exec(`SAVEPOINT ${savepoint}`);
+    try {
+      let changed = 0;
+      const orders = new Map(this.db.prepare('SELECT data FROM orders').all().map(parse).map(order => [order.id, order]));
+      for (const row of this.db.prepare('SELECT data FROM shipments').all()) {
+        const old = parse(row), order = orders.get(old.orderId), account = this.account(old.accountId);
+        if (!account?.enabled || this.shipmentAlias(old.id).id !== old.id || !order || orderRetention(order, this.now()).archived || order.hidden || order.deleted
+          || old.picked || old.pickupCompletion?.autoPicked || effectivePicked(pickupCompletionState(old)) || old.hidden || old.deleted
+          || !old.logisticsEvents?.length || logistics.catalogStation(old.station, catalog).id) continue;
+        const evidence = logistics.catalogPickupEvidence(old.logisticsEvents, catalog, rules);
+        if (!evidence.arrivalAt || evidence.arrivalAt > this.now() || !evidence.station) continue;
+        const trustedArrival = validTime(old.arrivalAt) && ['platform_event', 'locker_arrival'].includes(old.arrivalAtSource);
+        const updated = { ...old, ...evidence, status: 'arrived', updatedAt: this.now() };
+        if (trustedArrival) for (const key of ['arrivalAt', 'arrivalAtSource', 'arrivalAtPrecision']) updated[key] = old[key];
         this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
         changed++;
       }
@@ -523,17 +555,30 @@ export class Store {
           identityWarnings.push('多个包裹候选使用相同平台包裹键，未自动新增包裹，请核对');
           continue;
         }
-        const sameWaybill = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse)
+        const observedWaybill = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse)
           .filter(s => s.orderId === orderId && waybillKey(s.waybillNo) === waybill);
+        const observedIds = new Set(observedWaybill.map(s => this.shipmentAlias(s.id).id));
+        const packageIdentifiers = this.db.prepare('SELECT shipment_id,platform_package_key FROM shipment_identifiers WHERE account_id=? AND order_id=? AND platform_package_key<>?')
+          .all(accountId, orderId, '').map(row => ({ id: this.shipmentAlias(row.shipment_id).id, key: row.platform_package_key })).filter(row => observedIds.has(row.id));
+        if (!packageKey && observedIds.size > 1 && new Set(packageIdentifiers.map(row => row.key)).size > 1) {
+          identityWarnings.push('同号运单属于多个平台分包，本次缺少包裹键，未自动更新包裹');
+          continue;
+        }
+        const sameWaybill = observedWaybill.filter(s => {
+          if (!packageKey || indexed.length) return true;
+          const keys = packageIdentifiers.filter(row => row.id === this.shipmentAlias(s.id).id).map(row => row.key);
+          return !keys.length || keys.includes(packageKey);
+        });
         // Prefer one exact carrier or one previously unknown carrier. Multiple candidates are
         // ambiguous: do not manufacture another shipment while trying to resolve the identity.
         const exact = carrier ? sameWaybill.filter(s => s.carrier && carrierKey(s.carrier) === carrier) : [];
-        const unknown = sameWaybill.filter(s => !s.carrier);
-        if (!indexed.length && !carrier && !unknown.length && sameWaybill.length) {
+        const unknown = sameWaybill.filter(s => !carrierKey(s.carrier));
+        const genericCandidate = genericCarrier(input.carrier) && new Set(sameWaybill.map(s => this.shipmentAlias(s.id).id)).size === 1;
+        if (!indexed.length && !carrier && !unknown.length && sameWaybill.length && !genericCandidate) {
           identityWarnings.push('承运商未知且已有其他承运商同号包裹，未自动新增包裹，请核对');
           continue;
         }
-        const previous = indexed.length === 1 ? [{ id: this.shipmentAlias(indexed[0]).id }] : carrier ? (exact.length ? exact : unknown) : unknown;
+        const previous = indexed.length === 1 ? [{ id: this.shipmentAlias(indexed[0]).id }] : carrier ? (exact.length ? exact : unknown) : genericCandidate ? sameWaybill : unknown;
         const canonicalIds = [...new Set(previous.map(candidate => this.shipmentAlias(candidate.id).id))];
         const sameWaybillIds = new Set(sameWaybill.map(candidate => this.shipmentAlias(candidate.id).id));
         if (canonicalIds.length > 1 || (sameWaybillIds.size > 1 && !canonicalIds.length)) {
@@ -546,7 +591,8 @@ export class Store {
           identityWarnings.push('包裹历史别名解析后存在多个或越权候选，未自动新增包裹，请核对');
           continue;
         }
-        const id = canonicalIds.length === 1 ? canonicalIds[0] : stableId(accountId, account.platform, orderId, carrier, waybill);
+        const id = canonicalIds.length === 1 ? canonicalIds[0] : packageKey && observedWaybill.length && !sameWaybill.length
+          ? stableId(accountId, account.platform, orderId, carrier, waybill, 'package', packageKey) : stableId(accountId, account.platform, orderId, carrier, waybill);
         const old = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id));
         const inputCheckedAt = validTime(input.logisticsCheckedAt), oldCheckedAt = validTime(old?.logisticsCheckedAt);
         const trustedEvent = Array.isArray(input.logisticsEvents) && input.logisticsEvents.some(event => validTime(event?.time) > oldCheckedAt);
@@ -560,7 +606,7 @@ export class Store {
           : pickupCycleData(id, input, old || {}, logistics.logisticsEvents, this.now());
         const { cycleChanged, ...cycle } = cycleState;
         let shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
-          familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: old?.waybillNo || String(input.waybillNo), carrier: input.carrier || old?.carrier || '', status: staleLogistics ? old.status : status,
+          familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: old?.waybillNo || String(input.waybillNo), carrier: carrier ? input.carrier : old?.carrier || input.carrier || '', status: staleLogistics ? old.status : status,
           pickupCode: staleLogistics ? old.pickupCode || '' : input.pickupCode || (!pickup.arrivalAt && (old?.arrivalAt || logistics.logisticsEvents.some(event => pickupCycleReset(event.description) && (!event.time || event.time <= this.now()))) ? '' : old?.pickupCode) || '', ...pickup,
           updatedAt: input.updatedAt || this.now(), picked: cycleChanged ? false : old?.picked || false, hidden: old?.hidden || false,
           deleted: old?.deleted || false, manualAt: old?.manualAt || 0,

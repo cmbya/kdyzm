@@ -44,7 +44,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const getLogisticsRules = () => logisticsRules.read().rules;
   const store = new Store({ filename, key: configuration.key, now, getLogisticsRules });
   logisticsRules = new LogisticsRuleStore(store.db, now, { onRulesChanged: rules => store.refreshLogisticsRules(rules) });
-  const stations = new StationStore({ db: store.db, key: configuration.key, now });
+  const stations = new StationStore({ db: store.db, key: configuration.key, now, onRulesChanged: catalog => store.refreshStationRecognition(catalog) });
   const matchingFeedback = new MatchingFeedbackStore({ store, stations, now });
   const stationAi = new StationAiJobs({ stations, now, automaticEvents: scheduler, ...(aiRequest ? { request: aiRequest } : {}) });
   const aiAssistance = new AiAssistance({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
@@ -52,6 +52,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const pickupCompletion = store.pickupCompletion;
   const pickupCompletionAi = new PickupCompletionAi({ store, completionStore: pickupCompletion, stations, assistance: aiAssistance, now, automaticEvents: scheduler });
   const enrichCandidates = accountIds => {
+    store.refreshStationRecognition(stations.stationRules().stations);
     const snapshot = store.snapshot(accountIds);
     enqueuePlatformCandidates(stations, snapshot, now());
     logisticsAi.intake(snapshot);
@@ -378,6 +379,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       if (path === '/v1/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts(current.accountIds), familyIds: current.familyIds, legacyAccountIds: current.legacyAccountIds, families: store.families(current.familyIds) }); return; }
       if (path === '/v1/accounts/sync' && req.method === 'POST') {
         onlyKeys(await bodyOf(req), []);
+        store.refreshStationRecognition(stations.stationRules().stations);
         send(res, 202, { accepted: true, jobs: device(req).accountIds.map(id => jobs.request(id).job) }); return;
       }
       const syncPath = path.match(/^\/v1\/accounts\/([^/]+)\/sync$/);
