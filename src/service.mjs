@@ -14,6 +14,7 @@ import { AiAssistance } from './ai-assistance.mjs';
 import { LogisticsAiJobs } from './logistics-ai.mjs';
 import { PickupCompletionAi } from './pickup-completion-ai.mjs';
 import { serverVersion } from './version.mjs';
+import { orderRetention } from './order-retention.mjs';
 import { createAppUpdateHandler } from './app-updates.mjs';
 import { createCookieSyncHandler } from './cookie-sync.mjs';
 import { fail, hash, HttpError, onlyKeys, publicUrl, RateLimiter } from './security.mjs';
@@ -51,9 +52,10 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const logisticsAi = new LogisticsAiJobs({ stations, rules: logisticsRules, store, assistance: aiAssistance, now, automaticEvents: scheduler });
   const pickupCompletion = store.pickupCompletion;
   const pickupCompletionAi = new PickupCompletionAi({ store, completionStore: pickupCompletion, stations, assistance: aiAssistance, now, automaticEvents: scheduler });
-  const enrichCandidates = accountIds => {
-    store.refreshStationRecognition(stations.stationRules().stations);
-    const snapshot = store.snapshot(accountIds);
+  const enrichCandidates = (accountIds, shipmentIds) => {
+    store.refreshStationRecognition(stations.stationRules().stations, shipmentIds);
+    const snapshot = shipmentIds ? { shipments: shipmentIds.map(id => store.shipment(id)).filter(shipment => shipment
+      && !orderRetention(store.order(shipment.orderId), now()).archived) } : store.snapshot(accountIds);
     enqueuePlatformCandidates(stations, snapshot, now());
     logisticsAi.intake(snapshot);
     pickupCompletionAi.intake(snapshot);
@@ -64,7 +66,9 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
   pickupCompletionAi.intake(store.snapshot(store.accounts().filter(account => account.enabled).map(account => account.id)));
   const rate = new RateLimiter(now);
-  const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now, onImported: accountId => enrichCandidates([accountId]) });
+  const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now,
+    onImported: (accountId, shipmentIds) => enrichCandidates([accountId], shipmentIds),
+    onCompleted: () => store.refreshStationRecognition(stations.stationRules().stations) });
   const running = jobs.running;
   const allowed = (device, id) => { if (!device.accountIds.includes(id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); };
   const admin = req => {

@@ -386,17 +386,30 @@ function jobOutcome(snapshot) {
 }
 async function waitForOnline(snapshot, onProgress) {
   const deadline = Date.now() + 25000;
+  const jobIds = new Set((snapshot.online?.jobs || []).filter(job => ['queued', 'running'].includes(job.state)).map(job => job.id));
   let outcome = jobOutcome(snapshot);
   let firstPoll = true;
   while (outcome.pending && !outcome.blocked && Date.now() < deadline) {
     const cooling = snapshot.online.jobs.some(job => job.state === 'queued' && job.retryAt > Date.now());
-    onProgress?.({ label: cooling ? '已排队，冷却结束后将自动获取订单…' : '后台正在获取订单与物流…' });
+    const jobs = snapshot.online.jobs.filter(job => ['queued', 'running'].includes(job.state));
+    const progress = logisticsProgressText(snapshot.online.jobs.filter(job => jobIds.has(job.id)));
+    const retrying = jobs.some(job => job.throttled === true || job.continuation === true && job.state === 'queued');
+    onProgress?.({ label: progress ? `${progress}${retrying ? '，等待自动继续…' : '…'}` : cooling ? '已排队，冷却结束后将自动获取订单…' : '后台正在获取订单与物流…' });
     await delay(firstPoll && !cooling ? 300 : 1500);
     firstPoll = false;
     snapshot = await syncOnline(false);
     outcome = jobOutcome(snapshot);
   }
-  return { snapshot, onlineError: outcome.error, onlineNotice: outcome.notice, pending: outcome.pending };
+  const pendingJobs = (snapshot.online?.jobs || []).filter(job => ['queued', 'running'].includes(job.state));
+  const continuing = pendingJobs.some(job => job.continuation === true) || !!logisticsProgressText(pendingJobs);
+  const pendingNotice = outcome.pending ? continuing ? [logisticsProgressText((snapshot.online?.jobs || []).filter(job => jobIds.has(job.id))), '后台会自动继续查询，稍后刷新查看结果'].filter(Boolean).join('，') : '后台仍在处理中，稍后刷新查看' : '';
+  return { snapshot, onlineError: outcome.error, onlineNotice: outcome.notice, pending: outcome.pending, pendingNotice };
+}
+function logisticsProgressText(jobs) {
+  const progress = jobs.map(job => job.logisticsProgress).filter(value => value && Number.isFinite(value.total) && value.total > 0 && value.total <= 100000 && Number.isFinite(value.completed) && value.completed >= 0 && value.completed <= value.total);
+  if (!progress.length) return '';
+  const total = progress.reduce((sum, value) => sum + Math.floor(value.total), 0), completed = progress.reduce((sum, value) => sum + Math.floor(value.completed), 0);
+  return `物流查询任务 ${completed}/${total}`;
 }
 export function refreshOnline(onProgress) {
   if (onlineRefreshInFlight) return onlineRefreshInFlight;
@@ -410,7 +423,7 @@ export function refreshAll(onProgress) {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = (async () => {
     await ready();
-    let smsError = '', onlineError = '', onlineNotice = '', pending = false;
+    let smsError = '', onlineError = '', onlineNotice = '', pending = false, pendingNotice = '';
     const scan = async () => {
       try {
         onProgress?.({ label: '正在匹配短信并刷新订单…' });
@@ -425,11 +438,11 @@ export function refreshAll(onProgress) {
       try {
         if (!(await getSnapshot()).online?.bound) return;
         const result = await refreshOnline(onProgress);
-        onlineError = result.onlineError; onlineNotice = result.onlineNotice; pending = result.pending;
+        onlineError = result.onlineError; onlineNotice = result.onlineNotice; pending = result.pending; pendingNotice = result.pendingNotice;
       } catch (error) { onlineError = error.message || '订单刷新失败，已保留本地记录'; }
     };
     await Promise.all([scan(), online()]);
-    return { snapshot: changed(await request('refreshStations')), smsError, onlineError, onlineNotice, pending };
+    return { snapshot: changed(await request('refreshStations')), smsError, onlineError, onlineNotice, pending, pendingNotice };
   })().finally(() => { refreshInFlight = undefined; });
   return refreshInFlight;
 }

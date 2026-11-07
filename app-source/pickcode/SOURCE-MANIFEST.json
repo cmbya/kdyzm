@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.35",
+  "version": "3.1.36",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "fad9ca781a028da1b277319ab4c9a95cf82b882fe6d39894ee3d83c084f799c6"
+      "sha256": "f471b0db193539fff7876dea53eced0ab915d177387a57f179faa41bdb69b8c7"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -156,8 +156,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
-      "size": 72996,
-      "sha256": "c12098bfacb5bcdb655ae0d141247ad165316b96da15c556864714716c7866d9"
+      "size": 74144,
+      "sha256": "c89aa6f1efa9cac36a37e44e529a9273288a1e82095371a0e42f8abe3066b275"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
@@ -516,8 +516,8 @@
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 153089,
-      "sha256": "af5be4c6d2ba651a4e20c97523314b08097f5430be61285a9ecabbd3af67cb34"
+      "size": 153858,
+      "sha256": "2045db2881a1f24d2146edefbb4eee1caf5dd1a037d96b628e51851dc070b93a"
     },
     {
       "path": "index.html",
@@ -537,17 +537,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "a9bacaca263b6ef15951102c928aca3fd7f7ee2299afb0657b4684c5c6c99e50"
+      "sha256": "a1632fd293fe37e84646efa2dab44e89e0b0690b2e2dbbdba6d4676477f440aa"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "ab7ed6cc5b301623cce10120bbfee942ffcb53ef02a56b38a3c5ba5801aa47d3"
+      "sha256": "5ceaf3b8cf676ce4d1429d1693df869537ca555a996e5bc3144ab82a8b70ca81"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "b05591b4bd2f8da1919b7bacd8c049667461a0733906e43508f422e028068d12"
+      "sha256": "0f441da5d3555c22f816eec35219b27979eda0804382c76c99997cec1052170c"
     },
     {
       "path": "pages.json",
@@ -561,8 +561,8 @@
     },
     {
       "path": "pages/index/index.vue",
-      "size": 65041,
-      "sha256": "4b1285b399e7aa7642190708b91420c23b57a8905f0f5ab08ee3c7be5194dd04"
+      "size": 65098,
+      "sha256": "346af4fd9fa8882a149f40dda8856e85736404b33953e0a98213b8ef34205344"
     },
     {
       "path": "pages/my/about.vue",
@@ -576,8 +576,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 35972,
-      "sha256": "85f71afb718397340be26cb6addace8e90c319127408fe4b5fe06d260fa30328"
+      "size": 36690,
+      "sha256": "ff20156f0f88ec49ac3643e4fb9c01541bf0e5740e3c29f0cec8594098bbe004"
     },
     {
       "path": "pages/my/faq.vue",
@@ -611,8 +611,8 @@
     },
     {
       "path": "pages/my/online-accounts.vue",
-      "size": 14438,
-      "sha256": "9883171b877b0f679f1e36f159db1451965f169ea3ffce1104c1ce93dffd1034"
+      "size": 14781,
+      "sha256": "c9aaa6e9a534508ddcbd3aa0f5e80ab5d234e6cfb78011148feacf99dd60e4bd"
     },
     {
       "path": "pages/packages/edit.vue",
@@ -621,8 +621,8 @@
     },
     {
       "path": "pages/packages/index.vue",
-      "size": 69869,
-      "sha256": "f4148b73edc1f35191309b9d90eb7ceabe042c7d3265b22b2654811967eebf9a"
+      "size": 70323,
+      "sha256": "86a29ff4af54a77eff4f2784f71ee08bdede606a09ed7aa4a304f836d4e361e6"
     },
     {
       "path": "scripts/ai-context.mjs",
@@ -696,8 +696,8 @@
     },
     {
       "path": "services/assistant.js",
-      "size": 29743,
-      "sha256": "511a97839c2bfe36f9dd3725d9ae9b2b8f0ac1ee6b9d67814820e272d25b66b7"
+      "size": 31419,
+      "sha256": "794ee3359d4e8b785e6cc599015ce10b50e5c49abb96dee30715eae163f3d923"
     },
     {
       "path": "services/item-patch.js",
@@ -2509,7 +2509,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "d98e56a64cf228357bc0476d24a8cef6ed505706edd6c7c538ac27bd14744923"
+      "sha256": "46ad915a7b633d9f68c6ce7a4fab7bc3c12fe7f59805e41c3a1a4e672968e647"
     },
     {
       "path": ".gitignore",

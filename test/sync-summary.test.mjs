@@ -39,7 +39,7 @@ test('latest failed and successful scope summaries survive database restart; int
   assert.equal(waiting.job.state, 'queued');
   assert.ok(waiting.job.createdAt > complete.updatedAt, 'a same-millisecond request must supersede the previous terminal summary');
   await jobs.close();
-  const interrupted = { ...waiting.job, state: 'running', error: '', finishedAt: 0 };
+  const interrupted = { ...waiting.job, resumeVersion: undefined, state: 'running', error: '', finishedAt: 0 };
   store.db.prepare('UPDATE sync_job_summaries SET active=1,data=?').run(JSON.stringify(interrupted));
   store.updateAccount(account.id, { status: 'syncing' });
   store.close(); now += 1000; open();

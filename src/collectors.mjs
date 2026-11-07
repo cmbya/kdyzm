@@ -2,6 +2,7 @@
 // Copyright (c) 2026. Non-commercial license: ../licenses/Pickup-Code-Display-LICENSE.txt.
 // This adapter intentionally does not inherit upstream's automatic "picked" transitions.
 import { createHash } from 'node:crypto';
+import { discoverPddSplit, fetchPddSplitTrack } from './pdd-split.mjs';
 import { activeKnownOrders, activeKnownParcels, eventStatus, homeDeliveryCompleted, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDate, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
 
 const APPKEY = '12574478';
@@ -37,6 +38,13 @@ export async function platformRequest(url, cookie, { fetchImpl = fetch, method =
     if (response.status === 401) expired();
     throw new CollectorError('UPSTREAM_BLOCKED', '平台拒绝访问或触发风控，请稍后重试');
   }
+  if (response.status === 429) {
+    const error = new CollectorError('UPSTREAM_RATE_LIMITED', '平台请求频率受限，请稍后重试');
+    const retryAfter = response.headers.get('retry-after');
+    const delay = /^\d+(?:\.\d+)?$/.test(retryAfter || '') ? Number(retryAfter) * 1000 : Date.parse(retryAfter || '') - Date.now();
+    if (Number.isFinite(delay) && delay > 0) error.retryAfterMs = Math.min(delay, 15 * 60 * 1000);
+    throw error;
+  }
   if (!response.ok) upstream();
   const limit = 5 * 1024 * 1024;
   if (Number(response.headers.get('content-length')) > limit) upstream();
@@ -45,19 +53,26 @@ export async function platformRequest(url, cookie, { fetchImpl = fetch, method =
   for await (const chunk of response.body) { size += chunk.length; if (size > limit) { upstream(); } chunks.push(chunk); }
   return { text: new TextDecoder(encoding).decode(Buffer.concat(chunks)), headers: response.headers };
 }
-async function parallelLogistics(items, collect) {
+async function parallelLogistics(items, collect, { concurrency = 2, onResult } = {}) {
   const results = [];
   let next = 0, failure;
   // Stop dispatching on expiry, but drain the in-flight peer before returning the error.
-  await Promise.all(Array.from({ length: Math.min(2, items.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
     while (!failure && next < items.length) {
       const index = next++;
-      try { results[index] = await collect(items[index]); }
+      try {
+        results[index] = await collect(items[index]);
+        await onResult?.(results[index], items[index], index);
+      }
       catch (error) { failure ||= error; }
     }
   }));
   if (failure) throw failure;
   return results;
+}
+function mustStopLogistics(error, durable) {
+  return ['ACCOUNT_EXPIRED', 'UPSTREAM_BLOCKED', 'UPSTREAM_RATE_LIMITED'].includes(error.code)
+    || durable && (error.code === 'UPSTREAM_ERROR' || ['TimeoutError', 'AbortError', 'TypeError'].includes(error.name));
 }
 function json(text) {
   try { return JSON.parse(text); } catch { throw new CollectorError('UPSTREAM_FORMAT', '平台返回结构已变化，保留上次成功数据'); }
@@ -78,7 +93,9 @@ async function mtop(session, data, pc = false, detail = false) {
   const headers = { Origin: 'https://h5.m.taobao.com', Referer: 'https://h5.m.taobao.com/' };
   if (!session.refreshed) {
     const response = await platformRequest(`${base}?appKey=${APPKEY}`, session.cookie, { fetchImpl: session.fetchImpl, headers });
-    session.cookie = withCookies(session.cookie, response.headers);
+    const nextCookie = withCookies(session.cookie, response.headers);
+    if (nextCookie !== session.cookie) session.onCookieRefresh?.(nextCookie);
+    session.cookie = nextCookie;
     session.refreshed = true;
   }
   const token = session.cookie.match(/(?:^|;\s*)_m_h5_tk=([^;]+)/)?.[1].split('_')[0];
@@ -93,7 +110,9 @@ async function mtop(session, data, pc = false, detail = false) {
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
   } else qs.set('data', raw);
   const response = await platformRequest(`${base}?${qs}`, session.cookie, { fetchImpl: session.fetchImpl, headers, method: post ? 'POST' : 'GET', body: post ? `data=${encodeURIComponent(raw)}` : undefined });
-  session.cookie = withCookies(session.cookie, response.headers);
+  const nextCookie = withCookies(session.cookie, response.headers);
+  if (nextCookie !== session.cookie) session.onCookieRefresh?.(nextCookie);
+  session.cookie = nextCookie;
   const content = response.text.trim();
   const parsed = json(content.startsWith('{') ? content : content.slice(content.indexOf('(') + 1, content.lastIndexOf(')')));
   const ret = Array.isArray(parsed.ret) ? parsed.ret.join(' ') : asText(parsed.retCode || parsed.ret);
@@ -217,8 +236,8 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules)
   });
 }
 
-async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds = [], knownOrders = [], targetOrder, rules }) {
-  const session = { cookie, fetchImpl, now };
+async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds = [], knownOrders = [], targetOrder, rules, runLogistics, onProgress, durableLogistics, onCookieRefresh }) {
+  const session = { cookie, fetchImpl, now, onCookieRefresh };
   const orders = [], shipments = [], orderUpdates = [], warnings = [], logisticsFailures = [];
   const seen = new Set();
   const tracked = new Set([...trackedOrderIds, ...knownOrders.map(order => order.platformOrderId)].map(String));
@@ -245,12 +264,14 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       Object.assign(metadata, { dateState: orderDate ? 'ok' : 'empty', dateError: orderDate ? '' : '平台详情未返回有效下单日期' });
       if (orderDate) Object.assign(metadata, { orderDate, orderDateOrigin: 'detail' });
     } catch (error) {
-      if (error.code === 'ACCOUNT_EXPIRED') throw error;
+      if (mustStopLogistics(error, durableLogistics)) { stopped = error; interruption++; throw error; }
       Object.assign(metadata, { dateState: 'error', dateError: error.code === 'UPSTREAM_BLOCKED' ? '平台拒绝日期查询或触发风控，请稍后重试' : '日期查询未完成，已保留原日期' });
       warnings.push('部分下单日期补查暂不可用，未用同步时间替代');
     }
   }
+  let stopped, interruption = 0;
   async function collectLogistics(platformOrderId) {
+    const warnings = [], logisticsFailures = [];
     const checkedAt = now();
     try {
       const result = await platformRequest(`https://pages-g.m.taobao.com/wow/z/app/mtb/logisticsV2/h5-detail?x-ssr=true&bizOrderId=${encodeURIComponent(platformOrderId)}`, session.cookie, { fetchImpl });
@@ -270,15 +291,15 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       }
       if (!parcels.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
       if (parcels.length > 1 && parcels.some(p => p.logisticsState === 'unavailable')) warnings.push('部分拆单运单仅返回单号，等待平台提供各运单物流');
-      return { platformOrderId, parcels };
+      return { platformOrderId, parcels, warnings, logisticsFailures };
     } catch (error) {
-      if (error.code === 'ACCOUNT_EXPIRED') throw error;
+      if (mustStopLogistics(error, durableLogistics)) { stopped = error; interruption++; throw error; }
       // Full PC tracking is independent of SSR availability, including known completed parcels on manual refresh.
       const parcels = knownParcels(platformOrderId).map(parcel => ({ platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
         logisticsEvents: [], logisticsState: 'error', logisticsError: '物流摘要查询失败，已保留原轨迹', logisticsCheckedAt: checkedAt }));
       if (!parcels.length) logisticsFailures.push({ platformOrderId, state: 'error', logisticsCheckedAt: checkedAt });
       warnings.push('部分订单物流读取失败，已保留原运单');
-      return { platformOrderId, parcels };
+      return { platformOrderId, parcels, warnings, logisticsFailures };
     }
   }
   if (targetOrder) {
@@ -295,7 +316,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
         }
       }
     } catch (error) {
-      if (error.code === 'ACCOUNT_EXPIRED') throw error;
+      if (mustStopLogistics(error, durableLogistics)) { stopped = error; interruption++; throw error; }
       warnings.push('订单列表取件码暂不可用，仍保留物流和无码运单');
     }
     for (let page = 1; page <= maxPages; page++) {
@@ -333,16 +354,13 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       if (!newCount) { warnings.push('平台分页重复，停止本轮采集并保留已有记录'); break; }
       if (page === maxPages) warnings.push('已达到分页上限；缺席订单不会标记为已取或删除');
     }
-    for (const order of activeKnownOrders(knownOrders, seen)) logisticsOrders.push(asText(order.platformOrderId));
+    for (const order of activeKnownOrders(knownOrders, seen, knownOrders.length)) logisticsOrders.push(asText(order.platformOrderId));
   }
-  const supplements = await parallelLogistics(logisticsOrders, collectLogistics);
-  const lastLogisticsCheck = id => {
-    const parcels = knownParcels(id);
-    return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsDetailCheckedAt || 0)) : 0;
-  };
-  // SSR can contain only summaries. Query the full PC track even for nonempty SSR,
-  // giving the oldest known attempts priority within a separate 20-order budget.
-  await parallelLogistics([...supplements].sort((a, b) => lastLogisticsCheck(a.platformOrderId) - lastLogisticsCheck(b.platformOrderId)).slice(0, 20), async ({ platformOrderId, parcels }) => {
+  async function collectComplete({ platformOrderId }) {
+    const attempt = interruption;
+    const result = await collectLogistics(platformOrderId);
+    if (attempt !== interruption) throw stopped;
+    const { parcels, warnings, logisticsFailures } = result;
     const checkedAt = now();
     for (const parcel of parcels) Object.assign(parcel, { logisticsCheckedAt: checkedAt, logisticsDetailCheckedAt: checkedAt });
     try {
@@ -379,7 +397,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
         for (let i = logisticsFailures.length - 1; i >= 0; i--) if (logisticsFailures[i].platformOrderId === platformOrderId) logisticsFailures.splice(i, 1);
       }
     } catch (error) {
-      if (error.code === 'ACCOUNT_EXPIRED') throw error;
+      if (mustStopLogistics(error, durableLogistics)) { stopped = error; interruption++; throw error; }
       for (const parcel of parcels) parcel.logisticsError = '完整物流查询失败，当前仅保留已有节点';
       for (const parcel of parcels.filter(item => !item.logisticsEvents.length)) {
         parcel.logisticsState = 'error';
@@ -388,14 +406,31 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       }
       warnings.push('部分物流轨迹补查失败，已保留上次轨迹');
     }
-  });
-  for (const { parcels } of supplements) shipments.push(...parcels);
+    return { shipments: parcels, warnings, logisticsFailures };
+  }
   for (const order of (targetOrder ? [] : knownOrders).filter(item => !seen.has(asText(item.platformOrderId))).sort((a, b) => (a.dateCheckedAt || 0) - (b.dateCheckedAt || 0))) {
     if (dateBudget <= 0) break;
     const metadata = { platformOrderId: asText(order.platformOrderId) };
     await enrichDate(metadata);
     if (metadata.dateCheckedAt) orderUpdates.push(metadata);
   }
+  await onProgress?.({ orders, shipments: [], orderUpdates, logisticsFailures: [], warnings: [...new Set(warnings)] });
+  const lastLogisticsCheck = id => {
+    const parcels = knownParcels(id);
+    return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsDetailCheckedAt || 0)) : 0;
+  };
+  const candidates = [...new Set(logisticsOrders)].map(platformOrderId => ({ platformOrderId }))
+    .sort((a, b) => lastLogisticsCheck(a.platformOrderId) - lastLogisticsCheck(b.platformOrderId));
+  const results = await runLogistics(candidates, collectComplete, {
+    stage: 'taobao-detail', concurrency: 2, key: item => item.platformOrderId,
+    onResult: async result => {
+      warnings.push(...result.warnings); logisticsFailures.push(...result.logisticsFailures);
+      await onProgress?.({ orders: [], orderUpdates: [], ...result });
+    },
+  });
+  const byOrder = new Map(candidates.map((item, index) => [item.platformOrderId, results[index]]));
+  for (const id of new Set(logisticsOrders)) shipments.push(...byOrder.get(id).shipments);
+  for (const item of candidates) if (!logisticsOrders.includes(item.platformOrderId)) shipments.push(...byOrder.get(item.platformOrderId).shipments);
   if (skippedCount) warnings.push(`订单筛选：本轮保留${orders.length}笔，跳过${skippedCount}笔已结束或非待收货订单`);
   return { orders, shipments, orderUpdates, logisticsFailures, warnings: [...new Set(warnings)], refreshedCookie: session.cookie };
 }
@@ -450,61 +485,94 @@ export function pddParcels(order, cabinet, rules) {
       arrivalAtPrecision: arrivalAt ? logisticsTimePrecision(arrivalTime) : 'unknown' };
   });
 }
-async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], targetOrder, rules }) {
+async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], targetOrder, rules, runLogistics, onProgress, durableLogistics }) {
   const uid = cookie.match(/(?:^|;\s*)(?:pdd_user_id|pdduid)=([^;]+)/)?.[1];
   if (!uid) expired();
   const headers = { Referer: 'https://mobile.yangkeduo.com/orders.html' };
   const orders = [], shipments = [], orderUpdates = [], warnings = [], logisticsFailures = [];
   const seen = new Set();
-  let logisticsBudget = 20;
-  async function collectLogistics(platformOrderId, parcels) {
-    if ((!parcels.length && !targetOrder) || logisticsBudget <= 0) return;
-    logisticsBudget--;
+  const splitOptions = platformOrderId => ({ expectedOrderId: platformOrderId, pddCheck,
+    platformRequest: url => platformRequest(url, cookie, { fetchImpl, headers }) });
+  const applyShipping = (parcel, shipping, checkedAt) => {
+    const { events, truncated } = pddShippingEvents(shipping, timestamp);
+    Object.assign(parcel, { logisticsEvents: events, logisticsTruncated: truncated,
+      logisticsState: events.length ? 'ok' : 'empty', logisticsError: events.length ? '' : '平台本次未返回物流轨迹',
+      logisticsCheckedAt: checkedAt, logisticsUpdatedAt: checkedAt });
+    if (events.length) { parcel.status = eventStatus(events[0].description, parcel.status, rules); applyTrackEvidence(parcel, events, rules); }
+  };
+  async function collectLogistics({ platformOrderId, parcels: inputParcels, missingFromList }) {
+    const parcels = structuredClone(inputParcels), logisticsFailures = [], warnings = [], splitParcels = [];
     const checkedAt = now();
     try {
       const query = new URLSearchParams({ query_type: '2', entry_source: '2', ts: String(checkedAt) });
       const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/order/${encodeURIComponent(platformOrderId)}/shipping?${query}`, cookie, { fetchImpl, headers });
       const shipping = pddCheck(json(response.text)).shipping;
       if (!shipping || !Array.isArray(shipping.traces)) throw new CollectorError('UPSTREAM_FORMAT', '拼多多物流轨迹字段已变化');
+      if (shipping.order_sn != null && asText(shipping.order_sn) !== platformOrderId) throw new CollectorError('UPSTREAM_FORMAT', '拼多多物流订单标识不匹配');
       const waybillNo = pddWaybill(shipping.tracking_number || shipping.trackingNumber);
       if (targetOrder && !parcels.length && validPddWaybill(waybillNo)) parcels.push({ platformOrderId, waybillNo: pddWaybill(waybillNo), carrier: '', status: 'unknown' });
       const target = waybillNo ? parcels.find(parcel => parcel.waybillNo === waybillNo) : parcels.length === 1 ? parcels[0] : null;
-      if (!parcels.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
+      const discovered = await discoverPddSplit(shipping, splitOptions(platformOrderId));
+      splitParcels.push(...discovered.parcels.filter(parcel => parcel.waybillNo !== target?.waybillNo)
+        .map(parcel => ({ ...parcel, platformOrderId })));
+      logisticsFailures.push(...discovered.failures.filter(failure => failure.waybillNo).map(failure => ({ platformOrderId, ...failure, logisticsCheckedAt: checkedAt })));
+      if (discovered.failures.some(failure => !failure.waybillNo)) warnings.push('部分分包缺少有效运单标识，已保留其余已验证运单');
+      if (!parcels.length && !splitParcels.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
       for (const parcel of parcels) {
         if (parcel !== target) {
-          logisticsFailures.push({ platformOrderId, waybillNo: parcel.waybillNo, state: 'unavailable', logisticsCheckedAt: checkedAt });
+          if (!splitParcels.some(split => split.waybillNo === parcel.waybillNo)) logisticsFailures.push({ platformOrderId, waybillNo: parcel.waybillNo, state: 'unavailable', logisticsCheckedAt: checkedAt });
           continue;
         }
         if (waybillNo === parcel.waybillNo) parcel.carrier = asText(shipping.shipping_name || shipping.shippingName) || parcel.carrier;
-        const { events, truncated } = pddShippingEvents(shipping, timestamp);
-        parcel.logisticsEvents = events;
-        parcel.logisticsTruncated = truncated;
-        parcel.logisticsState = events.length ? 'ok' : 'empty';
-        parcel.logisticsError = events.length ? '' : '平台本次未返回物流轨迹';
-        parcel.logisticsCheckedAt = checkedAt;
-        parcel.logisticsUpdatedAt = checkedAt;
-        if (events.length) {
-          parcel.status = eventStatus(events[0].description, parcel.status, rules);
-          applyTrackEvidence(parcel, events, rules);
-        }
+        applyShipping(parcel, shipping, checkedAt);
       }
     } catch (error) {
-      if (error.code === 'ACCOUNT_EXPIRED') throw error;
+      if (mustStopLogistics(error, durableLogistics)) throw error;
       if (!parcels.length) logisticsFailures.push({ platformOrderId, state: 'error', logisticsCheckedAt: checkedAt });
       for (const parcel of parcels) logisticsFailures.push({ platformOrderId, waybillNo: parcel.waybillNo, state: 'error', logisticsCheckedAt: checkedAt });
       warnings.push('部分物流轨迹读取失败，已保留上次轨迹');
     }
+    return { shipments: missingFromList ? parcels.filter(parcel => parcel.logisticsState) : parcels, logisticsFailures, warnings, splitParcels };
+  }
+  const applyResult = async result => {
+    logisticsFailures.push(...result.logisticsFailures); warnings.push(...result.warnings);
+    const { splitParcels, ...delta } = result;
+    await onProgress?.({ orders: [], orderUpdates: [], ...delta });
+  };
+  async function collectSplits(results) {
+    const candidates = [...new Map(results.flatMap(result => result.splitParcels || []).map(parcel => [`${parcel.platformOrderId}:${parcel.waybillNo}`, parcel])).values()];
+    const splitResults = await runLogistics(candidates, async candidate => {
+      const checkedAt = now(), platformOrderId = candidate.platformOrderId;
+      const result = { shipments: [], logisticsFailures: [], warnings: [] };
+      try {
+        const detail = await fetchPddSplitTrack(candidate, { ...splitOptions(platformOrderId), queryType: 2 });
+        if (detail.failure) result.logisticsFailures.push({ platformOrderId, ...detail.failure, logisticsCheckedAt: checkedAt });
+        else {
+          const parcel = { platformOrderId, waybillNo: candidate.waybillNo, carrier: candidate.carrier, status: 'unknown' };
+          applyShipping(parcel, detail.shipping, checkedAt); result.shipments.push(parcel);
+        }
+      } catch (error) {
+        if (mustStopLogistics(error, durableLogistics)) throw error;
+        result.logisticsFailures.push({ platformOrderId, waybillNo: candidate.waybillNo, state: 'error', logisticsCheckedAt: checkedAt });
+      }
+      return result;
+    }, { stage: 'pdd-split-track', concurrency: 2, key: item => `${item.platformOrderId}:${item.waybillNo}`, onResult: applyResult });
+    return splitResults.flatMap(result => result.shipments);
   }
   if (targetOrder) {
     const platformOrderId = asText(targetOrder.platformOrderId);
     const parcels = (targetOrder.shipments || []).filter(parcel => validPddWaybill(parcel.waybillNo)).map(parcel => ({
       platformOrderId, waybillNo: pddWaybill(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
     }));
-    if (parcels.length || !TO_SHIP_STATUS_TEXT.test(asText(targetOrder.orderStatus))) await collectLogistics(platformOrderId, parcels);
     const hasDate = targetOrder.orderDateSource === 'platform' && targetOrder.orderDate > 0;
     const metadata = { platformOrderId, dateCheckedAt: now(), dateState: 'unavailable',
       dateError: hasDate ? '拼多多暂不支持单单日期详情查询，已保留平台列表日期' : '拼多多暂未提供可验证的单单日期查询，日期仍待确认' };
-    return { orders: [], orderUpdates: [metadata], shipments: parcels, logisticsFailures, warnings };
+    await onProgress?.({ orders: [], orderUpdates: [metadata], shipments: [], logisticsFailures: [], warnings: [] });
+    const results = parcels.length || !TO_SHIP_STATUS_TEXT.test(asText(targetOrder.orderStatus))
+      ? await runLogistics([{ platformOrderId, parcels }], collectLogistics, { stage: 'pdd-logistics', concurrency: 2, key: item => item.platformOrderId, onResult: applyResult }) : [];
+    const splits = await collectSplits(results);
+    const combined = new Map([...(results[0]?.shipments || parcels), ...splits].map(parcel => [parcel.waybillNo, parcel]));
+    return { orders: [], orderUpdates: [metadata], shipments: [...combined.values()], logisticsFailures, warnings };
   }
   const listedOrders = new Map();
   for (const type of ['unshipping', 'unreceived']) {
@@ -545,16 +613,22 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     }
   }
   let skippedCount = 0;
-  const parcelGroups = await parallelLogistics([...listedOrders], async ([platformOrderId, { order, kind, orderStatus, parcels }]) => {
+  const listed = [];
+  for (const [platformOrderId, { order, kind, orderStatus, parcels }] of listedOrders) {
     const metadata = { platformOrderId, title: (order.order_goods || []).map(g => g.goods_name || g.goods_title || '').filter(Boolean).join(' / '),
       amount: Number.isFinite(order.order_amount) ? order.order_amount / 100 : null, orderDate: timestamp(order.order_time || order.created_time || order.create_time),
       ...(timestamp(order.order_time || order.created_time || order.create_time) ? { orderDateOrigin: 'list' } : {}),
       orderStatus, refundStatus: asText(order.refund_status) };
     if (kind === 'skip') {
       skippedCount++; orderUpdates.push(metadata); seen.delete(platformOrderId);
-      return [];
+      continue;
     }
     orders.push(metadata);
+    listed.push({ platformOrderId, orderStatus, parcels });
+  }
+  await onProgress?.({ orders, shipments: [], orderUpdates, logisticsFailures: [], warnings: [...new Set(warnings)] });
+  const enrichCabinet = async ({ platformOrderId, orderStatus, parcels: inputParcels }) => {
+    const parcels = structuredClone(inputParcels), warnings = [];
     if (parcels.length) {
       try {
         const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/api/express/cabinet/${encodeURIComponent(platformOrderId)}`, cookie, { fetchImpl, headers });
@@ -564,7 +638,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
             shipping_status_text: parcel.status === 'signed' ? '已签收' : parcel.status === 'arrived' ? '待取件' : '' })) }, cabinet, rules);
         for (let i = 0; i < parcels.length; i++) Object.assign(parcels[i], enriched[i]);
       } catch (error) {
-        if (error.code === 'ACCOUNT_EXPIRED') throw error;
+        if (mustStopLogistics(error, durableLogistics)) throw error;
         warnings.push('部分驿站取件码暂不可用，无码运单继续保留');
       }
     }
@@ -572,11 +646,14 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
       if (parcels.some(item => item.waybillNo === asText(parcel.waybillNo))) continue;
       parcels.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
     }
-    return parcels;
-  });
-  for (const parcels of parcelGroups) shipments.push(...parcels);
-  const candidates = orders.map(order => ({ platformOrderId: order.platformOrderId, parcels: shipments.filter(parcel => parcel.platformOrderId === order.platformOrderId) }));
-  for (const order of activeKnownOrders(knownOrders, seen, logisticsBudget)) {
+    return { shipments: parcels, logisticsFailures: [], warnings };
+  };
+  const candidates = listed.map(item => ({ ...item, parcels: [...item.parcels] }));
+  for (const candidate of candidates) for (const parcel of activeKnownParcels(knownOrders.find(order => asText(order.platformOrderId) === candidate.platformOrderId))) {
+    if (!candidate.parcels.some(item => item.waybillNo === asText(parcel.waybillNo))) candidate.parcels.push({
+      platformOrderId: candidate.platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
+  }
+  for (const order of activeKnownOrders(knownOrders, seen, knownOrders.length)) {
     const platformOrderId = asText(order.platformOrderId);
     const parcels = activeKnownParcels(order).map(parcel => ({
       platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
@@ -587,11 +664,27 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     const parcels = activeKnownParcels(knownOrders.find(order => asText(order.platformOrderId) === id));
     return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsCheckedAt || 0)) : 0;
   };
-  candidates.sort((a, b) => lastChecked(a.platformOrderId) - lastChecked(b.platformOrderId));
-  const selected = candidates.filter(candidate => candidate.parcels.length).slice(0, logisticsBudget);
-  await parallelLogistics(selected, candidate => collectLogistics(candidate.platformOrderId, candidate.parcels));
-  for (const candidate of selected) {
-    if (candidate.missingFromList) shipments.push(...candidate.parcels.filter(parcel => parcel.logisticsState));
+  const selected = candidates.filter(candidate => candidate.parcels.length)
+    .sort((a, b) => lastChecked(a.platformOrderId) - lastChecked(b.platformOrderId));
+  let interrupted = 0, interruption;
+  const results = await runLogistics(selected, async candidate => {
+    const generation = interrupted;
+    try {
+      const cabinet = candidate.missingFromList ? { shipments: candidate.parcels, warnings: [] } : await enrichCabinet(candidate);
+      if (generation !== interrupted) throw interruption;
+      const result = await collectLogistics({ ...candidate, parcels: cabinet.shipments });
+      result.warnings.push(...cabinet.warnings);
+      return result;
+    } catch (error) { if (mustStopLogistics(error, durableLogistics)) { interrupted++; interruption = error; } throw error; }
+  }, {
+    stage: 'pdd-logistics', concurrency: 2, key: item => item.platformOrderId, onResult: applyResult,
+  });
+  const byOrder = new Map(selected.map((item, index) => [item.platformOrderId, results[index]]));
+  for (const candidate of candidates) shipments.push(...(byOrder.get(candidate.platformOrderId)?.shipments || candidate.parcels));
+  for (const item of selected) if (!candidates.some(candidate => candidate.platformOrderId === item.platformOrderId)) shipments.push(...byOrder.get(item.platformOrderId).shipments);
+  for (const parcel of await collectSplits(results)) {
+    const index = shipments.findIndex(current => current.platformOrderId === parcel.platformOrderId && current.waybillNo === parcel.waybillNo);
+    if (index < 0) shipments.push(parcel); else shipments[index] = parcel;
   }
   if (skippedCount) warnings.push(`订单筛选：本轮保留${orders.length}笔，跳过${skippedCount}笔已结束或非待发货/待收货订单`);
   return { orders, shipments, orderUpdates, logisticsFailures, warnings: [...new Set(warnings)] };
@@ -637,7 +730,7 @@ export function jdParcels(data, platformOrderId, checkedAt, rules) {
   });
 }
 
-async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], trackedOrderIds = [], targetOrder, rules }) {
+async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], trackedOrderIds = [], targetOrder, rules, runLogistics, onProgress, durableLogistics, onCookieRefresh }) {
   const orders = [], shipments = [], orderUpdates = [], logisticsFailures = [], warnings = [];
   const session = { cookie };
   const request = async (functionId, input, detail = false) => {
@@ -650,12 +743,13 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
       body: detail ? undefined : new URLSearchParams({ body: JSON.stringify(input) }).toString(),
       headers: { Origin: detail ? 'https://details.jd.com' : 'https://order.jd.com',
         Referer: detail ? 'https://details.jd.com/' : 'https://order.jd.com/center/list.action', 'Content-Type': 'application/x-www-form-urlencoded' } });
-    session.cookie = withCookies(session.cookie, response.headers);
+    const nextCookie = withCookies(session.cookie, response.headers);
+    if (nextCookie !== session.cookie) onCookieRefresh?.(nextCookie);
+    session.cookie = nextCookie;
     return jdCheck(json(response.text));
   };
-  let detailBudget = 20;
-  async function detail(platformOrderId) {
-    if (detailBudget-- <= 0) return;
+  async function detail({ platformOrderId }) {
+    const shipments = [], orderUpdates = [], logisticsFailures = [], warnings = [];
     const checkedAt = now();
     try {
       const data = await request('pcdetail_traceMultiPackage', { orderId: platformOrderId }, true);
@@ -674,22 +768,33 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
       const terminal = returnedParcels.length && returnedParcels.every(parcel => parcel.status === 'signed');
       const update = { platformOrderId, ...(orderDate ? { orderDate, orderDateOrigin: 'detail' } : {}), dateCheckedAt: checkedAt,
         dateState: orderDate ? 'ok' : 'empty', ...(terminal ? { orderStatus: '已签收' } : {}) };
-      const listed = orders.find(order => order.platformOrderId === platformOrderId);
-      if (listed) Object.assign(listed, update); else orderUpdates.push(update);
+      orderUpdates.push(update);
       shipments.push(...parcels);
       const returned = new Set(returnedParcels.map(parcel => parcel.waybillNo));
       const missing = activeKnownParcels(known).filter(parcel => !returned.has(asText(parcel.waybillNo)));
       for (const parcel of missing) logisticsFailures.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), state: 'unavailable', logisticsCheckedAt: checkedAt });
       if (!returnedParcels.length && !missing.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
     } catch (error) {
-      if (error.code === 'ACCOUNT_EXPIRED') throw error;
+      if (mustStopLogistics(error, durableLogistics)) throw error;
       logisticsFailures.push({ platformOrderId, state: 'error', logisticsCheckedAt: checkedAt });
       orderUpdates.push({ platformOrderId, dateCheckedAt: checkedAt, dateState: 'error', dateError: '京东订单日期补查失败，已保留原日期' });
       warnings.push('部分京东订单详情读取失败，已保留原记录');
     }
+    return { shipments, orderUpdates, logisticsFailures, warnings };
   }
+  const collectDetails = candidates => runLogistics(candidates, detail, {
+    stage: 'jd-detail', concurrency: 1, key: item => item.platformOrderId,
+    onResult: async result => {
+      shipments.push(...result.shipments); logisticsFailures.push(...result.logisticsFailures); warnings.push(...result.warnings);
+      for (const update of result.orderUpdates) {
+        const listed = orders.find(order => order.platformOrderId === update.platformOrderId);
+        if (listed) Object.assign(listed, update); else orderUpdates.push(update);
+      }
+      await onProgress?.({ orders: [], ...result });
+    },
+  });
   if (targetOrder) {
-    await detail(asText(targetOrder.platformOrderId));
+    await collectDetails([{ platformOrderId: asText(targetOrder.platformOrderId) }]);
     return { orders, shipments, orderUpdates, logisticsFailures, warnings, refreshedCookie: session.cookie };
   }
   const seen = new Set(), candidates = new Set();
@@ -721,24 +826,23 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
     if (Number.isInteger(data.data.totalNum) && seen.size >= data.data.totalNum) break;
     if (page === maxPages) warnings.push('已达到京东分页上限；缺席订单不会删除或标记已取');
   }
-  for (const order of activeKnownOrders(knownOrders, new Set(candidates), 20)) candidates.add(asText(order.platformOrderId));
+  for (const order of activeKnownOrders(knownOrders, new Set(candidates), knownOrders.length)) candidates.add(asText(order.platformOrderId));
   const lastChecked = id => {
     const known = knownOrders.find(order => asText(order.platformOrderId) === id);
     const parcels = activeKnownParcels(known);
     return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsCheckedAt || 0)) : known?.dateCheckedAt || 0;
   };
-  for (const id of [...candidates].sort((a, b) => lastChecked(a) - lastChecked(b))) {
-    if (detailBudget <= 0) { warnings.push('京东本轮详情补查已达上限，其余订单下轮继续'); break; }
-    await detail(id);
-  }
+  await onProgress?.({ orders, shipments: [], orderUpdates, logisticsFailures: [], warnings: [...new Set(warnings)] });
+  await collectDetails([...candidates].sort((a, b) => lastChecked(a) - lastChecked(b)).map(platformOrderId => ({ platformOrderId })));
   if (skipped) warnings.push(`京东订单筛选：保留${orders.length}笔待发货/待收货订单，跳过${skipped}笔已结束或非快递订单`);
   return { orders, shipments, orderUpdates, logisticsFailures, warnings: [...new Set(warnings)], refreshedCookie: session.cookie };
 }
 
 export function createCollector({ fetchImpl = fetch, now = Date.now, maxPages = 5, getLogisticsRules } = {}) {
-  return async (account, cookie, { trackedOrderIds = [], knownOrders = [], targetOrder } = {}) => {
+  return async (account, cookie, { trackedOrderIds = [], knownOrders = [], targetOrder, runLogistics = parallelLogistics, onProgress, durableLogistics = false, onCookieRefresh } = {}) => {
     const rules = getLogisticsRules ? JSON.parse(JSON.stringify(getLogisticsRules())) : undefined;
-    const options = { fetchImpl, now, maxPages, trackedOrderIds, knownOrders: targetOrder ? [targetOrder] : knownOrders, targetOrder, rules };
+    const options = { fetchImpl, now, maxPages, trackedOrderIds, knownOrders: targetOrder ? [targetOrder] : knownOrders, targetOrder, rules, runLogistics, durableLogistics, onCookieRefresh,
+      onProgress: onProgress ? result => onProgress({ ...structuredClone(result), ...(rules ? { logisticsRules: rules } : {}) }) : undefined };
     const collect = { taobao: collectTaobao, pdd: collectPdd, jd: collectJd }[account.platform];
     if (!collect) throw new CollectorError('INVALID_PLATFORM', '不支持的授权平台');
     const result = await collect(cookie, options);

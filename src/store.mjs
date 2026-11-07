@@ -14,12 +14,12 @@ const parse = row => row && JSON.parse(row.data);
 const validTime = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000 ? value : 0;
 const shortText = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
 const waybillKey = value => String(value || '').normalize('NFKC').replace(/\s+/gu, '').toUpperCase();
-function logisticsData(input, old = {}) {
+function logisticsData(input, old = {}, reuseEvents = false) {
   const checkedAt = validTime(input.logisticsCheckedAt);
   if (checkedAt && checkedAt < (old.logisticsCheckedAt || 0)) return logisticsData({}, old);
   const supplied = Array.isArray(input.logisticsEvents) ? input.logisticsEvents : [];
   const seen = new Map();
-  const events = [...supplied, ...(old.logisticsEvents || [])].filter(e => e && typeof e === 'object').map(e => ({
+  const events = reuseEvents ? old.logisticsEvents || [] : [...supplied, ...(old.logisticsEvents || [])].filter(e => e && typeof e === 'object').map(e => ({
     time: validTime(e.time), timeText: shortText(e.timeText, 100), description: shortText(e.description, 600), location: shortText(e.location, 120),
     ...(['second', 'minute', 'unknown'].includes(e.timePrecision) ? { timePrecision: e.timePrecision } : {}), ...providerEventFields(e)
   })).filter(e => {
@@ -33,7 +33,7 @@ function logisticsData(input, old = {}) {
     logisticsError: input.logisticsState ? shortText(input.logisticsError, 200) || ({ error: '物流查询未完成，已保留原轨迹', unavailable: '平台未返回该运单轨迹', empty: '平台本次未返回物流轨迹' }[state] || '') : old.logisticsError || '',
     logisticsCheckedAt: Math.max(checkedAt, old.logisticsCheckedAt || 0),
     logisticsDetailCheckedAt: Math.max(validTime(input.logisticsDetailCheckedAt), old.logisticsDetailCheckedAt || 0),
-    logisticsUpdatedAt: Math.max(old.logisticsUpdatedAt || 0, state === 'ok' && supplied.some(e => e?.description) ? validTime(input.logisticsUpdatedAt) || checkedAt : 0),
+    logisticsUpdatedAt: Math.max(old.logisticsUpdatedAt || 0, !reuseEvents && state === 'ok' && supplied.some(e => e?.description) ? validTime(input.logisticsUpdatedAt) || checkedAt : 0),
     logisticsTruncated: !!(input.logisticsTruncated || old.logisticsTruncated || events.length > 100) };
 }
 function pickupData(input = {}, old = {}, events = [], rules, now = Date.now()) {
@@ -148,9 +148,10 @@ export class Store {
   }
   close() { this.db.close(); }
   transaction(fn) {
-    this.db.exec('BEGIN IMMEDIATE');
-    try { const result = fn(); this.db.exec('COMMIT'); return result; }
-    catch (e) { this.db.exec('ROLLBACK'); throw e; }
+    const savepoint = this.db.isTransaction ? `store_${this.transactionSequence = (this.transactionSequence || 0) + 1}` : '';
+    this.db.exec(savepoint ? `SAVEPOINT ${savepoint}` : 'BEGIN IMMEDIATE');
+    try { const result = fn(); this.db.exec(savepoint ? `RELEASE ${savepoint}` : 'COMMIT'); return result; }
+    catch (e) { this.db.exec(savepoint ? `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}` : 'ROLLBACK'); throw e; }
   }
   migrateIdentityState() {
     let changed = false;
@@ -314,15 +315,17 @@ export class Store {
       return { changed };
     } catch (error) { this.db.exec(`ROLLBACK TO ${savepoint}`); this.db.exec(`RELEASE ${savepoint}`); throw error; }
   }
-  refreshStationRecognition(catalog) {
+  refreshStationRecognition(catalog, shipmentIds) {
     const logistics = globalThis.PickCodeLogistics, rules = this.getLogisticsRules?.();
     const savepoint = `station_projection_${this.projectionSequence = (this.projectionSequence || 0) + 1}`;
     this.db.exec(`SAVEPOINT ${savepoint}`);
     try {
       let changed = 0;
-      const orders = new Map(this.db.prepare('SELECT data FROM orders').all().map(parse).map(order => [order.id, order]));
-      for (const row of this.db.prepare('SELECT data FROM shipments').all()) {
-        const old = parse(row), order = orders.get(old.orderId), account = this.account(old.accountId);
+      const orders = shipmentIds ? null : new Map(this.db.prepare('SELECT data FROM orders').all().map(parse).map(order => [order.id, order]));
+      const selected = shipmentIds ? shipmentIds.map(id => this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id)).filter(Boolean)
+        : this.db.prepare('SELECT data FROM shipments').all();
+      for (const row of selected) {
+        const old = parse(row), order = orders ? orders.get(old.orderId) : this.order(old.orderId), account = this.account(old.accountId);
         if (!account?.enabled || this.shipmentAlias(old.id).id !== old.id || !order || orderRetention(order, this.now()).archived || order.hidden || order.deleted
           || old.picked || old.pickupCompletion?.autoPicked || effectivePicked(pickupCompletionState(old)) || old.hidden || old.deleted
           || !old.logisticsEvents?.length || logistics.catalogStation(old.station, catalog).id) continue;
@@ -505,14 +508,17 @@ export class Store {
     if (!result.changes && !this.db.prepare('SELECT id FROM devices WHERE id=?').get(id)) fail(404, 'NOT_FOUND', '设备不存在');
     return { revoked: true };
   }
-  importResult(accountId, result) {
+  importResult(accountId, result, { partial = false, reconcile = true } = {}) {
     const rules = result.logisticsRules ?? this.getLogisticsRules?.();
+    const completionRules = this.pickupCompletion.rules(), completionConfig = this.pickupCompletion.config();
+    const parserKey = hash(JSON.stringify([rules, completionRules, completionConfig]));
+    const changedShipmentIds = [];
     const account = this.account(accountId);
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
     this.transaction(() => {
       const orderIds = new Map();
       const identityWarnings = [];
-      this.reconcileDuplicateShipments(accountId);
+      if (reconcile) this.reconcileDuplicateShipments(accountId);
       const admittedIds = new Set(result.orders.map(input => String(input.platformOrderId)));
       for (const input of [...(result.orderUpdates || []), ...result.orders]) {
         const platformOrderId = String(input.platformOrderId);
@@ -558,8 +564,8 @@ export class Store {
           identityWarnings.push('多个包裹候选使用相同平台包裹键，未自动新增包裹，请核对');
           continue;
         }
-        const observedWaybill = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse)
-          .filter(s => s.orderId === orderId && waybillKey(s.waybillNo) === waybill);
+        const observedWaybill = this.db.prepare("SELECT data FROM shipments WHERE account_id=? AND json_extract(data,'$.orderId')=?").all(accountId, orderId).map(parse)
+          .filter(s => waybillKey(s.waybillNo) === waybill);
         const observedIds = new Set(observedWaybill.map(s => this.shipmentAlias(s.id).id));
         const packageIdentifiers = this.db.prepare('SELECT shipment_id,platform_package_key FROM shipment_identifiers WHERE account_id=? AND order_id=? AND platform_package_key<>?')
           .all(accountId, orderId, '').map(row => ({ id: this.shipmentAlias(row.shipment_id).id, key: row.platform_package_key })).filter(row => observedIds.has(row.id));
@@ -598,6 +604,15 @@ export class Store {
         const id = canonicalIds.length === 1 ? canonicalIds[0] : packageKey && observedWaybill.length && !sameWaybill.length
           ? stableId(accountId, account.platform, orderId, carrier, waybill, 'package', packageKey) : stableId(accountId, account.platform, orderId, carrier, waybill);
         const old = parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id));
+        const { logisticsCheckedAt, logisticsDetailCheckedAt, logisticsUpdatedAt, updatedAt, ...evidence } = input;
+        const logisticsEvidenceHash = hash(JSON.stringify([parserKey, evidence]));
+        // Identical evidence needs only a query timestamp; preserve manual decisions and avoid rerunning parsers/AI.
+        if (old?.logisticsEvidenceHash === logisticsEvidenceHash
+          && !(input.logisticsEvents || []).some(event => validTime(event.time) > (old.logisticsCheckedAt || 0))) {
+          const updated = { ...old, ...logisticsData(input, old, true) };
+          if (JSON.stringify(updated) !== JSON.stringify(old)) this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), id);
+          continue;
+        }
         const inputCheckedAt = validTime(input.logisticsCheckedAt), oldCheckedAt = validTime(old?.logisticsCheckedAt);
         const trustedEvent = Array.isArray(input.logisticsEvents) && input.logisticsEvents.some(event => validTime(event?.time) > oldCheckedAt);
         const hasPersistedLogistics = oldCheckedAt > 0 || validTime(old?.arrivalAt) > 0 || (old?.logisticsEvents || []).length > 0;
@@ -619,9 +634,11 @@ export class Store {
           ...cycle,
           ...logistics };
         if (staleLogistics) shipment.updatedAt = old.updatedAt || shipment.updatedAt;
-        shipment = this.pickupCompletion.project(shipment);
+        shipment = this.pickupCompletion.project(shipment, { rules: completionRules, config: completionConfig });
+        shipment.logisticsEvidenceHash = logisticsEvidenceHash;
         this.db.prepare('INSERT INTO shipments VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, accountId, JSON.stringify(shipment));
         this.saveShipmentIdentifier(shipment, account.platform, input, this.now());
+        changedShipmentIds.push(id);
       }
       for (const failure of result.logisticsFailures || []) {
         if (!['error', 'unavailable', 'empty'].includes(failure.state)) continue;
@@ -634,8 +651,10 @@ export class Store {
         }
       }
       // Absence, pagination, refunds and source signatures never change manual state or tombstones.
-      this.updateAccount(accountId, { status: 'ok', lastSuccessAt: this.now(), error: '', warnings: [...(result.warnings || []), ...identityWarnings] });
+      this.updateAccount(accountId, { status: partial ? 'syncing' : 'ok', ...(!partial ? { lastSuccessAt: this.now() } : {}), error: '',
+        warnings: [...new Set([...(partial ? account.warnings || [] : []), ...(result.warnings || []), ...identityWarnings])] });
     });
+    return { evidenceChanged: changedShipmentIds.length > 0, changedShipmentIds };
   }
   applyOrderRetention() {
     return this.transaction(() => {
@@ -668,7 +687,7 @@ export class Store {
       .filter(shipment => this.shipmentAlias(shipment.id).id === shipment.id).map(s => {
       // Configured services publish evidence persisted by imports or explicit rule changes.
       const pickup = pickupData({}, s, this.getLogisticsRules ? [] : s.logisticsEvents || [], undefined, this.now());
-      const { pickupManualAt, pickupManualOperation, pickupCycleHistory, ...publicShipment } = s;
+      const { pickupManualAt, pickupManualOperation, pickupCycleHistory, logisticsEvidenceHash, ...publicShipment } = s;
       const compactCycle = s.pickupCycle ? { id: s.pickupCycle.id, startedAt: s.pickupCycle.startedAt, evidenceKey: s.pickupCycle.evidenceKey, status: s.pickupCycle.status } : undefined;
       const archived = !!orderById.get(s.orderId)?.archived;
       const receipt = retainedSignedShipment(s, archived, this.now());

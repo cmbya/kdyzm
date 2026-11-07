@@ -48,7 +48,7 @@ test('disabling an account cancels waiting collection and close settles waiting 
   await jobs.request(account.id).done;
   const stopped = jobs.request(account.id);
   await jobs.close(); await stopped.done;
-  assert.equal(stopped.job.state, 'error'); assert.match(stopped.job.error, /停止/);
+  assert.equal(stopped.job.state, 'queued'); assert.equal(stopped.job.continuation, true);
   tick(300000); assert.equal(calls, 2);
 });
 

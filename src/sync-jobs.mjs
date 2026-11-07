@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { fail } from './security.mjs';
 import { activeKnownOrders } from './collector-enrichment.mjs';
+import { createLogisticsQueue } from './sync-logistics.mjs';
+import { stableId } from './store.mjs';
 
 const INTERVAL = 5 * 60000;
 const active = job => ['queued', 'running'].includes(job.state);
 const safeError = error => ({ ACCOUNT_EXPIRED: '平台登录态已失效，请在后台更新登录信息',
+  UPSTREAM_RATE_LIMITED: '平台暂时限流，已保存进度并等待重试',
   UPSTREAM_BLOCKED: '平台拒绝访问或触发风控，请稍后重试', UPSTREAM_FORMAT: '平台返回字段暂不可解析，已保留原记录',
   UPSTREAM_ERROR: '平台接口暂不可用，请稍后重试' })[error?.code] || '同步未完成，已保留原记录，请稍后重试';
 const partialErrors = {
@@ -25,8 +28,9 @@ function fullResult(job, result) {
   }
 }
 
-export function createSyncJobs({ store, collector, now, onImported = () => {} }) {
+export function createSyncJobs({ store, collector, now, onImported = () => {}, onCompleted = () => {} }) {
   const records = new Map(), scopes = new Map(), queues = new Map(), timers = new Map(), running = new Map();
+  const logistics = createLogisticsQueue({ store, now });
   store.db.exec(`CREATE TABLE IF NOT EXISTS sync_job_summaries (
     account_id TEXT NOT NULL REFERENCES accounts(id), order_id TEXT NOT NULL, account_version INTEGER NOT NULL,
     data TEXT NOT NULL, updated_at INTEGER NOT NULL, active INTEGER NOT NULL,
@@ -39,21 +43,40 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
         DO UPDATE SET account_version=excluded.account_version,data=excluded.data,updated_at=excluded.updated_at,active=excluded.active`)
         .run(record.job.accountId, record.job.orderId, record.accountVersion, JSON.stringify(record.job), record.job.updatedAt, active(record.job) ? 1 : 0);
       // Bound historical scope summaries without discarding an in-flight operation.
-      store.db.exec(`DELETE FROM sync_job_summaries WHERE rowid IN
+      if (!active(record.job)) store.db.exec(`DELETE FROM sync_job_summaries WHERE rowid IN
         (SELECT rowid FROM sync_job_summaries WHERE active=0 ORDER BY updated_at DESC,rowid DESC LIMIT -1 OFFSET 1000)`);
       store.revision();
     });
-  };
-  for (const row of store.db.prepare('SELECT account_version,data FROM sync_job_summaries WHERE active=1').all()) {
-    const job = JSON.parse(row.data);
-    const account = store.account(job.accountId);
-    if (job.state === 'running' && account?.credentialVersion === row.account_version && account.status === 'syncing') {
-      store.updateAccount(job.accountId, { status: 'error', error: '服务重启中断了采集，请重新刷新', warnings: [] });
+    if (active(record.job)) for (const follower of records.values()) if (follower.job.parentJobId === record.job.id && active(follower.job)) {
+      Object.assign(follower.job, { state: record.job.state, retryAt: record.job.retryAt || 0,
+        continuation: !!record.job.continuation, error: record.job.error }); persist(follower);
     }
-    Object.assign(job, { state: 'error', retryAt: 0, finishedAt: now(), error: '服务重启中断了采集，请重新刷新' });
-    persist({ job, accountVersion: row.account_version });
+  };
+  const makeRecord = (job, accountVersion) => {
+    let resolve;
+    const record = { job, accountVersion, createdAt: job.createdAt, done: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
+    records.set(job.id, record); scopes.set(`${job.accountId}:${job.orderId}`, record);
+    return record;
+  };
+  const finish = record => {
+    record.job.finishedAt = now(); persist(record); record.resolve(record.job);
+    if (!active(record.job)) logistics.clear(record.job.id);
+    for (const follower of records.values()) if (follower.job.parentJobId === record.job.id && active(follower.job)) {
+      Object.assign(follower.job, { state: record.job.state, retryAt: record.job.retryAt || 0, error: record.job.error,
+      });
+      if (record.job.state === 'completed') orderOutcome(follower.job);
+      if (!active(record.job)) finish(follower); else persist(follower);
+    }
+  };
+  function orderOutcome(job, result = {}) {
+    const order = store.order(job.orderId);
+    const parcels = store.db.prepare("SELECT data FROM shipments WHERE account_id=? AND json_extract(data,'$.orderId')=?")
+      .all(job.accountId, job.orderId).map(row => JSON.parse(row.data));
+    const state = ['error', 'unavailable', 'empty', 'ok'].find(value => parcels.some(s => s.logisticsState === value)
+      || result.logisticsFailures?.some(failure => failure.state === value)) || 'unavailable';
+    Object.assign(job, { dateState: order?.dateState || 'unknown', dateError: order?.dateError || '',
+      logisticsState: state, logisticsError: parcels.find(s => s.logisticsState === state)?.logisticsError || (parcels.length ? '' : '平台尚未提供可查询运单') });
   }
-  const finish = record => { record.job.finishedAt = now(); persist(record); record.resolve(record.job); };
   const saved = (accountId, orderId) => {
     const row = store.db.prepare('SELECT account_version,data FROM sync_job_summaries WHERE account_id=? AND order_id=?').get(accountId, orderId);
     return row && row.account_version === store.account(accountId)?.credentialVersion ? JSON.parse(row.data) : null;
@@ -63,7 +86,7 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
     const selected = previous.orders.filter(order => !orderId || order.id === orderId);
     const knownOrders = selected.map(order => ({ ...order, shipments: previous.shipments.filter(s => s.orderId === order.id)
       .map(s => ({ ...s, hidden: s.hidden || s.deleted })) }));
-    const trackedOrderIds = activeKnownOrders(knownOrders, new Set(), 20).map(o => o.platformOrderId);
+    const trackedOrderIds = activeKnownOrders(knownOrders, new Set(), knownOrders.length).map(o => o.platformOrderId);
     return { knownOrders, trackedOrderIds, ...(orderId ? { targetOrder: knownOrders[0] } : {}) };
   };
   function pump(accountId) {
@@ -76,50 +99,95 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
       queue.shift(); Object.assign(record.job, { state: 'disabled', retryAt: 0, error: '账号同步已关闭，请先在后台启用' });
       finish(record); pump(accountId); return;
     }
-    const retryAt = account.lastAttemptAt ? account.lastAttemptAt + INTERVAL : 0;
+    const retryAt = record.job.continuation ? record.job.retryAt || 0 : account.lastAttemptAt ? account.lastAttemptAt + INTERVAL : 0;
     if (retryAt > now()) {
       if (record.job.retryAt !== retryAt) { record.job.retryAt = retryAt; persist(record); }
       timers.set(accountId, setTimeout(() => pump(accountId), retryAt - now()).unref()); return;
     }
-    queue.shift(); record.accountVersion = account.credentialVersion;
+    queue.shift();
+    if (record.accountVersion !== account.credentialVersion) {
+      logistics.clear(record.job.id);
+      for (const field of ['logisticsProgress', 'retryCount', 'throttled', 'continuation']) delete record.job[field];
+    }
+    record.accountVersion = account.credentialVersion;
     Object.assign(record.job, { state: 'running', retryAt: 0, startedAt: now(), error: '',
       familyId: (record.job.orderId ? store.order(record.job.orderId) : account)?.familyId || '' });
     persist(record);
     store.updateAccount(accountId, { status: 'syncing', lastAttemptAt: now(), nextSyncAt: now() + account.intervalMinutes * 60000, error: '' });
     const task = Promise.resolve().then(async () => {
+      let continuing = false;
       try {
         const options = context(accountId, record.job.orderId);
+        let importedOnce = false;
         if (record.job.orderId && !options.targetOrder) throw new Error('Order removed');
-        const result = await collector(account, store.cookie(accountId), options);
-        if (store.account(accountId).credentialVersion !== account.credentialVersion) {
-          Object.assign(record.job, { state: 'error', error: '账号登录信息已更新，请重新刷新' }); return;
-        }
-        // A targeted collector must never import unrelated records, even if an upstream response includes them.
-        if (options.targetOrder) {
-          const matches = item => String(item.platformOrderId) === options.targetOrder.platformOrderId;
-          for (const key of ['orders', 'orderUpdates', 'shipments', 'logisticsFailures']) result[key] = (result[key] || []).filter(matches);
-        }
-        store.importResult(accountId, result);
-        // Optional station enrichment cannot turn a successful platform import into a sync failure.
-        try { onImported(accountId); } catch { /* Retry with the next successful import. */ }
+        const valid = () => {
+          if (closed) throw Object.assign(new Error('Service stopping'), { code: 'SERVICE_STOPPING' });
+          const current = store.account(accountId);
+          if (!current?.enabled) throw Object.assign(new Error('Account disabled'), { code: 'ACCOUNT_DISABLED' });
+          if (current.credentialVersion !== account.credentialVersion) throw Object.assign(new Error('Account changed'), { code: 'ACCOUNT_CHANGED' });
+        };
+        const importDelta = (data, partial = true) => {
+          valid();
+          const delta = { ...data, orders: data.orders || [], shipments: data.shipments || [] };
+          // A targeted collector must never import unrelated records, including streamed deltas.
+          if (options.targetOrder) {
+            const matches = item => String(item.platformOrderId) === options.targetOrder.platformOrderId;
+            for (const key of ['orders', 'orderUpdates', 'shipments', 'logisticsFailures']) delta[key] = (delta[key] || []).filter(matches);
+          }
+          const imported = store.importResult(accountId, delta, { partial, reconcile: !importedOnce });
+          importedOnce = true;
+          if (!record.job.firstResultAt && delta.shipments.some(shipment => shipment.logisticsEvents?.length)) record.job.firstResultAt = now();
+          if (imported?.evidenceChanged !== false) try { onImported(accountId, imported?.changedShipmentIds); } catch { /* Retry on the next import. */ }
+          fullResult(record.job, delta);
+        };
+        const result = await collector(account, store.cookie(accountId), { ...options, durableLogistics: true,
+          onCookieRefresh: cookie => {
+            const current = store.account(accountId);
+            if (!current?.enabled || current.credentialVersion !== account.credentialVersion) throw Object.assign(new Error('Account changed'), { code: 'ACCOUNT_CHANGED' });
+            // Persist session rotation even during shutdown; it must never enter task checkpoints or snapshots.
+            store.refreshCookie(accountId, cookie);
+          },
+          onProgress: delta => importDelta(delta),
+          runLogistics: (items, worker, settings) => logistics.run(record, items, worker, settings, { valid,
+            relevant: item => {
+              if (!item?.platformOrderId) return true;
+              const order = store.order(stableId(accountId, account.platform, 'order', String(item.platformOrderId)));
+              if (!order || order.archived || order.hidden || order.deleted) return false;
+              const parcels = store.db.prepare("SELECT data FROM shipments WHERE account_id=? AND json_extract(data,'$.orderId')=?")
+                .all(accountId, order.id).map(row => JSON.parse(row.data)).filter(parcel => !item.waybillNo || parcel.waybillNo === item.waybillNo);
+              return !parcels.length || parcels.some(parcel => !parcel.picked && !parcel.hidden && !parcel.deleted);
+            },
+            changed: progress => { record.job.logisticsProgress = progress; persist(record); } }),
+        });
+        importDelta(result, false);
+        try { onCompleted(accountId); } catch { /* Cached classification is refreshed on the next sync. */ }
         if (result.refreshedCookie) store.refreshCookie(accountId, result.refreshedCookie);
         record.job.state = 'completed';
-        if (record.job.orderId) {
-          const snapshot = store.snapshot([accountId]), order = snapshot.orders.find(o => o.id === record.job.orderId);
-          const parcels = snapshot.shipments.filter(s => s.orderId === record.job.orderId);
-          const state = ['error', 'unavailable', 'empty', 'ok'].find(value => parcels.some(s => s.logisticsState === value) || result.logisticsFailures?.some(failure => failure.state === value)) || 'unavailable';
-          Object.assign(record.job, { dateState: order?.dateState || 'unknown', dateError: order?.dateError || '',
-            logisticsState: state, logisticsError: parcels.find(s => s.logisticsState === state)?.logisticsError || (parcels.length ? '' : '平台尚未提供可查询运单') });
-        } else fullResult(record.job, result);
+        if (record.job.orderId) orderOutcome(record.job, result); else fullResult(record.job, result);
       } catch (error) {
-        if (store.account(accountId).credentialVersion !== account.credentialVersion) {
+        if (store.account(accountId)?.credentialVersion !== account.credentialVersion) {
           Object.assign(record.job, { state: 'error', error: '账号登录信息已更新，请重新刷新' }); return;
+        }
+        if (error.code === 'ACCOUNT_DISABLED') {
+          Object.assign(record.job, { state: 'disabled', retryAt: 0, error: '账号同步已关闭，请先在后台启用' }); return;
+        }
+        if (error.code === 'SERVICE_STOPPING' || error.logisticsRetryable && (record.job.retryCount || 0) < 3) {
+          const attempt = (record.job.retryCount || 0) + (closed ? 0 : 1);
+          const throttle = ['UPSTREAM_BLOCKED', 'UPSTREAM_RATE_LIMITED'].includes(error.code);
+          const delay = Math.min(15 * 60000, Math.max(Number(error.retryAfterMs) || 0, throttle ? INTERVAL : 15000 * 2 ** (attempt - 1)));
+          Object.assign(record.job, { state: 'queued', continuation: true, retryCount: attempt,
+            throttled: record.job.throttled || throttle, retryAt: closed ? now() : now() + delay,
+            error: closed ? '' : '部分查询暂未完成，已保存进度，将自动继续' });
+          persist(record); continuing = true;
+          if (!closed) { (queues.get(accountId) || []).unshift(record); }
+          else record.resolve(record.job);
+          return;
         }
         const message = safeError(error), expired = error.code === 'ACCOUNT_EXPIRED';
         Object.assign(record.job, { state: expired ? 'expired' : 'error', error: message });
         store.updateAccount(accountId, { status: expired ? 'expired' : 'error', error: message, warnings: [] });
       } finally {
-        running.delete(accountId); finish(record); pump(accountId);
+        running.delete(accountId); if (!continuing) finish(record); pump(accountId);
       }
     });
     running.set(accountId, task);
@@ -130,7 +198,7 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
     if (orderId && store.order(orderId)?.accountId !== accountId) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
     const key = `${accountId}:${orderId}`, existing = scopes.get(key);
-    if (existing && (active(existing.job) || (account.enabled && existing.accountVersion === account.credentialVersion && existing.job.state === 'cooldown' && existing.job.retryAt > now()))) {
+    if (existing && existing.accountVersion === account.credentialVersion && (active(existing.job) || (account.enabled && existing.job.state === 'cooldown' && existing.job.retryAt > now()))) {
       if (existing.job.state === 'queued') pump(accountId);
       return existing;
     }
@@ -147,17 +215,60 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
     // the original cooldown deadline; repeated clicks never extend that time.
     const state = !account.enabled ? 'disabled' : queue.length >= 25 ? 'cooldown' : 'queued';
     const previousTime = store.db.prepare('SELECT updated_at FROM sync_job_summaries WHERE account_id=? AND order_id=?').get(accountId, orderId)?.updated_at || 0;
-    const job = { id: randomUUID(), accountId, orderId, familyId: (orderId ? store.order(orderId) : account)?.familyId || '', state,
+    const job = { id: randomUUID(), accountId, orderId, resumeVersion: 1, familyId: (orderId ? store.order(orderId) : account)?.familyId || '', state,
       createdAt: Math.max(now(), previousTime + 1),
       retryAt: state !== 'disabled' && (retryAt > now() || inFlight || state === 'cooldown') ? Math.max(retryAt, now() + (queue.length >= 25 ? INTERVAL : 0)) : 0,
       error: state === 'disabled' ? '账号同步已关闭，请先在后台启用' : state === 'cooldown' ? '账号等待任务已满，本次未排队，请稍后重新获取' : '' };
-    let resolve;
-    const record = { job, accountVersion: account.credentialVersion, createdAt: now(), done: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
-    records.set(job.id, record); scopes.set(key, record);
+    const record = makeRecord(job, account.credentialVersion);
+    const full = scopes.get(`${accountId}:`);
+    // Keep the order's own authorization scope while joining a full refresh that covers its active parcels.
+    if (account.enabled && orderId && full && full.accountVersion === account.credentialVersion && active(full.job)
+      && activeKnownOrders(context(accountId, orderId).knownOrders, new Set(), 1).length) {
+      Object.assign(job, { parentJobId: full.job.id, state: full.job.state, retryAt: full.job.retryAt || 0 });
+      persist(record); return record;
+    }
+    if (!orderId && state === 'queued') {
+      const covered = new Set(activeKnownOrders(context(accountId, '').knownOrders, new Set(), Number.MAX_SAFE_INTEGER).map(order => order.id));
+      for (let index = queue.length - 1; index >= 0; index--) {
+        const pending = queue[index];
+        if (pending.accountVersion === account.credentialVersion && covered.has(pending.job.orderId)) {
+          queue.splice(index, 1);
+          Object.assign(pending.job, { parentJobId: job.id, retryAt: job.retryAt }); persist(pending);
+        }
+      }
+    }
     persist(record);
     if (state === 'queued') { queue.push(record); pump(accountId); } else finish(record);
     return record;
   }
+  for (const row of store.db.prepare('SELECT account_version,data FROM sync_job_summaries WHERE active=1 ORDER BY updated_at').all()) {
+    const job = JSON.parse(row.data), account = store.account(job.accountId);
+    if (job.resumeVersion === 1 && account?.enabled && account.credentialVersion === row.account_version) {
+      Object.assign(job, { state: 'queued', continuation: true, retryAt: job.retryAt || 0, error: '' });
+      const record = makeRecord(job, row.account_version);
+      persist(record);
+      if (!job.parentJobId) { const queue = queues.get(job.accountId) || []; queue.push(record); queues.set(job.accountId, queue); }
+    } else {
+      Object.assign(job, { state: 'error', retryAt: 0, finishedAt: now(), error: '服务重启中断了采集，请重新刷新' });
+      persist({ job, accountVersion: row.account_version });
+      if (account?.credentialVersion === row.account_version) store.updateAccount(job.accountId, { status: 'error', error: job.error });
+      logistics.clear(job.id);
+    }
+  }
+  for (const record of records.values()) if (record.job.parentJobId) {
+    const parent = records.get(record.job.parentJobId)?.job || (() => {
+      const row = store.db.prepare("SELECT data FROM sync_job_summaries WHERE json_extract(data,'$.id')=? AND account_version=?")
+        .get(record.job.parentJobId, record.accountVersion);
+      return row && JSON.parse(row.data);
+    })();
+    if (parent && !active(parent)) { Object.assign(record.job, { state: parent.state, error: parent.error, retryAt: 0 }); if (parent.state === 'completed') orderOutcome(record.job); finish(record); }
+    else if (!parent) {
+      delete record.job.parentJobId;
+      const queue = queues.get(record.job.accountId) || []; queue.push(record); queues.set(record.job.accountId, queue); persist(record);
+    }
+  }
+  // Delay recovery until the service has finished constructing its import callbacks.
+  queueMicrotask(() => { for (const id of queues.keys()) pump(id); });
   return { running, request, pump,
     latest(accountId) {
       return saved(accountId, '');
@@ -186,9 +297,10 @@ export function createSyncJobs({ store, collector, now, onImported = () => {} })
       closed = true;
       for (const timer of timers.values()) clearTimeout(timer);
       for (const queue of queues.values()) for (const record of queue) {
-        Object.assign(record.job, { state: 'error', retryAt: 0, error: '服务已停止，请重新刷新' }); finish(record);
+        Object.assign(record.job, { state: 'queued', continuation: true, error: '' }); persist(record); record.resolve(record.job);
       }
       await Promise.all([...running.values()]);
+      for (const record of records.values()) if (active(record.job)) record.resolve(record.job);
     },
   };
 }

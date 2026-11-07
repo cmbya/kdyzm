@@ -143,14 +143,14 @@ test('JD detects login expiry, format changes and blocking without leaking upstr
   await assert.rejects(() => createCollector()({ platform: 'unknown' }, ''), { code: 'INVALID_PLATFORM' });
 });
 
-test('JD stops duplicate pagination, bounds detail calls and records terminal detail on the admitted order', async () => {
+test('JD stops duplicate pagination, covers all details and records terminal detail on the admitted order', async () => {
   const calls = [], list = Array.from({ length: 23 }, (_, i) => order('o' + i));
   const details = Object.fromEntries(list.map(o => [o.orderId, tracking(parcel('P-' + o.orderId, '已签收'))]));
   const result = await createCollector({ now, maxPages: 3, fetchImpl: network(() => ({ orderList: list, totalNum: 100 }), details, calls) })({ platform: 'jd' }, 'thor=FAKE');
   assert.equal(calls.filter(c => c.target.searchParams.get('functionId') === 'pcorder_center_list').length, 2);
-  assert.equal(calls.filter(c => c.target.searchParams.get('functionId') === 'pcdetail_traceMultiPackage').length, 20);
+  assert.equal(calls.filter(c => c.target.searchParams.get('functionId') === 'pcdetail_traceMultiPackage').length, 23);
   assert.equal(result.orders[0].orderStatus, '已签收');
-  assert.ok(result.warnings.some(w => w.includes('分页重复'))); assert.ok(result.warnings.some(w => w.includes('详情补查已达上限')));
+  assert.ok(result.warnings.some(w => w.includes('分页重复'))); assert.ok(!result.warnings.some(w => w.includes('详情补查已达上限')));
 });
 
 test('JD encrypted accounts join existing family grants and platform sync preserves manual actions', async () => {

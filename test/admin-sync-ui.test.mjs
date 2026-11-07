@@ -7,6 +7,16 @@ import { createServerClock, syncStatus } from '../public/sync-status.js';
 const NOW = 1_800_000_000_000;
 const account = (job, platform = 'taobao') => ({ id: 'a', familyId: 'f', familyName: '我', label: platform === 'jd' ? '我的京东' : '我的淘宝', platform, status: 'ok', enabled: true, intervalMinutes: 60, syncJob: job });
 
+test('continuous logistics status counts query tasks, explains automatic retry, and ignores unsafe progress', () => {
+  const active = syncStatus(account({ state: 'running', continuation: true, logisticsProgress: { total: 8, completed: 3 } }), NOW);
+  assert.equal(active.label, '采集中 · 物流查询任务 3/8');
+  assert.match(active.details[0], /自动继续/); assert.equal(active.pending, true);
+  const retry = syncStatus(account({ state: 'queued', retryAt: NOW + 10000, continuation: true, throttled: true, logisticsProgress: { total: 8, completed: 3 } }), NOW);
+  assert.match(retry.label, /10 秒后采集.*查询任务 3\/8/); assert.match(retry.details[0], /平台限流/);
+  assert.equal(syncStatus(account({ state: 'running', logisticsProgress: { total: 'PRIVATE', completed: 1 } }), NOW).label, '采集中');
+  assert.equal(syncStatus(account({ state: 'running', logisticsProgress: { total: 1e9, completed: 2e9 } }), NOW).label, '采集中 · 物流查询任务 100000/100000');
+});
+
 test('queued countdown uses server time and monotonic elapsed time despite a wrong or changing local clock', () => {
   let monotonic = 100, wall = NOW + 86_400_000;
   const clock = createServerClock(() => monotonic, () => wall);
@@ -200,8 +210,9 @@ test('polling restores external jobs, advances states, preserves form drafts and
   assert.equal(page.elements.get('pair-code').textContent, '123456'); assert.equal(page.elements.get('pair-result').hidden, false);
   page.state.monotonic += 1000; for (const callback of page.intervals.values()) callback();
   assert.match(page.elements.get('accounts').children[0].children[2].textContent, /59 秒后采集/);
-  page.state.job = { id: 'external', state: 'running' }; await page.tick();
-  assert.equal(page.elements.get('accounts').children[0].children[2].textContent, '采集中');
+  page.state.job = { id: 'external', state: 'running', continuation: true, logisticsProgress: { total: 8, completed: 3 } }; await page.tick();
+  assert.equal(page.elements.get('accounts').children[0].children[2].textContent, '采集中 · 物流查询任务 3/8');
+  assert.match(page.elements.get('accounts').children[0].children[3].textContent, /自动继续/);
   page.state.job = { id: 'external', state: 'completed' }; await page.tick();
   assert.equal(page.elements.get('accounts').children[0].children[2].textContent, '采集完成');
   assert.equal([...page.timeouts.values()][0].delay, 30000);

@@ -31,6 +31,12 @@ export function syncStatus(account, now) {
     else if ([job.dateState, job.logisticsState].some(state => ['empty', 'unavailable'].includes(state))) label = '采集完成 · 部分信息未提供';
     else label = '采集完成';
   } else label = '采集失败';
+  const progress = job.logisticsProgress;
+  if (progress && Number.isFinite(progress.total) && progress.total > 0 && Number.isFinite(progress.completed) && progress.completed >= 0) {
+    const total = Math.min(100000, Math.floor(progress.total)), completed = Math.min(total, Math.floor(progress.completed));
+    label += ` · 物流查询任务 ${completed}/${total}`;
+  }
+  if (pending && job.continuation === true) details.push(job.throttled === true ? '平台限流，后台会自动继续查询。' : '后台会自动继续查询，已完成的结果可先查看。');
   for (const [field, name] of [['date', '订单日期'], ['logistics', '物流']]) {
     if (job[`${field}State`] === 'error' && !job[`${field}Error`]) details.push(`${name}查询失败，已保留原数据。`);
     if (['empty', 'unavailable'].includes(job[`${field}State`]) && !job[`${field}Error`]) details.push(`平台本次未提供${name}信息。`);

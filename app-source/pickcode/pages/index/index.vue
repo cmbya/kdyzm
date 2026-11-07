@@ -437,7 +437,7 @@ export default {
         if (binding !== this.onlineBindingKey()) return;
         this.applySnapshot(result.snapshot);
         this.syncErrors.online = result.onlineError || '';
-        this.syncMessage = [result.onlineNotice, result.pending ? '订单仍在后台处理中，稍后刷新查看' : ''].filter(Boolean).join('；');
+        this.syncMessage = [result.onlineNotice, result.pending ? result.pendingNotice || '订单仍在后台处理中，稍后刷新查看' : ''].filter(Boolean).join('；');
       } catch (error) { if (binding === this.onlineBindingKey()) { this.syncErrors.online = error.message || '线上更新失败'; this.showError(error); } }
       finally { this.syncing = false; this.refreshProgressText = '更新中'; }
     },
@@ -509,8 +509,9 @@ export default {
         const onlineError = sameBinding ? result.onlineError : '', pending = sameBinding && result.pending;
         const errors = [result.smsError, onlineError].filter(Boolean).map(error => error.message || error);
         this.syncErrors = { sms: result.smsError?.message || result.smsError || '', online: onlineError?.message || onlineError || '' };
-        if (pending) errors.push('订单仍在后台处理中，稍后刷新查看');
-        this.syncMessage = pending ? '订单仍在后台处理中，稍后刷新查看' : sameBinding && result.onlineNotice ? '匹配完成 · '+result.onlineNotice : errors.length ? '' : '匹配完成';
+        const pendingNotice = result.pendingNotice || '订单仍在后台处理中，稍后刷新查看';
+        if (pending) errors.push(pendingNotice);
+        this.syncMessage = pending ? pendingNotice : sameBinding && result.onlineNotice ? '匹配完成 · '+result.onlineNotice : errors.length ? '' : '匹配完成';
         uni.showToast({title: pending ? '后台仍在处理' : errors.length ? '部分完成' : '匹配完成',icon:'none'});
       } catch(error) { this.syncErrors.sms = error.message || '更新失败，请重试'; this.showError(error); }
       finally { this.scanning = false; this.refreshProgressText = '更新中'; }

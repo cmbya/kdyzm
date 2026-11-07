@@ -537,7 +537,15 @@ var PickCodeCore = (function () {
       // Older Android clients promoted optional detail warnings to a generic job error.
       var partial=j.state==='completed'&&(dateError||logisticsError);
       var error=pending?'':j.state==='cooldown'?(retryAt>Date.now()?'后台处于采集冷却期，请稍后重新获取':'本次采集未执行，现可重新获取订单'):j.state==='expired'?'账号登录已失效，请在后台更新':j.state==='disabled'?'账号已停用，请在后台启用':j.state==='error'||j.error&&!partial?'采集未完成，请稍后重试或检查后台账号':'';
-      return {id:j.id,accountId:text(j.accountId,200),orderId:text(j.orderId,200),familyId:familyId(j.familyId),state:j.state,retryAt:retryAt,createdAt:timestamp(j.createdAt),updatedAt:timestamp(j.updatedAt),startedAt:timestamp(j.startedAt),finishedAt:timestamp(j.finishedAt),error:error,dateState:dateState,dateError:dateError,logisticsState:logisticsState,logisticsError:logisticsError};
+      var value={id:j.id,accountId:text(j.accountId,200),orderId:text(j.orderId,200),familyId:familyId(j.familyId),state:j.state,retryAt:retryAt,createdAt:timestamp(j.createdAt),updatedAt:timestamp(j.updatedAt),startedAt:timestamp(j.startedAt),finishedAt:timestamp(j.finishedAt),error:error,dateState:dateState,dateError:dateError,logisticsState:logisticsState,logisticsError:logisticsError};
+      function count(n){return typeof n==='number'&&isFinite(n)?Math.max(0,Math.min(100000,Math.floor(n))):0;}
+      if(j.logisticsProgress&&typeof j.logisticsProgress==='object'&&!Array.isArray(j.logisticsProgress)){
+        var progress={};['total','completed','active','attempts','durationMs'].forEach(function(key){progress[key]=count(j.logisticsProgress[key]);});
+        progress.completed=Math.min(progress.total,progress.completed);progress.active=Math.min(progress.total-progress.completed,progress.active);value.logisticsProgress=progress;
+      }
+      if(j.retryCount!==undefined)value.retryCount=count(j.retryCount);
+      ['continuation','throttled'].forEach(function(key){if(j[key]!==undefined)value[key]=j[key]===true;});
+      return value;
     });
   }
   function recoverOnlineJobs(online) {

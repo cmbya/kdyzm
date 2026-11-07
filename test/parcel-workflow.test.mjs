@@ -51,7 +51,7 @@ test('sync jobs expose scope, terminal states, capability/version and queue duri
   assert.equal(calls, 1);
 });
 
-test('target refresh queues behind account sync, coalesces and executes only its stored order after cooldown', async t => {
+test('target refresh joins account sync and later standalone refresh filters unrelated records', async t => {
   let release, concurrent = 0, maximum = 0;
   const gate = new Promise(resolve => { release = resolve; }), calls = [];
   const { service, account, order, advance } = await setup(t, async (_account, _cookie, options) => {
@@ -63,13 +63,13 @@ test('target refresh queues behind account sync, coalesces and executes only its
   });
   const full = service.jobs.request(account.id);
   const targeted = service.jobs.request(account.id, order.id);
-  assert.equal(targeted.job.state, 'queued'); assert.equal(service.jobs.request(account.id, order.id), targeted);
+  assert.equal(targeted.job.parentJobId, full.job.id); assert.equal(service.jobs.request(account.id, order.id), targeted);
   release(); await full.done;
-  assert.equal(targeted.job.state, 'queued'); assert.equal(targeted.job.retryAt, NOW + 300000); assert.equal(calls.length, 1);
-  advance(300000); service.jobs.pump(account.id); await targeted.done;
+  await targeted.done; assert.equal(targeted.job.state, 'completed'); assert.equal(calls.length, 1);
+  advance(300000); const standalone = service.jobs.request(account.id, order.id); await standalone.done;
   assert.equal(maximum, 1); assert.equal(calls.length, 2);
   assert.equal(calls[1].knownOrders.length, 1); assert.equal(calls[1].targetOrder.id, order.id);
-  assert.equal(targeted.job.state, 'completed'); assert.equal(targeted.job.dateState, 'unavailable');
+  assert.equal(standalone.job.state, 'completed'); assert.equal(standalone.job.dateState, 'unavailable');
   const snapshot = service.store.snapshot([account.id]);
   assert.notEqual(snapshot.orders.find(o => o.platformOrderId === 'two').title, '必须过滤');
   assert.ok(!snapshot.shipments.some(s => s.waybillNo === 'UNRELATED'));

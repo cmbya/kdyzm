@@ -2,6 +2,13 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.36 · 私人版</text><text class="version-date">2026-11-08</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">同步</text><text class="content">配合后台 3.1.32 连续处理全部待查物流，逐项更新结果并显示查询进度，中断后自动接续</text></view>
+          <view class="update-item"><text class="tag optimize">准确</text><text class="content">按平台真实分包分别查询，复用在途刷新，相同物流不重复解析，保留取件码绑定和人工决定</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.35 · 私人版</text><text class="version-date">2026-11-08</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">物流</text><text class="content">配合后台 3.1.31 保留平台已取件证据，修复明确签收被客服电话话术误判，自动领取后继续保留短信绑定</text></view>

@@ -113,7 +113,7 @@ test('PDD failed shipping reports refresh failure; expired login still aborts co
   await assert.rejects(createCollector({ fetchImpl: async url => String(url).includes('/shipping?') ? response({ error_code: 40001 }) : fetchImpl(url) })({ platform: 'pdd' }, 'pdd_user_id=1'), { code: 'ACCOUNT_EXPIRED' });
 });
 
-test('PDD logistics budget is bounded and prioritizes the oldest known attempts', async () => {
+test('PDD logistics covers all listed and absent active orders with oldest attempts first', async () => {
   const checked = [];
   const list = Array.from({ length: 25 }, (_, index) => ({ order_sn: `o${index}`, tracking_number: `A${index}` }));
   const result = await createCollector({ now: () => NOW, fetchImpl: async url => {
@@ -126,7 +126,7 @@ test('PDD logistics budget is bounded and prioritizes the oldest known attempts'
     ...list.map(order => ({ platformOrderId: order.order_sn, shipments: [{ waybillNo: order.tracking_number, status: 'transit', logisticsCheckedAt: NOW }] })),
     { platformOrderId: 'missing', shipments: [{ waybillNo: 'MISSING', status: 'transit', logisticsCheckedAt: 1 }] },
   ] });
-  assert.equal(checked.length, 20);
+  assert.equal(checked.length, 26);
   assert.equal(checked[0], '/proxy/api/order/missing/shipping');
   assert.equal(result.orders.length, 25);
 });
@@ -290,7 +290,7 @@ test('Taobao keeps picked and hidden metadata without polling, and refreshes sig
   assert.deepEqual(result.orders, []);
 });
 
-test('Taobao full-track budget rotates beyond the first 20 independently of SSR check timestamps', async () => {
+test('Taobao full-track covers every order and prioritizes detail timestamps independently of SSR', async () => {
   const records = Array.from({ length: 21 }, (_, i) => ({ id: `o${i}`, statusInfo: { text: '待收货' } }));
   let attempted = [];
   const base = taobaoDateFetch(records, {});
@@ -306,21 +306,22 @@ test('Taobao full-track budget rotates beyond the first 20 independently of SSR 
   const collect = createCollector({ now: () => NOW, fetchImpl });
   const knownOrders = records.map(order => ({ platformOrderId: order.id, orderDateOrigin: 'detail', shipments: [{ waybillNo: order.id, status: 'transit' }] }));
   const first = await collect({ platform: 'taobao' }, cookie, { knownOrders });
-  assert.equal(attempted.length, 20);
-  assert.ok(!attempted.includes('o20'));
+  assert.equal(attempted.length, 21);
+  assert.ok(attempted.includes('o20'));
   assert.equal(first.shipments.at(-1).logisticsCheckedAt, NOW);
-  assert.equal(first.shipments.at(-1).logisticsDetailCheckedAt, undefined);
+  assert.equal(first.shipments.at(-1).logisticsDetailCheckedAt, NOW);
   for (const order of knownOrders) order.shipments = first.shipments.filter(parcel => parcel.platformOrderId === order.platformOrderId);
+  knownOrders.at(-1).shipments[0].logisticsDetailCheckedAt = 1;
   attempted = [];
   const second = await collect({ platform: 'taobao' }, cookie, { knownOrders });
-  assert.equal(attempted.length, 20);
+  assert.equal(attempted.length, 21);
   assert.equal(attempted[0], 'o20');
   assert.equal(second.shipments.at(-1).logisticsDetailCheckedAt, NOW);
 });
 
 for (const platform of ['taobao', 'pdd']) {
   for (const listed of [false, true]) {
-    test(`${platform} mixed-status split orders rotate fairly across two ${listed ? 'listed' : 'absent'} batches`, async () => {
+    test(`${platform} mixed-status split orders retain parcel identities across complete ${listed ? 'listed' : 'absent'} batches`, async () => {
       const knownOrders = Array.from({ length: 21 }, (_, i) => ({ platformOrderId: `o${i}`, orderDateOrigin: 'detail', shipments: [
         { waybillNo: `A${i}`, status: 'transit', logisticsCheckedAt: 0, logisticsDetailCheckedAt: 0 },
         ...(i === 20 ? [] : [
@@ -355,8 +356,8 @@ for (const platform of ['taobao', 'pdd']) {
       const collect = createCollector({ now: () => NOW, fetchImpl });
       const accountCookie = platform === 'taobao' ? cookie : 'pdd_user_id=1';
       const first = await collect({ platform }, accountCookie, { knownOrders });
-      assert.equal(attempted.length, 20);
-      assert.ok(!attempted.includes('o20'));
+      assert.equal(attempted.length, 21);
+      assert.ok(attempted.includes('o20'));
       for (const order of knownOrders) {
         for (const parcel of order.shipments) {
           const update = first.shipments.find(item => item.platformOrderId === order.platformOrderId && item.waybillNo === parcel.waybillNo);
@@ -373,8 +374,8 @@ for (const platform of ['taobao', 'pdd']) {
       }
       attempted = [];
       await collect({ platform }, accountCookie, { knownOrders });
-      assert.equal(attempted.length, 20);
-      assert.equal(attempted[0], 'o20');
+      assert.equal(attempted.length, 21);
+      assert.equal(new Set(attempted).size, 21);
     });
   }
 }

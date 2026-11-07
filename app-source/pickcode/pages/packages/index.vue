@@ -114,6 +114,7 @@
             <LogisticsTimeline :shipment="shipment" />
           </view>
           <text v-if="!selectedOrder.shipments?.length && selectedOrder.source !== 'manual'" class="muted-inline">暂无运单号，物流信息待同步。</text>
+          <text v-if="refreshProgressText || error || notice" class="muted-inline" role="status">{{ refreshProgressText || error || notice }}</text>
           <view class="order-tools">
             <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-if="selectedOrder.canRefresh" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="refreshOrderDate(selectedOrder)">{{ syncingOrderId === selectedOrder.id ? '更新中' : '更新订单' }}</button>
             <button role="button" tabindex="0" v-if="selectedOrder.source === 'online'" @click="goToApp(selectedOrder.platform)">打开购物 App</button>
@@ -143,7 +144,7 @@ export default {
   components: { LogisticsTimeline, PickupStamp, StationChooser },
   data() { return {
     packages: [], families: [], stationRules: [], stationChoices: [], stationChooserOpen: false, tableData: [], archivedData: [], selectedFamily: 'all', selectedPlatform: 'all', selectedProgress: 'all',
-    showHidden: false, showHistory: false, showExpired: false, hydrated: false, online: {}, refreshing: false, backgroundSyncing: false, error: '', notice: '',
+    showHidden: false, showHistory: false, showExpired: false, hydrated: false, online: {}, refreshing: false, backgroundSyncing: false, error: '', notice: '', refreshProgressText: '',
     detailId: '', dateEditing: false, activePopup: '', filterDraft: { family: 'all', history: false, hidden: false }, dateDraft: '', dateTarget: null, syncingOrderId: '', reducedMotion: false,
     mainPlatforms: [{ key: 'taobao', label: '淘宝', mark: '淘' }, { key: 'jd', label: '京东', mark: 'JD' }, { key: 'pdd', label: '拼多多', mark: '拼' }],
     progressOptions: [{ key: 'pickup', label: '待取' }, { key: 'transit', label: '运输中' }, { key: 'waiting', label: '待发货' }, { key: 'done', label: '已完成' }, { key: 'other', label: '其他' }, { key: 'all', label: '未收到' }]
@@ -169,7 +170,7 @@ export default {
     resultTitle() { if (this.showExpired) return '过期订单' + (this.selectedPlatform === 'all' ? '' : ' · ' + this.platformLabel({ source: this.selectedPlatform === 'manual' ? 'manual' : 'online', platform: this.selectedPlatform })); return (this.selectedPlatform === 'all' ? (this.showHistory ? '历史记录' : this.selectedProgress === 'all' ? '最近未收到' : '包裹记录') : this.platformLabel({ source: this.selectedPlatform === 'manual' ? 'manual' : 'online', platform: this.selectedPlatform })) + (this.selectedProgress === 'all' ? '' : ' · ' + this.progressOptions.find(p => p.key === this.selectedProgress).label); },
     resultSummary() { if (this.showExpired) return this.platformPackages.length + ' 笔过期订单'; const s = this.resultTotals; const count = this.selectedPlatform === 'manual' || this.selectedProgress === 'other' ? s.orders + ' 条记录' : s.total + ' 个包裹'; return (this.showHistory && this.selectedPlatform !== 'manual' ? s.onlineOrders + ' 笔订单 · ' : '') + count; },
     syncText() {
-      if (this.refreshing || this.backgroundSyncing) return '正在更新，已有记录可继续查看';
+      if (this.refreshing || this.syncingOrderId || this.backgroundSyncing) return this.refreshProgressText || '正在更新，已有记录可继续查看';
       if (this.error) return this.error;
       if (this.notice) return this.notice;
       if (!this.online.bound) return '本地记录 · 可在「我的」绑定后台';
@@ -298,7 +299,7 @@ export default {
       const current = () => revision === (this._snapshotRevision || 0) && request === this._loadRequest;
       try { const snapshot = await getSnapshot(); if (current()) this.applySnapshot(snapshot); } catch (e) { if (current()) this.error = e.message; }
     },
-    async retrySync() { if (this.refreshing || this.backgroundSyncing) return; this.refreshing = true; try { if (!this.hydrated) this.applySnapshot(await getSnapshot()); if (!this.online.bound) { await this.loadData(); return; } const result = await refreshOnline(); this.applySnapshot(result.snapshot); this.error = result.onlineError || ''; this.notice = [result.onlineNotice, result.pending ? '后台仍在处理中，稍后刷新查看' : ''].filter(Boolean).join('；'); } catch (e) { this.error = e.message || '更新失败，已有记录已保留'; } finally { this.refreshing = false; } },
+    async retrySync() { if (this.refreshing || this.backgroundSyncing) return; this.refreshing = true; try { if (!this.hydrated) this.applySnapshot(await getSnapshot()); if (!this.online.bound) { await this.loadData(); return; } const result = await refreshOnline(progress => { this.refreshProgressText = progress.label; }); this.applySnapshot(result.snapshot); this.error = result.onlineError || ''; this.notice = [result.onlineNotice, result.pending ? result.pendingNotice || '后台仍在处理中，稍后刷新查看' : ''].filter(Boolean).join('；'); } catch (e) { this.error = e.message || '更新失败，已有记录已保留'; } finally { this.refreshing = false; this.refreshProgressText = ''; } },
     openFilters() { this.filterDraft = { family: this.selectedFamily, history: this.showHistory, hidden: this.showHidden }; this.openPopup('filterPopup'); },
     applyFilters() { this.animateList(() => { this.selectedFamily = this.filterDraft.family; this.showHistory = this.filterDraft.history; this.showExpired = false; this.showHidden = this.filterDraft.hidden; this.regroup(); }); this.closePopup('filterPopup'); },
     openDetails(item) { this.detailId = item.id; this.dateEditing = false; this.openPopup('detailPopup'); },
@@ -386,7 +387,7 @@ export default {
     openDateEditor(item) { this.dateTarget = item; this.dateDraft = item.dateOverride || ''; this.dateEditing = true; this.$nextTick(() => this.$refs.detailPopup?.$el?.querySelector?.('input')?.focus()); },
     async saveDate() { if (!this.dateTarget || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(this.dateDraft)) { uni.showToast({ title: '请输入YYYY-MM-DD', icon: 'none' }); return; } if (this.syncingOrderId) return; try { this.syncingOrderId = this.dateTarget.id; this.applySnapshot(await mutate('setOrderDate', { id: this.dateTarget.id, date: this.dateDraft })); this.dateEditing = false; } catch (e) { uni.showToast({ title: e.message || '保存失败', icon: 'none' }); } finally { this.syncingOrderId = ''; } },
     async restoreDate(item) { await this.action('setOrderDate', { id: item.id, date: null }); },
-    async refreshOrderDate(item) { if (this.syncingOrderId) return; try { this.syncingOrderId = item.id; const result = await refreshOrder(item.id); this.applySnapshot(result.snapshot || result); this.error = [result.smsError, result.onlineError].filter(Boolean).map(e => e.message || e).join('；'); this.notice = result.pending ? '后台仍在处理中，稍后刷新查看' : result.onlineNotice || '订单已更新'; } catch (e) { this.error = e.message || '更新失败'; } finally { this.syncingOrderId = ''; } },
+    async refreshOrderDate(item) { if (this.syncingOrderId) return; try { this.syncingOrderId = item.id; const result = await refreshOrder(item.id, progress => { this.refreshProgressText = progress.label; }); this.applySnapshot(result.snapshot || result); this.error = [result.smsError, result.onlineError].filter(Boolean).map(e => e.message || e).join('；'); this.notice = result.pending ? result.pendingNotice || '后台仍在处理中，稍后刷新查看' : result.onlineNotice || '订单已更新'; } catch (e) { this.error = e.message || '更新失败'; } finally { this.syncingOrderId = ''; this.refreshProgressText = ''; } },
     showAddPackage() { uni.navigateTo({ url: '/pages/packages/edit' }); },
     showEditPackage(item) { if (item.source === 'online') return; if (this.activePopup) this.closePopup(this.activePopup); uni.setStorageSync('editData', JSON.stringify({ item: { ...item, name: item.title, price: item.amount ?? '', date: new Date(item.orderDate).toLocaleDateString('sv-SE') } })); uni.navigateTo({ url: '/pages/packages/edit?type=edit' }); },
     getWaybillCount(list) { return list.filter(item => item.source !== 'manual').reduce((total, item) => total + (item.shipments || []).filter(s => s && !s.hidden && String(s.waybillNo || '').trim()).length, 0); },

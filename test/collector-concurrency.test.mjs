@@ -87,27 +87,27 @@ for (const platform of ['pdd', 'taobao']) {
     for (const stage of stages) assert.equal(network.calls.filter(call => call.kind === stage).length, 6);
   });
 
-  test(`${platform} concurrent full-track requests retain the twenty-order budget and oldest-first priority`, async () => {
-    const network = fixture(platform, { count: 22 });
-    const knownOrders = ids(22).map((platformOrderId, index) => ({ platformOrderId, orderDateOrigin: 'detail', shipments: [{
-      waybillNo: `A-${platformOrderId}`, status: 'transit', logisticsCheckedAt: 22 - index, logisticsDetailCheckedAt: 22 - index,
+  test(`${platform} concurrent full-track requests finish every order and retain oldest-first priority`, async () => {
+    const network = fixture(platform, { count: 27 });
+    const knownOrders = ids(27).map((platformOrderId, index) => ({ platformOrderId, orderDateOrigin: 'detail', shipments: [{
+      waybillNo: `A-${platformOrderId}`, status: 'transit', logisticsCheckedAt: 27 - index, logisticsDetailCheckedAt: 27 - index,
     }] }));
     await createCollector({ now: () => NOW, fetchImpl: network.fetchImpl })({ platform }, cookie, { knownOrders });
     const tracked = network.calls.filter(call => call.kind === stages[1]);
-    assert.equal(tracked.length, 20);
-    assert.deepEqual(tracked.slice(0, 2).map(call => call.id), ['synthetic-21', 'synthetic-20']);
+    assert.equal(tracked.length, 27);
+    assert.deepEqual(tracked.slice(0, 2).map(call => call.id), ['synthetic-26', 'synthetic-25']);
     assert.equal(network.maxima[stages[1]], 2);
   });
 
-  for (const stage of stages) test(`${platform} ${stage} expiry drains the in-flight peer and stops new requests`, async () => {
+  for (const stage of stages) for (const [status, code] of [[401, 'ACCOUNT_EXPIRED'], [403, 'UPSTREAM_BLOCKED'], [429, 'UPSTREAM_RATE_LIMITED']]) test(`${platform} ${stage} HTTP ${status} drains the in-flight peer and stops new requests`, async () => {
     const network = fixture(platform, { onRequest: async call => {
       if (call.kind !== stage) return;
-      if (call.id === 'synthetic-0') return new Response('', { status: 401 });
+      if (call.id === 'synthetic-0') return new Response('', { status });
       await pause(30);
     } });
-    await assert.rejects(createCollector({ now: () => NOW, fetchImpl: network.fetchImpl })({ platform }, cookie), { code: 'ACCOUNT_EXPIRED' });
+    await assert.rejects(createCollector({ now: () => NOW, fetchImpl: network.fetchImpl })({ platform }, cookie), { code });
     assert.equal(network.active.size, 0);
-    assert.deepEqual(network.calls.filter(call => call.kind === stage).map(call => call.id), ['synthetic-0', 'synthetic-1']);
+    assert.deepEqual(network.calls.filter(call => call.kind === stage).map(call => call.id).sort(), ['synthetic-0', 'synthetic-1']);
     if (stage === stages[0]) assert.equal(network.calls.filter(call => call.kind === stages[1]).length, 0);
   });
 

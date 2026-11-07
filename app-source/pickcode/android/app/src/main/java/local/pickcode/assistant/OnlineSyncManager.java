@@ -912,6 +912,16 @@ public final class OnlineSyncManager {
             boolean pending = "queued".equals(state) || "running".equals(state);
             JSONObject value = new JSONObject().put("id", id).put("accountId", accountId).put("orderId", orderId).put("state", state)
                     .put("retryAt", Math.max(0, job.optLong("retryAt")));
+            JSONObject progress = job.optJSONObject("logisticsProgress");
+            if (progress != null) {
+                JSONObject counts = new JSONObject();
+                for (String field : new String[]{"total", "completed", "active", "attempts", "durationMs"}) counts.put(field, progressCount(progress.opt(field)));
+                counts.put("completed", Math.min(counts.getInt("total"), counts.getInt("completed")));
+                counts.put("active", Math.min(counts.getInt("total") - counts.getInt("completed"), counts.getInt("active")));
+                value.put("logisticsProgress", counts);
+            }
+            if (job.has("retryCount")) value.put("retryCount", progressCount(job.opt("retryCount")));
+            for (String field : new String[]{"continuation", "throttled"}) if (job.has(field)) value.put(field, Boolean.TRUE.equals(job.opt(field)));
             if (job.has("familyId")) {
                 String family = safeText(job, "familyId", 101);
                 if (!family.isEmpty() && !family.matches("[A-Za-z0-9_-]{1,100}")) throw invalidResponse();
@@ -943,6 +953,11 @@ public final class OnlineSyncManager {
             safe.put(value);
         }
         return safe;
+    }
+    private static int progressCount(Object value) {
+        if (!(value instanceof Number)) return 0;
+        double number = ((Number) value).doubleValue();
+        return Double.isFinite(number) ? (int) Math.max(0, Math.min(100000, number)) : 0;
     }
     static JSONArray mergeStartedJobs(JSONArray previous, JSONArray started) throws Exception {
         Map<String, JSONObject> result = new LinkedHashMap<>();
