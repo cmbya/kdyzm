@@ -1,0 +1,8 @@
+rules:
+  - id: no-hardcoded-node-env-production-toggle
+    message: Do not hard-code production-only behavior in workflow scaffolding.
+    severity: WARNING
+    languages:
+      - javascript
+      - typescript
+    pattern: process.env.NODE_ENV = "production"

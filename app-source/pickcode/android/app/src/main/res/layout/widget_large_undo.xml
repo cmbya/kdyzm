@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:paddingTop="2dp" android:paddingBottom="3dp">
+    <TextView android:id="@+id/large_undo_message" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+        android:text="✓ 已标记领取" android:textSize="11sp" android:textColor="#536073" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" />
+    <TextView android:id="@+id/large_undo_button" android:layout_width="57dp" android:layout_height="44dp" android:gravity="center"
+        android:text="撤销" android:textSize="12sp" android:textColor="#0867FF" android:maxLines="1" android:includeFontPadding="false" />
+</LinearLayout>

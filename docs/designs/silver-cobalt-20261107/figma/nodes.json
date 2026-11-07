@@ -1,0 +1,458 @@
+[
+  {
+    "id": "pickup",
+    "title": "取件列表",
+    "nodeId": "29:2",
+    "index": 0
+  },
+  {
+    "id": "pickup-time",
+    "title": "取件列表",
+    "nodeId": "30:2",
+    "index": 1
+  },
+  {
+    "id": "pickup-history",
+    "title": "取件列表",
+    "nodeId": "31:2",
+    "index": 2
+  },
+  {
+    "id": "pickup-empty",
+    "title": "取件列表",
+    "nodeId": "32:2",
+    "index": 3
+  },
+  {
+    "id": "pickup-long",
+    "title": "取件列表",
+    "nodeId": "33:2",
+    "index": 4
+  },
+  {
+    "id": "notifications",
+    "title": "通知中心",
+    "nodeId": "34:2",
+    "index": 5
+  },
+  {
+    "id": "notifications-empty",
+    "title": "通知中心",
+    "nodeId": "35:2",
+    "index": 6
+  },
+  {
+    "id": "pickup-detail",
+    "title": "取件详情",
+    "nodeId": "36:2",
+    "index": 7
+  },
+  {
+    "id": "pickup-multi",
+    "title": "同码多件取件",
+    "nodeId": "37:2",
+    "index": 8
+  },
+  {
+    "id": "pickup-match",
+    "title": "选择对应包裹",
+    "nodeId": "38:2",
+    "index": 9
+  },
+  {
+    "id": "pickup-match-empty",
+    "title": "匹配包裹",
+    "nodeId": "39:2",
+    "index": 10
+  },
+  {
+    "id": "pickup-conflict",
+    "title": "确认取件码",
+    "nodeId": "40:2",
+    "index": 11
+  },
+  {
+    "id": "pickup-source",
+    "title": "原始短信",
+    "nodeId": "41:2",
+    "index": 12
+  },
+  {
+    "id": "pickup-menu",
+    "title": "取件记录操作",
+    "nodeId": "42:2",
+    "index": 13
+  },
+  {
+    "id": "station",
+    "title": "更换站点",
+    "nodeId": "43:2",
+    "index": 14
+  },
+  {
+    "id": "station-saved",
+    "title": "站点已修正",
+    "nodeId": "44:2",
+    "index": 15
+  },
+  {
+    "id": "pickup-edit",
+    "title": "修改取件记录",
+    "nodeId": "45:2",
+    "index": 16
+  },
+  {
+    "id": "pickup-ignore",
+    "title": "忽略这条短信",
+    "nodeId": "46:2",
+    "index": 17
+  },
+  {
+    "id": "packages",
+    "title": "包裹记录",
+    "nodeId": "47:2",
+    "index": 18
+  },
+  {
+    "id": "packages-filter",
+    "title": "筛选包裹",
+    "nodeId": "48:2",
+    "index": 19
+  },
+  {
+    "id": "package-detail",
+    "title": "包裹详情",
+    "nodeId": "49:2",
+    "index": 20
+  },
+  {
+    "id": "package-multi",
+    "title": "一单多个包裹",
+    "nodeId": "50:2",
+    "index": 21
+  },
+  {
+    "id": "package-expired",
+    "title": "过期订单详情",
+    "nodeId": "51:2",
+    "index": 22
+  },
+  {
+    "id": "package-delivery",
+    "title": "确认收到",
+    "nodeId": "52:2",
+    "index": 23
+  },
+  {
+    "id": "package-date",
+    "title": "修改下单日期",
+    "nodeId": "53:2",
+    "index": 24
+  },
+  {
+    "id": "package-edit",
+    "title": "添加快递",
+    "nodeId": "54:2",
+    "index": 25
+  },
+  {
+    "id": "package-error",
+    "title": "包裹记录",
+    "nodeId": "55:2",
+    "index": 26
+  },
+  {
+    "id": "package-loading",
+    "title": "包裹记录",
+    "nodeId": "56:2",
+    "index": 27
+  },
+  {
+    "id": "package-logistics",
+    "title": "物流轨迹",
+    "nodeId": "57:2",
+    "index": 28
+  },
+  {
+    "id": "package-history",
+    "title": "历史与过期记录",
+    "nodeId": "58:2",
+    "index": 29
+  },
+  {
+    "id": "pickup-unmatched",
+    "title": "取件详情",
+    "nodeId": "59:2",
+    "index": 30
+  },
+  {
+    "id": "pickup-linked-source",
+    "title": "短信与关联",
+    "nodeId": "60:2",
+    "index": 31
+  },
+  {
+    "id": "pickup-assignment",
+    "title": "确认此前已取",
+    "nodeId": "61:2",
+    "index": 32
+  },
+  {
+    "id": "pickup-reminder",
+    "title": "到站提醒",
+    "nodeId": "62:2",
+    "index": 33
+  },
+  {
+    "id": "notifications-review",
+    "title": "通知中心",
+    "nodeId": "63:2",
+    "index": 34
+  },
+  {
+    "id": "notifications-error",
+    "title": "通知中心",
+    "nodeId": "64:2",
+    "index": 35
+  },
+  {
+    "id": "notifications-sync",
+    "title": "通知中心",
+    "nodeId": "65:2",
+    "index": 36
+  },
+  {
+    "id": "station-empty",
+    "title": "更换站点",
+    "nodeId": "67:2",
+    "index": 37
+  },
+  {
+    "id": "pickup-match-conflict",
+    "title": "确认关联差异",
+    "nodeId": "68:2",
+    "index": 38
+  },
+  {
+    "id": "package-empty",
+    "title": "包裹记录",
+    "nodeId": "69:2",
+    "index": 39
+  },
+  {
+    "id": "package-edit-error",
+    "title": "添加快递",
+    "nodeId": "70:2",
+    "index": 40
+  },
+  {
+    "id": "package-refreshing",
+    "title": "包裹记录",
+    "nodeId": "71:2",
+    "index": 41
+  },
+  {
+    "id": "package-logistics-empty",
+    "title": "物流轨迹",
+    "nodeId": "72:2",
+    "index": 42
+  },
+  {
+    "id": "my",
+    "title": "我的",
+    "nodeId": "73:2",
+    "index": 43
+  },
+  {
+    "id": "accounts",
+    "title": "线上账号",
+    "nodeId": "74:2",
+    "index": 44
+  },
+  {
+    "id": "accounts-unbound",
+    "title": "绑定服务",
+    "nodeId": "75:2",
+    "index": 45
+  },
+  {
+    "id": "accounts-verify",
+    "title": "确认授权范围",
+    "nodeId": "76:2",
+    "index": 46
+  },
+  {
+    "id": "accounts-error",
+    "title": "账号需要处理",
+    "nodeId": "77:2",
+    "index": 47
+  },
+  {
+    "id": "automation",
+    "title": "识别优化",
+    "nodeId": "78:2",
+    "index": 48
+  },
+  {
+    "id": "optimization",
+    "title": "优化设置",
+    "nodeId": "79:2",
+    "index": 49
+  },
+  {
+    "id": "scan",
+    "title": "扫描与权限",
+    "nodeId": "80:2",
+    "index": 50
+  },
+  {
+    "id": "scan-denied",
+    "title": "需要短信权限",
+    "nodeId": "81:2",
+    "index": 51
+  },
+  {
+    "id": "widgets",
+    "title": "桌面卡片",
+    "nodeId": "82:2",
+    "index": 52
+  },
+  {
+    "id": "widgets-small",
+    "title": "紧凑桌面卡片",
+    "nodeId": "83:2",
+    "index": 53
+  },
+  {
+    "id": "widgets-large",
+    "title": "大号桌面卡片",
+    "nodeId": "84:2",
+    "index": 54
+  },
+  {
+    "id": "widgets-privacy",
+    "title": "桌面卡片隐私",
+    "nodeId": "85:2",
+    "index": 55
+  },
+  {
+    "id": "corrections",
+    "title": "人工修正记录",
+    "nodeId": "86:2",
+    "index": 56
+  },
+  {
+    "id": "correction-detail",
+    "title": "本次修正",
+    "nodeId": "87:2",
+    "index": 57
+  },
+  {
+    "id": "correction-failed",
+    "title": "修正提交失败",
+    "nodeId": "88:2",
+    "index": 58
+  },
+  {
+    "id": "auto-completions",
+    "title": "自动取件记录",
+    "nodeId": "89:2",
+    "index": 59
+  },
+  {
+    "id": "sms-rules",
+    "title": "短信识别规则",
+    "nodeId": "90:2",
+    "index": 60
+  },
+  {
+    "id": "sms-edit",
+    "title": "编辑短信规则",
+    "nodeId": "91:2",
+    "index": 61
+  },
+  {
+    "id": "sms-ai",
+    "title": "短信 AI 建议",
+    "nodeId": "92:2",
+    "index": 62
+  },
+  {
+    "id": "sms-ai-unavailable",
+    "title": "AI 服务暂不可用",
+    "nodeId": "93:2",
+    "index": 63
+  },
+  {
+    "id": "sms-ai-detail",
+    "title": "核对识别建议",
+    "nodeId": "94:2",
+    "index": 64
+  },
+  {
+    "id": "sms-presets",
+    "title": "选择预制规则",
+    "nodeId": "95:2",
+    "index": 65
+  },
+  {
+    "id": "logistics-rules",
+    "title": "物流识别规则",
+    "nodeId": "96:2",
+    "index": 66
+  },
+  {
+    "id": "logistics-edit",
+    "title": "编辑物流规则",
+    "nodeId": "97:2",
+    "index": 67
+  },
+  {
+    "id": "ignored",
+    "title": "已忽略短信",
+    "nodeId": "98:2",
+    "index": 68
+  },
+  {
+    "id": "faq",
+    "title": "常见问题",
+    "nodeId": "99:2",
+    "index": 69
+  },
+  {
+    "id": "about",
+    "title": "关于应用",
+    "nodeId": "100:2",
+    "index": 70
+  },
+  {
+    "id": "changelog",
+    "title": "更新记录",
+    "nodeId": "101:2",
+    "index": 71
+  },
+  {
+    "id": "update",
+    "title": "检查更新",
+    "nodeId": "102:2",
+    "index": 72
+  },
+  {
+    "id": "update-progress",
+    "title": "下载更新",
+    "nodeId": "103:2",
+    "index": 73
+  },
+  {
+    "id": "update-ready",
+    "title": "准备安装",
+    "nodeId": "104:2",
+    "index": 74
+  },
+  {
+    "id": "update-error",
+    "title": "更新未完成",
+    "nodeId": "105:2",
+    "index": 75
+  }
+]

@@ -1,0 +1,534 @@
+[
+  {
+    "id": "pickup",
+    "title": "取件列表",
+    "group": "取件",
+    "route": "/pages/index/index",
+    "description": "默认按站点聚合。同站点按柜号排列，商品名称最多十字，完整名称在详情查看。"
+  },
+  {
+    "id": "pickup-time",
+    "title": "取件列表",
+    "group": "取件",
+    "route": "/pages/index/index · 按时间",
+    "description": "按时间浏览；日期作为组标题，同站点柜号从小到大。"
+  },
+  {
+    "id": "pickup-history",
+    "title": "取件列表",
+    "group": "取件",
+    "route": "/pages/index/index · 已取展开",
+    "description": "展开已取历史仍保留全部未取在最前，历史只出现在下方。"
+  },
+  {
+    "id": "pickup-empty",
+    "title": "取件列表",
+    "group": "取件",
+    "route": "/pages/index/index · 空状态",
+    "description": "无待取记录时仍可手动添加或更新，不强制绑定。"
+  },
+  {
+    "id": "pickup-long",
+    "title": "取件列表",
+    "group": "取件",
+    "route": "/pages/index/index · 长码与缺失信息",
+    "description": "长码完整换行，未知商品与平台保持留白，仍可独立领取。"
+  },
+  {
+    "id": "notifications",
+    "title": "通知中心",
+    "group": "取件",
+    "route": "/pages/index/index · notificationsPopup",
+    "description": "待确认、异常与同步集中呈现，每项均可独立关闭。"
+  },
+  {
+    "id": "notifications-empty",
+    "title": "通知中心",
+    "group": "取件",
+    "route": "/pages/index/index · 通知空状态",
+    "description": "当前没有待处理或异常通知。"
+  },
+  {
+    "id": "pickup-detail",
+    "title": "取件详情",
+    "group": "取件",
+    "route": "/pages/index/index · sourcePopup",
+    "description": "关联商品显示完整名称，领取只记录当前包裹。"
+  },
+  {
+    "id": "pickup-multi",
+    "title": "同码多件取件",
+    "group": "取件",
+    "route": "/pages/index/index · 多成员",
+    "description": "同码三件、已取一件；选择本次领取成员。"
+  },
+  {
+    "id": "pickup-match",
+    "title": "选择对应包裹",
+    "group": "取件",
+    "route": "/pages/index/index · 匹配选择",
+    "description": "以运单为匹配单位；推荐、搜索、角色和平台筛选收在同一面板。"
+  },
+  {
+    "id": "pickup-match-empty",
+    "title": "匹配包裹",
+    "group": "取件",
+    "route": "/pages/index/index · 匹配无结果",
+    "description": "搜索与筛选无结果的实际空状态。"
+  },
+  {
+    "id": "pickup-conflict",
+    "title": "确认取件码",
+    "group": "取件",
+    "route": "/pages/index/index · 取件码冲突",
+    "description": "不合并来源冲突与匹配冲突；用户明确选择采用的码。"
+  },
+  {
+    "id": "pickup-source",
+    "title": "原始短信",
+    "group": "取件",
+    "route": "/pages/index/index · 未关联来源",
+    "description": "未匹配短信不显示虚构商品或领取归属。"
+  },
+  {
+    "id": "pickup-menu",
+    "title": "取件记录操作",
+    "group": "取件",
+    "route": "/pages/index/index · more-actions",
+    "description": "低频操作收进更多菜单；删除、忽略和解除语义独立。"
+  },
+  {
+    "id": "station",
+    "title": "更换站点",
+    "group": "取件",
+    "route": "components/StationChooser.vue",
+    "description": "取件列表和包裹详情共用；当前人工指定与原识别值分开。"
+  },
+  {
+    "id": "station-saved",
+    "title": "站点已修正",
+    "group": "取件",
+    "route": "components/StationChooser.vue · 保存结果",
+    "description": "站点修正成功与后续优化进度分离。"
+  },
+  {
+    "id": "pickup-edit",
+    "title": "修改取件记录",
+    "group": "取件",
+    "route": "/pages/index/edit-code",
+    "description": "主要字段单列，标签管理与备注只在编辑场景展开。"
+  },
+  {
+    "id": "pickup-ignore",
+    "title": "忽略这条短信",
+    "group": "取件",
+    "route": "/pages/index/index · ignorePopup",
+    "description": "明确影响并给出可恢复路径。"
+  },
+  {
+    "id": "packages",
+    "title": "包裹记录",
+    "group": "包裹",
+    "route": "/pages/packages/index",
+    "description": "总数是未收到包裹；平台和进度兼作筛选，订单与包裹的计量保持区别。"
+  },
+  {
+    "id": "packages-filter",
+    "title": "筛选包裹",
+    "group": "包裹",
+    "route": "/pages/packages/index · filterPopup",
+    "description": "角色、时间与隐藏维度统一收纳；状态和平台保留快捷入口。"
+  },
+  {
+    "id": "package-detail",
+    "title": "包裹详情",
+    "group": "包裹",
+    "route": "/pages/packages/index · detailPopup",
+    "description": "完整商品名、订单级元信息只出现一次；运单级动作保持独立。"
+  },
+  {
+    "id": "package-multi",
+    "title": "一单多个包裹",
+    "group": "包裹",
+    "route": "/pages/packages/index · 多运单详情",
+    "description": "一笔订单两件包裹；领取、归属与物流各自独立。"
+  },
+  {
+    "id": "package-expired",
+    "title": "过期订单详情",
+    "group": "包裹",
+    "route": "/pages/packages/index · 归档详情",
+    "description": "超过 30 天归档；物流已签收可显示超期确认，未签收仅归档。"
+  },
+  {
+    "id": "package-delivery",
+    "title": "确认收到",
+    "group": "包裹",
+    "route": "/pages/packages/index · 送货上门",
+    "description": "区分物流已送达与用户已收到；本地记录不触发平台确认收货。"
+  },
+  {
+    "id": "package-date",
+    "title": "修改下单日期",
+    "group": "包裹",
+    "route": "/pages/packages/index · dateEditing",
+    "description": "人工日期显式标记来源，可恢复平台日期；不伪造平台信息。"
+  },
+  {
+    "id": "package-edit",
+    "title": "添加快递",
+    "group": "包裹",
+    "route": "/pages/packages/edit",
+    "description": "最少两项手动记录，保存后的校验失败单独展示。"
+  },
+  {
+    "id": "package-error",
+    "title": "包裹记录",
+    "group": "包裹",
+    "route": "/pages/packages/index · 同步异常",
+    "description": "更新失败保留本地记录；账号问题进入账号管理。"
+  },
+  {
+    "id": "package-loading",
+    "title": "包裹记录",
+    "group": "包裹",
+    "route": "/pages/packages/index · 首次加载",
+    "description": "未完成本地读取前只显示骨架，不提前给出空列表结论。"
+  },
+  {
+    "id": "package-logistics",
+    "title": "物流轨迹",
+    "group": "包裹",
+    "route": "components/LogisticsTimeline.vue",
+    "description": "查询失败仍展示缓存，时间线说明来源与时间。"
+  },
+  {
+    "id": "package-history",
+    "title": "历史与过期记录",
+    "group": "包裹",
+    "route": "/pages/packages/index · 历史与过期",
+    "description": "已完成、过期与手动是独立口径；保留撤销自动完成、恢复显示及历史日期管理。"
+  },
+  {
+    "id": "pickup-unmatched",
+    "title": "取件详情",
+    "group": "取件",
+    "route": "/pages/index/index · 未匹配详情",
+    "description": "未匹配也可直接领取；不展示虚构商品、角色或此前领取归属。"
+  },
+  {
+    "id": "pickup-linked-source",
+    "title": "短信与关联",
+    "group": "取件",
+    "route": "/pages/index/index · 已关联来源",
+    "description": "已匹配来源保留原文、依据及单件或整条解除操作。"
+  },
+  {
+    "id": "pickup-assignment",
+    "title": "确认此前已取",
+    "group": "取件",
+    "route": "/pages/index/index · 领取归属待确认",
+    "description": "只在已有领取数量但归属缺失时出现，与未匹配短信详情分开。"
+  },
+  {
+    "id": "pickup-reminder",
+    "title": "到站提醒",
+    "group": "取件",
+    "route": "/pages/index/index · 未识别取件码短信",
+    "description": "没有识别到码的短信以原文提供核对入口。"
+  },
+  {
+    "id": "notifications-review",
+    "title": "通知中心",
+    "group": "取件",
+    "route": "/pages/index/index · 待确认通知",
+    "description": "待确认类别单独浏览，每条可关闭。"
+  },
+  {
+    "id": "notifications-error",
+    "title": "通知中心",
+    "group": "取件",
+    "route": "/pages/index/index · 异常通知",
+    "description": "账号、本地读取和短信更新错误均给出对应恢复入口。"
+  },
+  {
+    "id": "notifications-sync",
+    "title": "通知中心",
+    "group": "取件",
+    "route": "/pages/index/index · 同步通知",
+    "description": "同步进度和结果可分别关闭，后台任务不阻塞本地取件。"
+  },
+  {
+    "id": "station-empty",
+    "title": "更换站点",
+    "group": "取件",
+    "route": "components/StationChooser.vue · 无可选站点",
+    "description": "同步站点配置为空的独立状态。"
+  },
+  {
+    "id": "pickup-match-conflict",
+    "title": "确认关联差异",
+    "group": "取件",
+    "route": "/pages/index/index · 匹配冲突确认",
+    "description": "所选包裹与短信末端站点不同，需要用户明确再次确认。"
+  },
+  {
+    "id": "package-empty",
+    "title": "包裹记录",
+    "group": "包裹",
+    "route": "/pages/packages/index · 无记录",
+    "description": "真正没有记录的空状态，提供新增和账号绑定入口。"
+  },
+  {
+    "id": "package-edit-error",
+    "title": "添加快递",
+    "group": "包裹",
+    "route": "/pages/packages/edit · 校验失败",
+    "description": "保存后真实字段错误态，错误在对应字段附近显示。"
+  },
+  {
+    "id": "package-refreshing",
+    "title": "包裹记录",
+    "group": "包裹",
+    "route": "/pages/packages/index · 后台更新",
+    "description": "已有本地记录仍可浏览，更新中按钮禁用。"
+  },
+  {
+    "id": "package-logistics-empty",
+    "title": "物流轨迹",
+    "group": "包裹",
+    "route": "components/LogisticsTimeline.vue · 无轨迹",
+    "description": "平台暂未提供轨迹时显示查询时间与空状态。"
+  },
+  {
+    "id": "my",
+    "title": "我的",
+    "group": "设置",
+    "route": "/pages/my/index",
+    "description": "设置首页。识别统计保持本机口径，常用配置按职责归组。"
+  },
+  {
+    "id": "accounts",
+    "title": "线上账号",
+    "group": "设置",
+    "route": "/pages/my/online-accounts",
+    "description": "已绑定状态。全局同步只保留一个主入口，账号行保留各自的登录与采集情况。"
+  },
+  {
+    "id": "accounts-unbound",
+    "title": "绑定服务",
+    "group": "设置",
+    "route": "/pages/my/online-accounts",
+    "description": "未绑定/更换服务表单；扫码、相册和粘贴均只填入待核验信息。"
+  },
+  {
+    "id": "accounts-verify",
+    "title": "确认授权范围",
+    "group": "设置",
+    "route": "/pages/my/online-accounts · pairingPreview",
+    "description": "核验完成后才允许绑定。家人整组授权与指定账号授权分开列明。"
+  },
+  {
+    "id": "accounts-error",
+    "title": "账号需要处理",
+    "group": "设置",
+    "route": "/pages/my/online-accounts · error",
+    "description": "平台登录失效与设备授权失效分开；现存本地记录不隐藏。"
+  },
+  {
+    "id": "automation",
+    "title": "识别优化",
+    "group": "识别与优化",
+    "route": "/pages/my/auto-settings + /pages/my/match-rules",
+    "description": "设计建议的集中入口，原有开关和数据来源不变；三个优化流程保持独立。"
+  },
+  {
+    "id": "optimization",
+    "title": "优化设置",
+    "group": "识别与优化",
+    "route": "/pages/my/auto-settings · stationEnhancement / manualLearning",
+    "description": "手机采集许可和后台处理职责分开，不增加渠道、密钥或自动批准设置。"
+  },
+  {
+    "id": "scan",
+    "title": "扫描与权限",
+    "group": "设置",
+    "route": "/pages/my/auto-settings · scan / permission",
+    "description": "将扫描频率、权限、后台限制和手动扫描放在同一页；没有准点保证。"
+  },
+  {
+    "id": "scan-denied",
+    "title": "需要短信权限",
+    "group": "设置",
+    "route": "/pages/my/auto-settings · smsPermission=false",
+    "description": "权限拒绝状态。显示真实阻断原因，保留本地记录与打开系统设置入口。"
+  },
+  {
+    "id": "widgets",
+    "title": "桌面卡片",
+    "group": "设置",
+    "route": "/pages/my/auto-settings · widget=list",
+    "description": "默认 4×2 列表卡片；三个尺寸有独立可切换场景，保留隐私与添加入口。"
+  },
+  {
+    "id": "widgets-small",
+    "title": "紧凑桌面卡片",
+    "group": "设置",
+    "route": "/pages/my/auto-settings · widget=small",
+    "description": "2×2 紧凑卡片，突出一个取件码与剩余数量。"
+  },
+  {
+    "id": "widgets-large",
+    "title": "大号桌面卡片",
+    "group": "设置",
+    "route": "/pages/my/auto-settings · widget=large",
+    "description": "5×3 大卡片，保留站点/平台筛选、共码多件、待确认收到与代收包裹。"
+  },
+  {
+    "id": "widgets-privacy",
+    "title": "桌面卡片隐私",
+    "group": "设置",
+    "route": "/pages/my/auto-settings · widgetPrivacy",
+    "description": "隐私模式同时隐藏码、柜号、公司、地址及相关详情，保留进入应用的入口。"
+  },
+  {
+    "id": "corrections",
+    "title": "人工修正记录",
+    "group": "识别与优化",
+    "route": "/pages/my/auto-settings · matchingFeedback / corrections",
+    "description": "本地纠错为主线，提交回执附在事件上，避免把同一次纠错重复列成两张卡。"
+  },
+  {
+    "id": "correction-detail",
+    "title": "本次修正",
+    "group": "识别与优化",
+    "route": "/pages/my/auto-settings?correctionId=demo-correction",
+    "description": "纠错深链直接定位同一个事件。展示本地保存、后台结果与手机回执，不编造 AI 推理过程。"
+  },
+  {
+    "id": "correction-failed",
+    "title": "修正提交失败",
+    "group": "识别与优化",
+    "route": "/pages/my/auto-settings · matchingFeedback.failed",
+    "description": "失败样例保留本机修正，显示原始失败回执与尝试时间；通过现有同步流程重试。"
+  },
+  {
+    "id": "auto-completions",
+    "title": "自动取件记录",
+    "group": "识别与优化",
+    "route": "/pages/my/auto-settings · recentCompletionResults",
+    "description": "自动完成结果记录，非 AI 通用运行日志。监测开关只读后台状态。"
+  },
+  {
+    "id": "sms-rules",
+    "title": "短信识别规则",
+    "group": "识别与优化",
+    "route": "/pages/my/match-rules",
+    "description": "规则列表专注规则维护，AI 建议与忽略短信保留明确入口。"
+  },
+  {
+    "id": "sms-edit",
+    "title": "编辑短信规则",
+    "group": "识别与优化",
+    "route": "/pages/my/match-settings?mode=edit&id=demo-rule",
+    "description": "保留样例、正确码、起止文字与验证门槛；新增、预制和提醒模板复用此结构。"
+  },
+  {
+    "id": "sms-ai",
+    "title": "短信 AI 建议",
+    "group": "识别与优化",
+    "route": "/pages/my/match-rules · AiOptimizationPanel",
+    "description": "自动准备候选建议；确认使用才生效，不展示虚构准确率或运行日志。"
+  },
+  {
+    "id": "sms-ai-unavailable",
+    "title": "AI 服务暂不可用",
+    "group": "识别与优化",
+    "route": "/components/AiOptimizationPanel.vue · service.available=false",
+    "description": "AI 默认服务未配置状态，不禁用本机手动规则。完整 AI 运行日志仍需后台能力支持。"
+  },
+  {
+    "id": "sms-ai-detail",
+    "title": "核对识别建议",
+    "group": "识别与优化",
+    "route": "/components/AiOptimizationPanel.vue · proposalDetails",
+    "description": "候选建议核对弹层，保留本机原样例与具体提取位置。"
+  },
+  {
+    "id": "sms-presets",
+    "title": "选择预制规则",
+    "group": "识别与优化",
+    "route": "/pages/my/match-rules · presetPopup",
+    "description": "选择仅进入编辑核对，不直接覆盖现有规则。"
+  },
+  {
+    "id": "logistics-rules",
+    "title": "物流识别规则",
+    "group": "识别与优化",
+    "route": "/pages/my/logistics-rules",
+    "description": "本机规则与后台规则明确分开；列表保留启停、编辑、删除、恢复默认。"
+  },
+  {
+    "id": "logistics-edit",
+    "title": "编辑物流规则",
+    "group": "识别与优化",
+    "route": "/pages/my/logistics-rules · editor",
+    "description": "两种规则类型可见；多条起始文字和关键词保持各自独立输入。"
+  },
+  {
+    "id": "ignored",
+    "title": "已忽略短信",
+    "group": "识别与优化",
+    "route": "/pages/my/ignored",
+    "description": "保留原短信核对与逐条恢复，恢复按当前规则重新处理。"
+  },
+  {
+    "id": "faq",
+    "title": "常见问题",
+    "group": "帮助",
+    "route": "/pages/my/faq",
+    "description": "按常见故障折叠，移除旧 DeepSeek/原样例上传文案，保留设置直达。"
+  },
+  {
+    "id": "about",
+    "title": "关于应用",
+    "group": "帮助",
+    "route": "/pages/my/about",
+    "description": "简化功能宣传，保留本地识别、私人版、许可、版本与历史入口。"
+  },
+  {
+    "id": "changelog",
+    "title": "更新记录",
+    "group": "帮助",
+    "route": "/pages/my/changelog",
+    "description": "当前版本使用 3.1.33；旧版本内容折叠，未来更新只在更新场景中标注为示例。"
+  },
+  {
+    "id": "update",
+    "title": "检查更新",
+    "group": "帮助",
+    "route": "/components/AppUpdate.vue · available",
+    "description": "有可用版本的更新弹层，当前版、来源、文件大小与说明均保留。"
+  },
+  {
+    "id": "update-progress",
+    "title": "下载更新",
+    "group": "帮助",
+    "route": "/components/AppUpdate.vue · downloading",
+    "description": "下载中保留字节进度和明确取消操作；关闭弹层不代表取消。"
+  },
+  {
+    "id": "update-ready",
+    "title": "准备安装",
+    "group": "帮助",
+    "route": "/components/AppUpdate.vue · ready",
+    "description": "展示准备完成与未知来源权限状态；安装仅进入 Android 流程，不伪造安装成功。"
+  },
+  {
+    "id": "update-error",
+    "title": "更新未完成",
+    "group": "帮助",
+    "route": "/components/AppUpdate.vue · error",
+    "description": "下载失败与检查失败复用错误容器；保留真实原因和各自恢复操作。"
+  }
+]

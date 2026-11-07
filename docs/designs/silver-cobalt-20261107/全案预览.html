@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>取件助手 · B 版细腻柔雾全案</title>
+  <style>@layer base, studio, components, responsive;
+@layer base {
+  :root { --glass-bg:linear-gradient(125deg,rgba(255,255,255,.50),rgba(249,251,255,.34) 50%,rgba(240,245,252,.42)); --glass-shadow:inset 0 1px 1px rgba(255,255,255,.90),inset 0 -1px 0 rgba(255,255,255,.25),0 12px 30px rgba(61,78,105,.08); --glass-blur:blur(26px) saturate(104%); --glass-edge:rgba(255,255,255,.88); --pickup-code:#172233; }
+  :root { --bg:#e8edf4; --surface:#f7f9fc; --ink:#172233; --muted:#626d7d; --line:#dce3ed; --blue:#0867f2; --code:#1257c8; --teal:#087f7d; --teal-bg:#dff2ef; --amber:#7b591d; --amber-bg:#fbefd9; --red:#b33f3b; --radius:24px; --shadow:0 8px 24px rgba(47,65,90,.07); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; color:var(--ink); font-synthesis:none; }
+  body { margin:0; background:#edf0f5; }
+  :where(div,section,article,header,footer,nav,aside,main,label,button,input,textarea,select,a) { box-sizing:border-box; }
+  :where(button,input,textarea,select) { font:inherit; }
+  button { cursor:pointer; color:inherit; }
+  button:disabled { cursor:default; opacity:.5; }
+  :where(button,input,textarea,select,a):focus-visible { outline:3px solid #1676ec; outline-offset:3px; }
+  :where(h1,h2,h3,p) { margin:0; }
+  .icon { width:22px; height:22px; flex-shrink:0; vertical-align:middle; }
+  [hidden] { display:none !important; }
+}
+@layer studio {
+  .catalog { position:fixed; inset:0 auto 0 0; width:252px; padding:28px 20px 18px; display:flex; flex-direction:column; border-right:1px solid #dce3eb; background:#f8f9fc; z-index:5; }
+  .brand { display:flex; gap:12px; align-items:center; font-size:18px; font-weight:700; letter-spacing:-.4px; }
+  .brand small { display:block; font-size:10px; letter-spacing:.8px; color:var(--muted); font-weight:500; margin-top:5px; }
+  .brand-icon { display:grid; place-items:center; background:var(--blue); color:white; width:38px; height:38px; border-radius:13px; font-size:27px; }
+  .catalog-intro { margin:32px 0 24px; font-size:23px; font-weight:650; letter-spacing:-1px; }
+  .catalog-intro span { display:block; font-size:11px; color:var(--muted); font-weight:400; letter-spacing:0; margin-top:10px; }
+  .catalog-search { font-size:11px; color:var(--muted); }
+  .catalog-search input { display:block; width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#eef2f7; margin:8px 0 18px; font-size:12px; }
+  #scene-nav { overflow-y:auto; flex:1; scrollbar-width:thin; padding-right:3px; }
+  .nav-group { margin-bottom:18px; }
+  .nav-group h2 { font-size:10px; color:var(--muted); letter-spacing:1.5px; padding:8px 10px; }
+  .nav-item { border:0; background:transparent; width:100%; text-align:left; display:flex; align-items:center; gap:11px; padding:9px 10px; border-radius:9px; font-size:12px; line-height:20px; }
+  .nav-item span { font-size:10px; color:#758195; font-variant-numeric:tabular-nums; }
+  .nav-item[aria-current=page] { background:#e7effc; color:var(--code); font-weight:650; }
+  .catalog-bottom { padding-top:16px; border-top:1px solid var(--line); font-size:10px; color:var(--muted); line-height:1.8; }
+  .workspace { margin-left:252px; min-height:100dvh; background:radial-gradient(ellipse at 25% 25%,#f8fafc 0%,#e9eef5 60%,#e3e9f1 100%); }
+  .workbar { height:116px; padding:28px 48px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #dde3ec; }
+  .eyebrow { font-size:10px; letter-spacing:2px; color:#607289; font-weight:650; }
+  .work-title h1 { font-size:24px; letter-spacing:-.8px; font-weight:600; margin-top:8px; }
+  .work-actions { display:flex; align-items:center; gap:20px; }
+  .tool-button { border:1px solid #d1dae6; border-radius:10px; background:#f7f9fc; min-height:36px; padding:8px 13px; font-size:11px; }
+  .sizes { display:flex; gap:3px; background:#dfe6ef; padding:4px; border-radius:10px; }
+  .sizes button { border:0; background:transparent; padding:6px 10px; border-radius:7px; font-size:11px; color:var(--muted); }
+  .sizes button[aria-pressed=true] { background:white; box-shadow:0 2px 5px #b5c1d433; color:var(--code); }
+  .review-stage { display:flex; align-items:flex-start; justify-content:center; gap:clamp(30px,5vw,90px); padding:40px 36px 50px; }
+  .preview-column { flex:0 0 auto; }
+  .phone { width:390px; height:844px; border:5px solid #f9fbfd; border-radius:44px; overflow:hidden; background:radial-gradient(ellipse at 3% 8%,#f5f7fa 0%,transparent 52%),radial-gradient(ellipse at 100% 61%,#dce4ef80 0%,transparent 62%),linear-gradient(135deg,#e8edf3 0%,#e9edf4 46%,#e0e7f0 78%,#eff3f8 100%); box-shadow:0 24px 65px #3245611b,0 0 0 1px #c7d2df; display:grid; grid-template-rows:32px auto minmax(0,1fr) auto; position:relative; isolation:isolate; container-type:inline-size; }
+  .phone::before { content:''; position:absolute; inset:0; pointer-events:none; z-index:-1; background:url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22180%22%20height%3D%22180%22%20viewBox%3D%220%200%20180%20180%22%3E%3Cfilter%20id%3D%22g%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%22.82%22%20numOctaves%3D%223%22%20stitchTiles%3D%22stitch%22%2F%3E%3CfeColorMatrix%20type%3D%22saturate%22%20values%3D%220%22%2F%3E%3C%2Ffilter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20opacity%3D%22.055%22%20filter%3D%22url(%23g)%22%2F%3E%3C%2Fsvg%3E%0A'); opacity:.18; }
+  .phone .statusbar { display:flex; align-items:center; justify-content:space-between; padding:8px 23px 0; font-size:11px; font-weight:650; font-variant-numeric:tabular-nums; }
+  .status-icons { display:flex; gap:6px; align-items:center; font-size:10px; letter-spacing:-1px; }
+  .battery { width:20px; height:9px; border:1px solid #526077; border-radius:3px; padding:1px; }
+  .battery::after { content:''; display:block; width:85%; height:100%; border-radius:1px; background:var(--ink); }
+  .phone-header { display:flex; align-items:center; gap:10px; padding:15px 16px 14px; min-height:72px; }
+  .phone-header h1 { font-size:29px; line-height:36px; font-weight:750; letter-spacing:-1.1px; flex:1; }
+  .phone-header.subpage { min-height:66px; padding:9px 12px; }
+  .phone-header.subpage h1 { font-size:20px; letter-spacing:-.6px; line-height:28px; }
+  .header-actions { display:flex; gap:4px; }
+  .page-content { overflow-y:auto; padding:0 15px 22px; scrollbar-width:none; min-height:0; }
+  .page-content::-webkit-scrollbar { display:none; }
+  .page-content > :not(:last-child) { margin-bottom:14px; }
+  .page-footer { padding:12px 16px 24px; display:flex; gap:10px; background:var(--glass-bg); border-top:1px solid var(--glass-edge); backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); }
+  .page-footer > .btn { flex:1; }
+  .tabbar { display:grid; grid-template-columns:repeat(3,1fr); padding:11px 10px 23px; border-top:1px solid var(--glass-edge); background:var(--glass-bg); backdrop-filter:blur(28px) saturate(104%); -webkit-backdrop-filter:blur(28px) saturate(104%); border-radius:26px 26px 0 0; box-shadow:inset 0 1px 0 #ffffffb3,0 -4px 24px #6b819c0c; }
+  .tabbar button { display:grid; justify-items:center; gap:5px; border:0; background:none; font-size:11px; color:var(--muted); font-weight:600; }
+  .tabbar .icon { width:24px; height:24px; }
+  .tabbar button.active { color:var(--blue); }
+  .phone::after { position:absolute; content:''; width:108px; height:4px; border-radius:8px; background:#263347; bottom:7px; left:calc(50% - 54px); pointer-events:none; z-index:3; }
+  .preview-caption { margin-top:18px; display:flex; justify-content:space-between; color:var(--muted); font-size:10px; }
+  .design-notes { max-width:270px; padding-top:65px; }
+  .design-notes h2 { font-size:30px; line-height:1.4; letter-spacing:-1px; margin:15px 0 20px; }
+  .design-notes p { font-size:13px; line-height:1.95; color:#58667a; }
+  .note-rule { height:1px; background:#cfd9e6; margin:28px 0; }
+  .design-notes h3 { font-size:12px; font-weight:650; }
+  .design-notes ul { padding-left:16px; font-size:12px; color:#58667a; line-height:2; margin-top:12px; }
+  .route-note { margin-top:28px; font-size:10px; color:#62738a; }
+  .route-note code { display:block; font:11px/1.8 Consolas,monospace; overflow-wrap:anywhere; margin-top:8px; color:#46576d; }
+  .review-hint { margin-top:24px; padding:13px; font-size:11px; line-height:1.8; background:#ffffff66; border-radius:12px; color:#62738a; }
+  .scene-pager { margin-top:24px; display:flex; justify-content:space-between; }
+  #prototype-toast { position:fixed; left:50%; bottom:28px; transform:translate(-50%,20px); opacity:0; pointer-events:none; background:#152438ed; color:white; border-radius:14px; padding:13px 20px; font-size:13px; z-index:100; max-width:90%; transition:opacity .15s,transform .15s; }
+  #prototype-toast.visible { opacity:1; transform:translate(-50%,0); }
+  .mobile-select { display:none; }
+  .overview { padding:36px 45px 60px; }
+  .overview-title { margin-bottom:30px; display:flex; justify-content:space-between; align-items:end; }
+  .overview-title h2 { font-size:29px; font-weight:650; letter-spacing:-1px; margin-bottom:7px; }
+  .overview-title p { color:var(--muted); font-size:12px; }
+  .overview-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:35px 28px; align-items:start; }
+  .overview-item { min-width:0; }
+  .overview-item > h3 { font-size:14px; margin-bottom:12px; }
+  .overview-item > h3 span { color:var(--muted); font-size:10px; margin-right:8px; }
+  .overview-item .phone { width:100%; height:760px; border-radius:34px; }
+  body.board .catalog, body.board .workbar { display:none; }
+  body.board .workspace { margin:0; }
+  body.board .overview { max-width:1320px; margin:auto; padding:42px 42px 50px; }
+  body.board .overview-item .phone { height:800px; }
+}
+@layer components {
+  .phone { --muted:#536073; }
+  .stack { display:flex; flex-direction:column; gap:14px; }
+  .gap-sm { gap:8px; }
+  .card { border-radius:var(--radius); border:1px solid #fff; background:#f9fbfddb; box-shadow:var(--shadow); overflow:hidden; }
+  .inset { padding:16px; }
+  .list { background:#f9fbfddb; border:1px solid #fff; border-radius:var(--radius); overflow:hidden; box-shadow:var(--shadow); }
+  .muted { color:var(--muted); }
+  .small { font-size:12px; line-height:1.55; }
+  .strong { font-weight:650; }
+  .hrow { display:flex; align-items:center; gap:10px; }
+  .between { justify-content:space-between; }
+  .chips { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .badge { display:inline-flex; align-items:center; border-radius:7px; padding:4px 8px; line-height:17px; font-size:12px; font-weight:600; color:#586578; background:#e8ecf2; white-space:nowrap; }
+  .badge.blue { color:var(--code); background:#e4edff; }
+  .badge.teal { color:#076e6c; background:var(--teal-bg); }
+  .badge.amber { color:var(--amber); background:var(--amber-bg); }
+  .badge.red { color:var(--red); background:#fce6e3; }
+  .platform { font-size:12px; color:var(--muted); line-height:21px; }
+  .icon-button { width:44px; height:44px; border:0; background:transparent; border-radius:50%; display:inline-grid; place-items:center; flex-shrink:0; position:relative; }
+  .phone-header:not(.subpage) .icon-button { border:1px solid white; background:#fafcff8c; box-shadow:0 4px 14px #3245610d; }
+  .notification-dot { position:absolute; right:0; top:-1px; width:17px; height:17px; border-radius:50%; background:#e45042; color:white; font-size:10px; display:grid; place-items:center; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:46px; padding:11px 17px; border:1px solid transparent; border-radius:14px; font-size:14px; font-weight:650; line-height:22px; text-decoration:none; }
+  .btn.primary, .collect-button { color:white; background:linear-gradient(145deg,#0867ff,#0052ed); box-shadow:inset 0 1px 1px #ffffff3b,0 4px 10px #0867f229; }
+  .btn.secondary, .btn.outline { background:#f7faff; color:var(--code); border-color:#b4cdf8; }
+  .btn.ghost { background:transparent; color:var(--code); }
+  .btn.danger { background:#fce9e6; color:var(--red); }
+  .btn.full { width:100%; }
+  .text-action { color:var(--code); border:0; background:none; padding:9px 0; min-height:40px; font-size:12px; font-weight:600; text-align:left; }
+  .segmented { background:#f0f5fc30; border:1px solid #fffffff0; border-radius:17px; padding:4px; display:flex; gap:3px; min-height:46px; backdrop-filter:blur(20px); box-shadow:inset 0 1px 0 white,0 6px 16px #536e9612; }
+  .segmented button { flex:1; border:0; background:none; color:var(--muted); font-size:13px; font-weight:600; border-radius:13px; padding:9px 4px; }
+  .segmented button.active { background:linear-gradient(120deg,#ffffffc9,#f8fbff80); color:var(--code); box-shadow:inset 0 1px 0 white,0 3px 8px #51688912; }
+  .section-heading { display:flex; align-items:center; justify-content:space-between; margin:20px 3px 10px; gap:10px; }
+  .section-heading h2, .section-title { font-size:14px; font-weight:650; line-height:22px; }
+  .section:first-child .section-heading { margin-top:5px; }
+  .section:has(.pickup-card) .section-heading { background:#f9fbfd66; border:1px solid white; border-radius:17px; min-height:47px; padding:10px 13px; margin:8px 0 10px; font-size:12px; color:var(--muted); }
+  .section:has(.pickup-card) .section-heading h2 { font-size:15px; color:var(--ink); }
+  .setting-row, .toggle-row { width:100%; border:0; background:transparent; display:flex; align-items:center; gap:10px; text-align:left; min-height:62px; padding:15px 16px; }
+  .list > :is(.setting-row,.toggle-row,.kv):not(:last-child) { border-bottom:1px solid #e0e6ee; }
+  .row-text { flex:1; min-width:0; }
+  .row-text strong { font-size:14px; line-height:22px; font-weight:600; display:block; }
+  .row-text small { display:block; margin-top:4px; font-size:12px; line-height:1.6; color:var(--muted); font-weight:400; overflow-wrap:anywhere; }
+  .row-tail { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; }
+  .row-tail .icon { width:16px; height:16px; color:#8895a7; }
+  .toggle-row { position:relative; }
+  .toggle-row input { position:absolute; opacity:0; width:44px; height:32px; right:16px; }
+  .switch { width:44px; height:27px; border-radius:20px; background:#ccd6e4; padding:3px; flex-shrink:0; }
+  .switch::after { content:''; display:block; width:21px; height:21px; border-radius:50%; background:white; box-shadow:0 1px 3px #26334724; transition:transform .15s; }
+  .toggle-row:has(input:checked) .switch { background:var(--blue); }
+  .toggle-row:has(input:checked) .switch::after { transform:translateX(17px); }
+  .toggle-row:has(input:focus-visible) .switch { outline:3px solid #0867f2; outline-offset:3px; }
+  .field { display:flex; flex-direction:column; gap:8px; font-size:12px; color:var(--muted); }
+  .field input, .field textarea, .field select, .search { width:100%; min-width:0; border:1px solid #d5deea; border-radius:13px; padding:13px; background:#fdfefe; color:var(--ink); font-size:14px; line-height:22px; }
+  .field textarea { resize:vertical; min-height:96px; }
+  .field + .field { margin-top:16px; }
+  .search { display:flex; align-items:center; gap:8px; }
+  .search input { min-width:0; width:100%; border:0; background:transparent; outline-offset:0; }
+  .search .icon { color:#7a8799; width:18px; }
+  .note { display:flex; align-items:flex-start; gap:9px; border-radius:15px; padding:13px; background:#e0e7f166; color:#5d6c7f; font-size:12px; line-height:1.65; }
+  .note .icon { width:17px; height:17px; margin-top:1px; }
+  .note.blue { background:#e5eeff; color:#315c9f; }
+  .note.teal { background:var(--teal-bg); color:#076e6c; }
+  .note.amber { background:#fbefd9; color:var(--amber); }
+  .note.red { background:#fce6e3; color:var(--red); }
+  .kv { display:flex; justify-content:space-between; gap:20px; font-size:12px; line-height:1.8; padding:9px 0; }
+  .kv > span { color:var(--muted); flex-shrink:0; }
+  .kv > strong { font-weight:500; text-align:right; overflow-wrap:anywhere; min-width:0; }
+  .list > .kv { padding:13px 16px; }
+  .divider { height:1px; background:var(--line); margin:12px 0; }
+  .choice { display:flex; align-items:center; gap:12px; border:1px solid #dee5ef; border-radius:16px; padding:15px; background:#fafcfe; cursor:pointer; position:relative; }
+  .choice input { position:absolute; opacity:0; inset:0; width:100%; height:100%; cursor:pointer; }
+  .choice-check { width:22px; height:22px; border:1px solid #b5c3d6; border-radius:50%; color:transparent; display:grid; place-items:center; flex-shrink:0; }
+  .choice-check .icon { width:14px; height:14px; }
+  .choice:has(input:checked) { border-color:#91b8f9; background:#f0f5ff; }
+  .choice:has(input:checked) .choice-check { background:var(--blue); color:white; border-color:var(--blue); }
+  .choice:has(input:focus-visible) { outline:3px solid var(--blue); outline-offset:3px; }
+  .empty { display:flex; flex-direction:column; align-items:center; text-align:center; padding:68px 25px; }
+  .empty-icon { width:75px; height:75px; background:#f6faffb3; border:1px solid white; border-radius:26px; color:#71869f; display:grid; place-items:center; margin-bottom:23px; }
+  .empty-icon .icon { width:31px; height:31px; }
+  .empty h2 { font-size:19px; margin-bottom:10px; }
+  .empty p { font-size:13px; color:var(--muted); line-height:1.8; margin-bottom:22px; }
+  .pickup-card { border:1px solid #fff; border-radius:24px; padding:10px 13px 14px; background:linear-gradient(135deg,#fbfdffe8,#f1f5fbcb); box-shadow:var(--shadow); }
+  .quick-add { display:flex; align-items:center; gap:7px; background:#f9fbfd80; border:1px solid white; border-radius:20px; padding:8px; box-shadow:var(--shadow); }
+  .quick-add input { width:0; flex:1; min-width:0; height:44px; border:1px solid #fff; border-radius:12px; background:#f8faffbb; padding:9px; font-size:13px; }
+  .quick-add .btn { min-width:61px; min-height:44px; padding:10px; border-radius:12px; }
+  .quick-add .icon-button { color:var(--blue); border:1px solid #a8c6f4; border-radius:12px; width:44px; height:44px; }
+  .notification-item { display:flex; align-items:flex-start; border:1px solid white; border-radius:21px; background:#f9fbfddb; box-shadow:var(--shadow); padding-right:5px; }
+  .notification-item .setting-row { flex:1; min-width:0; padding-right:5px; }
+  .notification-item > .icon-button { margin-top:6px; color:#77879c; }
+  .notification-item .row-tail { display:none; }
+  .hero-cabinet { display:inline-flex; padding:7px 11px; border-radius:10px; background:var(--teal-bg); color:#077370; font-size:13px; font-weight:650; }
+  .phone-safearea { height:18px; }
+  .pickup-top { display:flex; justify-content:space-between; align-items:center; min-height:34px; margin:-5px -8px 0 0; }
+  .pickup-grid { display:grid; grid-template-columns:65px minmax(0,1fr) 73px; grid-template-rows:auto auto; column-gap:12px; }
+  .cabinet { background:linear-gradient(135deg,#d9f0ed,#e3f4f0); color:#077370; border:1px solid #effffc; border-radius:14px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:7px; min-height:117px; grid-row:1 / 3; }
+  .cabinet small { font-size:12px; color:#506e77; }
+  .cabinet strong { font-size:22px; line-height:28px; white-space:nowrap; letter-spacing:-.6px; }
+  .cabinet.no-cabinet { background:#e9eef5; border-color:#f8faff; color:#5d6c7f; }
+  .cabinet.no-cabinet strong { font-size:17px; }
+  .pickup-code { color:var(--pickup-code); font-weight:750; font-size:clamp(1.5rem,1.08rem + 2.1cqi,1.85rem); line-height:37px; letter-spacing:-.8px; font-variant-numeric:tabular-nums; border:0; padding:0; background:none; text-align:left; grid-column:2 / 4; white-space:normal; overflow-wrap:anywhere; min-height:39px; }
+  .pickup-code.long-code { font-size:clamp(1.25rem,.9rem + 1.7cqi,1.5rem); letter-spacing:-.6px; }
+  .pickup-meta { min-width:0; display:flex; flex-direction:column; gap:2px; justify-content:start; }
+  .pickup-product { font-size:14px; font-weight:600; height:22px; line-height:22px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; width:calc(100% + 82px); max-width:155px; }
+  .pickup-meta time, .pickup-source { font-size:12px; line-height:19px; min-height:19px; color:var(--muted); white-space:nowrap; }
+  .collect-button { align-self:end; min-height:44px; border:0; border-radius:14px; font-size:17px; font-weight:650; padding:12px 5px; line-height:22px; margin-bottom:0; }
+  .collect-button.done { background:#e1e8f1; box-shadow:none; color:#67778e; font-size:13px; }
+  .collect-button.done .icon { width:13px; margin-right:3px; }
+  .collected .pickup-code { color:#697b91; }
+  .collected .cabinet { background:#e8eef3; color:#698188; border-color:#f6faff; }
+  .pickup-bottom { display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
+  .pickup-bottom .text-action { border:1px solid #bbd2f7; padding:0 9px; min-height:31px; border-radius:9px; font-size:11px; }
+  .pickup-bottom .small { font-size:10px; }
+  .code-hero { text-align:center; padding:20px 12px; color:var(--pickup-code); font-weight:750; font-size:32px; line-height:1.35; letter-spacing:-1px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+  .mini-code { color:var(--pickup-code); font-size:21px; line-height:1.5; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.4px; overflow-wrap:anywhere; }
+  .package-card { display:block; width:100%; border:1px solid white; border-radius:23px; background:#f9fbfddd; padding:15px; text-align:left; box-shadow:var(--shadow); }
+  .package-product { display:flex; gap:12px; align-items:center; margin:17px 0 14px; }
+  .product-art { width:48px; height:48px; border-radius:14px; background:linear-gradient(140deg,#e0e7f1,#f5f8fc); display:grid; place-items:center; color:#7d91ac; flex-shrink:0; }
+  .package-product > span:nth-child(2) { flex:1; min-width:0; }
+  .package-product strong { font-size:14px; font-weight:650; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .package-product small { display:block; margin-top:6px; color:var(--muted); font-size:12px; }
+  .package-product > .icon { width:14px; color:#8996a8; }
+  .package-summary { display:flex; gap:7px; color:var(--muted); font-size:12px; line-height:1.65; border-top:1px solid #e0e6ef; padding-top:11px; }
+  .package-summary .icon { width:14px; height:17px; }
+  .timeline { list-style:none; margin:0; padding:5px 0 0 15px; }
+  .timeline li { position:relative; padding:0 0 22px 19px; border-left:1px solid #d4dfec; }
+  .timeline li::before { content:''; width:7px; height:7px; background:#bac7d7; border:4px solid #f8fafd; border-radius:50%; position:absolute; left:-8px; top:0; }
+  .timeline li.current::before { background:var(--blue); }
+  .timeline li.current p { color:var(--code); }
+  .timeline time { font-size:11px; color:var(--muted); }
+  .timeline p { font-size:13px; line-height:1.7; margin-top:5px; }
+  .timeline li:last-child { border-color:transparent; padding-bottom:0; }
+  details { border-radius:15px; background:#f9fbfdac; }
+  summary { font-size:13px; font-weight:600; padding:14px 0; cursor:pointer; }
+  details p { font-size:12px; line-height:1.9; color:var(--muted); margin-bottom:12px; }
+  .progress { height:6px; background:#dce6f3; border-radius:8px; overflow:hidden; }
+  .progress > span, .progress > div { display:block; width:62%; height:100%; background:var(--blue); border-radius:8px; }
+  progress.progress { display:block; width:100%; accent-color:var(--blue); border:0; }
+  progress.progress::-webkit-progress-bar { background:#dce6f3; border-radius:8px; }
+  progress.progress::-webkit-progress-value { background:var(--blue); border-radius:8px; }
+  fieldset { min-width:0; margin:0; padding:14px; border:1px solid var(--line); border-radius:16px; }
+  legend { font-size:13px; color:var(--muted); padding:0 5px; }
+  .skeleton { height:120px; background:linear-gradient(110deg,#f4f7fb,#e4eaf3,#f4f7fb); border-radius:23px; }
+  .stat-number { font-size:33px; letter-spacing:-1.3px; color:var(--code); font-weight:700; font-variant-numeric:tabular-nums; }
+  .sheet-phone { grid-template-rows:32px 70px minmax(0,1fr) auto; }
+  .sheet-backdrop { position:absolute; inset:0; z-index:-1; background:linear-gradient(#899bb05c,#263c5a44); padding:66px 18px 0; overflow:hidden; }
+  .sheet-backdrop p { font-weight:750; font-size:28px; margin-bottom:24px; opacity:.4; }
+  .sheet-phone .statusbar { opacity:.5; }
+  .sheet-phone .phone-header { background:#eef3f9; border-radius:28px 28px 0 0; margin-top:4px; border-top:1px solid white; padding-top:20px; position:relative; }
+  .sheet-phone .phone-header::before { content:''; position:absolute; top:7px; left:calc(50% - 17px); width:34px; height:4px; background:#c9d3df; border-radius:3px; }
+  .sheet-phone .page-content { background:#eef3f9; padding-top:14px; }
+  .sheet-phone .page-footer { background:#f4f7fb; }
+  .sheet-phone .phone-header h1 { font-size:20px; letter-spacing:-.6px; }
+  :is(.card,.list,.pickup-card,.package-card,.notification-item,.quick-add,.segmented), .section:has(.pickup-card) .section-heading { background:var(--glass-bg); border:1px solid var(--glass-edge); backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); box-shadow:var(--glass-shadow); }
+  .segmented button.active { background:linear-gradient(125deg,#ffffffe0,#ffffff80); box-shadow:inset 0 1px 0 #fff,0 4px 14px #4d668017; }
+  .phone-header:not(.subpage) .icon-button { background:var(--glass-bg); border-color:var(--glass-edge); backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); box-shadow:var(--glass-shadow); }
+  .sheet-phone .page-content { background:linear-gradient(130deg,#eef2f7ed,#e5ebf3f2); }
+  .sheet-phone .phone-header { background:linear-gradient(130deg,#f5f7fbe0,#eaf0f7db); backdrop-filter:var(--glass-blur); -webkit-backdrop-filter:var(--glass-blur); }
+  .sheet-phone .page-footer { background:var(--glass-bg); }
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) { :is(.card,.list,.pickup-card,.package-card,.notification-item,.quick-add,.segmented,.tabbar,.page-footer), .section:has(.pickup-card) .section-heading, .sheet-phone .phone-header, .phone-header:not(.subpage) .icon-button { background:#f3f7fc; } }
+}
+@layer responsive {
+  @container (max-width:365px) {
+    .phone-header h1 { font-size:27px; }
+    .pickup-grid { grid-template-columns:60px minmax(0,1fr) 68px; gap:0 10px; }
+    .pickup-card { padding:9px 11px 13px; }
+    .cabinet strong { font-size:20px; }
+    .pickup-code { font-size:25px; }
+    .pickup-code.long-code { font-size:21px; }
+    .pickup-product { max-width:141px; font-size:13px; }
+    .pickup-meta time,.pickup-source { font-size:12px; }
+    .btn { padding-inline:13px; }
+    .segmented button { font-size:12px; }
+  }
+  @media (max-width:1200px) { .catalog { width:215px; } .workspace { margin-left:215px; } .design-notes { max-width:220px; } .review-stage { gap:30px; padding-inline:24px; } .workbar { padding-inline:30px; } .overview-grid { grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:980px) { .design-notes { display:none; } .work-title h1 { font-size:20px; } .sizes { display:none; } }
+  @media (max-width:680px) { .catalog { display:none; } .workspace { margin-left:0; } .workbar { height:68px; padding:10px 16px; } .work-title h1 { font-size:15px; margin-top:4px; } .eyebrow { font-size:8px; letter-spacing:1px; } .work-actions { gap:6px; } .mobile-select { display:flex; align-items:center; gap:10px; padding:10px 16px; font-size:11px; color:var(--muted); } .mobile-select select { flex:1; min-width:0; padding:8px; border:1px solid var(--line); border-radius:9px; background:#f7faff; font-size:12px; color:var(--ink); } .review-stage { padding:0; display:block; } .preview-column { width:100%; } .phone { width:100% !important; max-width:430px; margin:auto; height:calc(100dvh - 122px); min-height:560px; border:0; border-radius:0; box-shadow:none; } .preview-caption { display:none; } .phone-header { padding-top:8px; } .phone::after { bottom:5px; } .overview { padding:24px 16px; } .overview-grid { grid-template-columns:1fr; } .overview-item .phone { height:780px; border-radius:28px; } .overview-title h2 { font-size:22px; } }
+  @media (prefers-reduced-motion:reduce) { .switch::after, #prototype-toast { transition:none; } }
+  @media (forced-colors:active) { .card,.pickup-card,.package-card,.choice,.btn,.cabinet { border:1px solid CanvasText; } .switch { border:1px solid ButtonText; } }
+}
+</style>
+</head>
+<body>
+  <aside class="catalog" aria-label="设计稿目录">
+    <div class="brand"><span class="brand-icon" aria-hidden="true">↗</span><div>取件助手<small>界面设计全案 / 2026.11</small></div></div>
+    <div class="catalog-intro">B · 细腻柔雾<span>银灰磨砂与钴蓝，贯穿每一次取件。</span></div>
+    <label class="catalog-search">查找页面<input id="scene-search" type="search" placeholder="页面、弹层或状态"></label>
+    <nav id="scene-nav"></nav>
+    <div class="catalog-bottom">B 版方向已选定 · 全案源稿<br>全部为合成示例，不连接真实账号。</div>
+  </aside>
+  <main class="workspace">
+    <header class="workbar">
+      <div class="work-title"><span class="eyebrow">PICKCODE / DESIGN SYSTEM</span><h1>每一屏，都清晰有序。</h1></div>
+      <div class="work-actions"><button id="overview-button" class="tool-button">设计总览</button><div class="sizes" aria-label="预览宽度"><button data-width="360">360</button><button data-width="390" aria-pressed="true">390</button><button data-width="430">430</button></div></div>
+    </header>
+    <label class="mobile-select">查看页面<select id="scene-select"></select></label>
+    <div class="review-stage" id="review-stage">
+      <section class="preview-column" aria-label="手机界面预览"><div id="phone-host"></div><div class="preview-caption"><span id="scene-position"></span><span>可点击操作 · 仅演示</span></div></section>
+      <aside class="design-notes"><div class="eyebrow" id="scene-group"></div><h2 id="scene-title"></h2><p id="scene-description"></p><div class="note-rule"></div><h3>这套界面的共同规则</h3><ul><li>取件码与柜号优先，操作靠右。</li><li>商品约十字，缺失字段保留对齐槽位。</li><li>平台只出现一次，详细证据按需展开。</li><li>所有状态同时用文字表达。</li></ul><div class="route-note"><span>对应现有页面 / 组件</span><code id="scene-route"></code></div><div class="review-hint">这里的页面拆分是设计建议。正式 App 仍保持原样，审阅后再进入 Figma 与实施。</div><div class="scene-pager"><button id="previous-scene" class="tool-button">← 上一页</button><button id="next-scene" class="tool-button">下一页 →</button></div></aside>
+    </div>
+    <section id="overview" class="overview" hidden aria-label="设计总览"></section>
+  </main>
+  <div id="prototype-toast" role="status" aria-live="polite"></div>
+  <script>/* Shared visual primitives for the review prototype; no production API calls. */
+window.SCENES = [];
+window.UI = (() => {
+  const escape = (value = '') => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const paths = {
+    box:'<path d="m12 3 9 5v9l-9 5-9-5V8zM3 8l9 5 9-5M12 13v9M7 5.8l10 5.6"/>',
+    package:'<path d="m12 3 9 5v9l-9 5-9-5V8zM3 8l9 5 9-5M12 13v9"/>',
+    list:'<rect x="5" y="5" width="14" height="17" rx="3"/><path d="M9 5V2h6v3M9 11h6M9 16h4"/>',
+    user:'<circle cx="12" cy="7" r="4"/><path d="M4 22v-3a8 8 0 0 1 16 0v3z"/>',
+    bell:'<path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9M10 22h4"/>',
+    pin:'<path d="M19 10c0 5-7 12-7 12S5 15 5 10a7 7 0 0 1 14 0Z"/><circle cx="12" cy="10" r="2.5"/>',
+    plus:'<path d="M12 4v16M4 12h16"/>',
+    refresh:'<path d="M20 8a8 8 0 0 0-14-3L3 8M3 3v5h5M4 16a8 8 0 0 0 14 3l3-3M21 21v-5h-5"/>',
+    search:'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+    more:'<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
+    chevron:'<path d="m9 5 7 7-7 7"/>',
+    back:'<path d="m15 5-7 7 7 7"/>',
+    close:'<path d="m6 6 12 12M6 18 18 6"/>',
+    check:'<path d="m4 12 5 5L20 6"/>',
+    clock:'<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
+    filter:'<path d="M4 6h16M7 12h10M10 18h4"/>',
+    copy:'<rect x="8" y="8" width="13" height="13" rx="3"/><path d="M16 8V3H3v13h5"/>',
+    scan:'<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5M7 7v10M11 7v10M15 7v10M18 7v10"/>',
+    shield:'<path d="m12 2 8 4v6c0 6-8 10-8 10S4 18 4 12V6zM8 12l3 3 5-6"/>',
+    settings:'<circle cx="12" cy="12" r="3"/><path d="m10 2-1 3-3 1-3-1-2 4 3 2v3l-2 2 2 4 3-1 3 1 1 3h4l1-3 3-1 3 1 2-4-3-2v-3l2-2-2-4-3 1-3-1-1-3z"/>',
+    spark:'<path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/>',
+    link:'<path d="m10 7 2-2a5 5 0 0 1 7 7l-2 2M14 17l-2 2a5 5 0 0 1-7-7l2-2M8 16l8-8"/>',
+    info:'<circle cx="12" cy="12" r="9"/><path d="M12 10v7M12 6v1"/>',
+    warning:'<path d="m12 3 10 18H2zM12 9v5M12 17v1"/>',
+    download:'<path d="M12 3v13m-5-5 5 5 5-5M3 16v5h18v-5"/>',
+    phone:'<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M10 18h4"/>',
+    trash:'<path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/>',
+    edit:'<path d="m14 4 6 6M3 21l5-1L21 7l-5-5L3 15z"/>'
+  };
+  const icon = name => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.box}</svg>`;
+  const action = (target, fallback) => target ? `data-go="${escape(target)}"` : `data-demo="${escape(fallback || '这是设计演示，未修改真实数据。')}"`;
+  const button = (text,target='',kind='primary') => `<button class="btn ${escape(kind)}" ${action(target,text+' · 设计演示')}>${escape(text)}</button>`;
+  const link = (text,target) => `<button class="text-action" ${action(target,text)}>${escape(text)}</button>`;
+  const badge = (text,tone='neutral') => `<span class="badge ${escape(tone)}">${escape(text)}</span>`;
+  const row = (title,sub='',tail='',target='') => `<button class="setting-row" ${action(target,title+' · 设计演示')}><span class="row-text"><strong>${escape(title)}</strong>${sub?`<small>${escape(sub)}</small>`:''}</span><span class="row-tail">${tail.includes('<')?tail:escape(tail)}${icon('chevron')}</span></button>`;
+  const toggle = (title,desc,on) => `<label class="toggle-row"><span class="row-text"><strong>${escape(title)}</strong>${desc?`<small>${escape(desc)}</small>`:''}</span><input type="checkbox" role="switch" ${on?'checked':''}><span class="switch" aria-hidden="true"></span></label>`;
+  const field = (label,value,placeholder='',type='text') => `<label class="field"><span>${escape(label)}</span>${type==='textarea'?`<textarea placeholder="${escape(placeholder)}" rows="4">${escape(value)}</textarea>`:`<input type="${escape(type)}" value="${escape(value)}" placeholder="${escape(placeholder)}">`}</label>`;
+  const section = (title,content,extra='') => `<section class="section"><div class="section-heading"><h2>${escape(title)}</h2>${extra}</div>${content}</section>`;
+  const note = (text,tone='neutral') => `<div class="note ${escape(tone)}">${icon(tone==='red'||tone==='amber'?'warning':'info')}<span>${escape(text)}</span></div>`;
+  const kv = (label,value) => `<div class="kv"><span>${escape(label)}</span><strong>${value.includes?.('<')?value:escape(value)}</strong></div>`;
+  const segmented = (items,active=0) => `<div class="segmented">${items.map((item,i)=>`<button class="${i===active?'active':''}" aria-pressed="${i===active}" ${action(Array.isArray(item)?item[1]:'', '切换至'+(Array.isArray(item)?item[0]:item))}>${escape(Array.isArray(item)?item[0]:item)}</button>`).join('')}</div>`;
+  const choice = (title,desc,selected) => `<label class="choice"><input type="checkbox" ${selected?'checked':''}><span class="choice-check" aria-hidden="true">${icon('check')}</span><span class="row-text"><strong>${escape(title)}</strong>${desc?`<small>${escape(desc)}</small>`:''}</span></label>`;
+  const empty = (title,desc,actionHTML='') => `<div class="empty"><span class="empty-icon">${icon('box')}</span><h2>${escape(title)}</h2><p>${escape(desc)}</p>${actionHTML}</div>`;
+  const pickupCard = (p={}) => {
+    const title = Array.from(p.product || '').slice(0,10).join('');
+    const code = p.code || '2-2-1001';
+    return `<article class="pickup-card ${p.done?'collected':''}"><div class="pickup-top"><div class="chips">${badge(p.role||'待归属',p.role==='妈妈'?'amber':p.role==='我'?'blue':'neutral')}${p.platform?`<span class="platform">${escape(p.platform)}</span>`:''}${p.multi?badge(typeof p.multi==='string'?p.multi:'共 '+p.multi+' 件','teal'):''}</div><button class="icon-button" data-go="pickup-menu" aria-label="取件码 ${escape(code)} 更多操作">${icon('more')}</button></div><div class="pickup-grid"><div class="cabinet ${!p.cabinet?'no-cabinet':''}"><small>${p.cabinet?'柜号':'取件位置'}</small><strong>${escape(p.cabinet||'驿站')}</strong></div><button class="pickup-code ${code.length>12?'long-code':''}" ${action(p.target||'pickup-detail')} aria-label="查看取件码 ${escape(code)}">${escape(code)}</button><div class="pickup-meta"><span class="pickup-product" title="${escape(p.product||'')}" aria-label="${escape(p.product||'未关联商品')}">${escape(title)}${Array.from(p.product||'').length>10?'…':''}</span><time>${escape(p.time||'')}</time><span class="pickup-source">${escape(p.source||(p.unmatched?'短信':''))}</span></div><button class="collect-button ${p.done?'done':''}" ${p.multi?'data-go="pickup-multi"':'data-collect'}>${p.done?icon('check')+'已取':'取件'}</button></div>${p.unmatched?`<div class="pickup-bottom">${link('匹配订单','pickup-match')}<span class="small muted">也可直接取件</span></div>`:''}</article>`;
+  };
+  const packageCard = (p={}) => `<button class="package-card" ${action(p.target||'package-detail')}><div class="hrow between"><div class="chips"><span class="platform">${escape(p.platform||'手动记录')}</span>${badge(p.role||'我')}</div>${badge(p.status||'运输中',p.tone||'blue')}</div><div class="package-product"><span class="product-art" aria-hidden="true">${icon('box')}</span><span><strong>${escape(Array.from(p.product||'日用收纳用品').slice(0,10).join(''))}</strong><small>${escape(p.price||'')}${p.date?' · '+escape(p.date):''}</small></span>${icon('chevron')}</div><div class="package-summary">${icon('clock')}<span>${escape(p.summary||'暂无新物流')}</span></div></button>`;
+  const timeline = items => `<ol class="timeline">${items.map(t=>`<li class="${t.active?'current':''}"><time>${escape(t.time)}</time><p>${escape(t.text)}</p></li>`).join('')}</ol>`;
+  return {escape,icon,button,row,toggle,field,section,badge,note,kv,segmented,choice,empty,link,pickupCard,packageCard,timeline};
+})();
+</script>
+  <script>(() => {
+  const U = window.UI;
+  const mug = '雾蓝色陶瓷马克杯双杯礼盒套装';
+  const box = '家用加厚透明收纳整理箱三件套';
+  const socks = '柔软纯棉条纹居家袜五双装';
+  const short = text => [...text].length > 10 ? [...text].slice(0, 10).join('') + '…' : text;
+  const demo = (text, message = text) => `<button type="button" class="text-action" data-demo="${message}">${text}</button>`;
+  const chips = (...items) => `<div class="chips">${items.join('')}</div>`;
+  const wrap = html => `<div class="stack">${html}</div>`;
+  const section = (title, html, extra = '') => U.section(title, `<div class="stack gap-sm">${html}</div>`, extra);
+  const notification = (title, sub = '', tail = '', target = '') => `<div class="notification-item">${U.row(title, sub, tail, target)}<button type="button" class="icon-button" data-dismiss aria-label="关闭${title}">${U.icon('close')}</button></div>`;
+  const notificationTabs = (active = 0) => U.segmented([['全部','notifications'],['待确认','notifications-review'],['异常','notifications-error'],['同步','notifications-sync']], active);
+  const codeHero = (code = '3-2068', cabinet = '12-A', meta = '青禾小区东门驿站') => `<div class="card inset stack"><div class="hrow between">${cabinet ? U.badge('柜号 ' + cabinet, 'teal') : U.badge('短信取件', 'blue')}${demo('复制', '已复制取件码（设计演示）')}</div><div class="code-hero">${code}</div><div class="muted small">${meta}</div></div>`;
+  const pickup = (overrides = {}) => U.pickupCard({code:'3-2068',cabinet:'12-A',role:'我',platform:'淘宝',product:short(mug),time:'今天 10:32',source:'短信',target:'pickup-detail',...overrides});
+  const parcel = (overrides = {}) => U.packageCard({product:short(mug),platform:'淘宝',role:'我',status:'待取件',summary:'已到达青禾小区东门驿站',date:'11月06日',price:'¥69.00',target:'package-detail',tone:'blue',...overrides});
+  const addCode = () => `<div class="quick-add"><input type="text" aria-label="取件码" placeholder="请输入取件码" autocorrect="off" autocapitalize="off" spellcheck="false"><button type="button" class="btn primary" data-demo="取件码已添加（设计演示）">添加</button><button type="button" class="icon-button" data-go="notifications" aria-label="更新取件记录">${U.icon('refresh')}</button></div>`;
+  const grouping = (active = 0) => U.segmented([['按站点','pickup'],['按时间','pickup-time']],active);
+  const historyEntry = () => U.row('已取历史','已完成的记录放在列表末尾','3 件','pickup-history');
+  const productHead = (title = mug, meta = '淘宝 · 我 · ¥69.00') => `<div class="card inset stack"><h2 class="section-title">${title}</h2><div class="muted small">${meta}</div></div>`;
+  const sourcePreview = (unmatched = false) => `<div class="card inset stack"><div class="hrow between"><strong>取件短信</strong><span class="muted small">${unmatched ? '昨天 16:20' : '今天 10:32'}</span></div><p>${unmatched ? '【云杉便利店】您的包裹已到店，请凭 98-126 取件。' : '【青禾驿站】您的包裹已到青禾小区东门驿站，请凭 3-2068 至 12-A 柜取件。'}</p><div class="muted small">短信 · 中通快递</div></div>`;
+  const logistics = () => U.timeline([{time:'今天 10:26',text:'已到达青禾小区东门驿站，请及时取件。',active:true},{time:'今天 08:12',text:'快递员正在派送。'},{time:'昨天 22:38',text:'包裹已到达本市转运中心。'}]);
+  const scenes = [
+    {id:'pickup',title:'取件列表',group:'取件',route:'/pages/index/index',description:'默认按站点聚合。同站点按柜号排列，商品名称最多十字，完整名称在详情查看。',tab:'pickup',top:[{icon:'bell',label:'通知中心',target:'notifications'}],content:()=>wrap(addCode()+grouping()+section('青禾小区东门驿站',pickup({code:'7-4502',cabinet:'08-B',role:'妈妈',platform:'京东',product:short(box),time:'今天 09:18',multi:'共 3 件 · 已取 1 件',target:'pickup-multi'})+pickup(),'3 件待取')+section('云杉便利店',pickup({code:'98-126',cabinet:'',role:'待归属',platform:'',product:'',time:'昨天 16:20',unmatched:true,target:'pickup-unmatched'}),'1 件待取')+historyEntry())},
+    {id:'pickup-time',title:'取件列表',group:'取件',route:'/pages/index/index · 按时间',description:'按时间浏览；日期作为组标题，同站点柜号从小到大。',back:'pickup',tab:'pickup',top:[{icon:'bell',label:'通知中心',target:'notifications'}],content:()=>wrap(addCode()+grouping(1)+section('今天 · 11月07日',U.row('青禾小区东门驿站','','3 件待取')+pickup({code:'7-4502',cabinet:'08-B',role:'妈妈',platform:'京东',product:short(box),multi:'共 3 件 · 已取 1 件',target:'pickup-multi'})+pickup())+section('昨天 · 11月06日',U.row('云杉便利店','','1 件待取')+pickup({code:'98-126',cabinet:'',role:'待归属',platform:'',product:'',unmatched:true,target:'pickup-unmatched'}))+historyEntry())},
+    {id:'pickup-history',title:'取件列表',group:'取件',route:'/pages/index/index · 已取展开',description:'展开已取历史仍保留全部未取在最前，历史只出现在下方。',back:'pickup',tab:'pickup',content:()=>wrap(addCode()+grouping()+section('青禾小区东门驿站',pickup({code:'7-4502',cabinet:'08-B',role:'妈妈',platform:'京东',product:short(box),multi:'共 3 件 · 已取 1 件',target:'pickup-multi'})+pickup(),'3 件待取')+section('已取历史',pickup({code:'3-2055',done:true,time:'今天 09:42',product:short(socks),target:'pickup-linked-source'})+pickup({code:'5-1630',cabinet:'03-C',done:true,platform:'拼多多',product:'厨房吸水擦手巾',time:'昨天 18:20',target:'pickup-linked-source'}),U.link('收起','pickup')))},
+    {id:'pickup-empty',title:'取件列表',group:'取件',route:'/pages/index/index · 空状态',description:'无待取记录时仍可手动添加或更新，不强制绑定。',back:'pickup',tab:'pickup',top:[{icon:'bell',label:'通知中心',target:'notifications-empty'}],content:()=>wrap(addCode()+U.empty('暂时没有待取包裹','新短信到来后，取件码会出现在这里。',U.button('一键更新','notifications','secondary'))+U.row('已取历史','查看以前的取件记录','','pickup-history'))},
+    {id:'pickup-long',title:'取件列表',group:'取件',route:'/pages/index/index · 长码与缺失信息',description:'长码完整换行，未知商品与平台保持留白，仍可独立领取。',back:'pickup',tab:'pickup',content:()=>wrap(addCode()+grouping()+section('站点待确认',pickup({code:'88-1208-003671',cabinet:'',role:'待归属',platform:'',product:'',time:'今天 11:08',unmatched:true,target:'pickup-unmatched'}))+U.button('更换站点','station','secondary'))},
+    {id:'notifications',title:'通知中心',group:'取件',route:'/pages/index/index · notificationsPopup',description:'待确认、异常与同步集中呈现，每项均可独立关闭。',back:'pickup',sheet:true,content:()=>wrap(notificationTabs()+section('待确认',notification('已送达，确认收到',short(socks)+' · 妈妈 · 京东',U.badge('1 件','blue'),'package-delivery')+notification('取件信息待核对','3-2068 · 有 2 个匹配候选',U.badge('待匹配','amber'),'pickup-match')+notification('一条到站提醒','还未识别到取件码','查看短信','pickup-reminder'))+section('异常',notification('京东账号已失效','更新登录后可继续同步','处理','accounts-error'))+section('同步',notification('上次更新 10:34','已更新 3 个取件码 · 1 条提醒','查看','notifications-sync'))+U.note('有新进展时会再次提醒。'))},
+    {id:'notifications-empty',title:'通知中心',group:'取件',route:'/pages/index/index · 通知空状态',description:'当前没有待处理或异常通知。',back:'notifications',sheet:true,content:()=>wrap(notificationTabs()+U.empty('暂无待处理事项','有新的取件动态时会在这里提醒。'))},
+    {id:'pickup-detail',title:'取件详情',group:'取件',route:'/pages/index/index · sourcePopup',description:'关联商品显示完整名称，领取只记录当前包裹。',back:'pickup',sheet:true,top:[{icon:'more',label:'更多操作',target:'pickup-menu'}],content:()=>wrap(codeHero()+productHead()+U.row('包裹物流','今天 10:26 · 已到站','查看','package-logistics')+U.row('短信与关联','今天 10:32 · 中通快递','查看','pickup-linked-source')+U.note('仅记录领取，不会确认电商收货。')),footer:()=>U.button('标记已取','pickup-history')},
+    {id:'pickup-multi',title:'同码多件取件',group:'取件',route:'/pages/index/index · 多成员',description:'同码三件、已取一件；选择本次领取成员。',back:'pickup',sheet:true,content:()=>wrap(codeHero('7-4502','08-B')+chips(U.badge('共 3 件','blue'),U.badge('已取 1 件','teal'))+section('选择本次已取',U.choice(short(box),'妈妈 · 京东 · 运单尾号 6281',true)+U.choice(short(mug),'我 · 淘宝 · 运单尾号 9150',false)+U.row(short(socks),'妈妈 · 京东',U.badge('已取','teal'),'package-detail'))+U.note('仅记录领取，不会确认电商收货。')),footer:()=>wrap(U.button('标记所选 1 件已取','pickup-history')+U.button('全部领取 · 余下 2 件','pickup-history','secondary'))},
+    {id:'pickup-match',title:'选择对应包裹',group:'取件',route:'/pages/index/index · 匹配选择',description:'以运单为匹配单位；推荐、搜索、角色和平台筛选收在同一面板。',back:'pickup-unmatched',sheet:true,content:()=>wrap(`<div class="hrow between"><span class="mini-code">98-126</span>${U.badge('已选 1 / 2 件','blue')}</div>`+U.field('搜索包裹','','商品、订单号或运单号','search')+U.segmented([['全部家人','pickup-match'],['全部平台','pickup-match-empty']])+section('推荐候选',U.choice(short(mug),'我 · 淘宝 · 运单尾号 9150',true)+U.note('同一站点 · 到站时间相差 2 分钟','teal')+U.choice(short(box),'妈妈 · 京东 · 运单尾号 6281',false)+U.note('到站时间相近 · 站点尚未提供'))+U.link('查看其他未完成包裹','pickup-match-conflict')+U.note('仅关联取件信息；未选择的 1 件继续待匹配。')),footer:()=>U.button('确认关联所选 1 件','pickup-linked-source')},
+    {id:'pickup-match-empty',title:'匹配包裹',group:'取件',route:'/pages/index/index · 匹配无结果',description:'搜索与筛选无结果的实际空状态。',back:'pickup-match',sheet:true,content:()=>wrap(U.field('搜索包裹','收纳用品','商品、订单号或运单号','search')+chips(U.badge('妈妈','blue'),U.badge('淘宝','blue'))+U.empty('没有符合条件的包裹','试试其他关键词，或更新订单与物流。',U.button('清除筛选','pickup-match','secondary')))},
+    {id:'pickup-conflict',title:'确认取件码',group:'取件',route:'/pages/index/index · 取件码冲突',description:'不合并来源冲突与匹配冲突；用户明确选择采用的码。',back:'pickup-detail',sheet:true,content:()=>wrap(U.note('两条来源提供了不同的取件码。','amber')+U.choice('3-2068','当前记录 · 短信 · 今天 10:32',true).replace('type="checkbox"','type="radio" name="pickup-code-choice"')+U.choice('3-2086','线上物流 · 今天 10:30',false).replace('type="checkbox"','type="radio" name="pickup-code-choice"')+U.row('核对原始短信','保留所有原文与来源','查看','pickup-linked-source')),footer:()=>wrap(U.button('使用所选取件码','pickup-detail')+U.button('暂不处理','pickup-detail','secondary'))},
+    {id:'pickup-source',title:'原始短信',group:'取件',route:'/pages/index/index · 未关联来源',description:'未匹配短信不显示虚构商品或领取归属。',back:'pickup-unmatched',sheet:true,content:()=>wrap(sourcePreview(true)+U.row('匹配对应包裹','','选择','pickup-match')+U.row('忽略这条短信','可在“我的”恢复','','pickup-ignore'))},
+    {id:'pickup-menu',title:'取件记录操作',group:'取件',route:'/pages/index/index · more-actions',description:'低频操作收进更多菜单；删除、忽略和解除语义独立。',back:'pickup-detail',sheet:true,content:()=>wrap(U.row('修改取件记录','取件码、公司、标签与备注','','pickup-edit')+U.row('更换站点','只修改此取件记录的站点','','station')+U.row('忽略短信','可在“我的”恢复','','pickup-ignore')+U.row('核对取件码','查看不同来源的码','','pickup-conflict')+demo('删除取件码','删除后不会从同一条短信重复添加；原手机短信保留。')+demo('删除当前日期分组','仅删除当前日期分组的取件记录，手机短信保留，记录不会自动重建。'))},
+    {id:'station',title:'更换站点',group:'取件',route:'components/StationChooser.vue',description:'取件列表和包裹详情共用；当前人工指定与原识别值分开。',back:'pickup-detail',sheet:true,content:()=>wrap(U.kv('当前站点','青禾小区东门驿站')+U.note('同一取件码的包裹会一起更换站点。')+section('可用站点',U.row('青禾小区东门驿站','常用',U.badge('当前','blue'),'station-saved')+U.row('云杉便利店','常用','','station-saved')+U.row('青禾北门智能柜','','','station-saved'))+U.button('恢复自动识别站点','station-saved','secondary')+U.note('原始短信和物流内容保留。'))},
+    {id:'station-saved',title:'站点已修正',group:'取件',route:'components/StationChooser.vue · 保存结果',description:'站点修正成功与后续优化进度分离。',back:'station',sheet:true,content:()=>wrap(U.empty('已更换站点','本条记录已使用你指定的站点。')+U.kv('当前站点','云杉便利店')+U.kv('原识别','青禾小区东门驿站')+U.note('修正已保存，优化进度单独记录。')+U.button('查看本次优化进度','correction-detail','secondary')),footer:()=>U.button('完成','pickup-detail')},
+    {id:'pickup-edit',title:'修改取件记录',group:'取件',route:'/pages/index/edit-code',description:'主要字段单列，标签管理与备注只在编辑场景展开。',back:'pickup-detail',content:()=>wrap(U.field('取件码','3-2068','请输入取件码')+U.field('物流公司','中通快递','物流公司名称')+section('标签',chips(U.badge('家','blue'),U.badge('生鲜'),U.badge('私密'))+U.field('新增标签','','自定义标签')+demo('添加标签','已添加标签；最多可设置 10 个，长按可删除。'))+`<label class="field" for="pickup-remark"><span>备注</span><textarea id="pickup-remark" name="remark" rows="3" placeholder="可选">门口代取，放入收纳袋</textarea></label>`+U.toggle('标记已取','仅记录本取件码的领取状态',false)+U.note('取件码必填；标签最多 10 个。')),footer:()=>U.button('保存','pickup-detail')},
+    {id:'pickup-ignore',title:'忽略这条短信',group:'取件',route:'/pages/index/index · ignorePopup',description:'明确影响并给出可恢复路径。',back:'pickup-source',sheet:true,content:()=>wrap(sourcePreview()+U.note('本条短信不再自动识别，可在“我的 → 已忽略短信”恢复。','amber')+U.field('原因（可选）','','填写备注原因，最多 200 字')),footer:()=>wrap(U.button('确认忽略','pickup')+U.button('取消','pickup-source','secondary'))},
+    {id:'packages',title:'包裹记录',group:'包裹',route:'/pages/packages/index',description:'总数是未收到包裹；平台和进度兼作筛选，订单与包裹的计量保持区别。',tab:'packages',top:[{icon:'plus',label:'添加快递',target:'package-edit'}],content:()=>wrap(U.row('全部角色','最近 30 天','筛选','packages-filter')+`<div class="card inset stack"><div class="hrow between"><span class="muted">未收到</span>${U.badge('6 个包裹','blue')}</div>${U.segmented([['全部平台','packages'],['淘宝 3','packages-filter'],['京东 2','packages-filter'],['拼多多 1','packages-filter']])}${chips(U.link('待取 3','package-detail'),U.link('运输中 2','package-multi'),U.link('待发货 1','packages-filter'))}</div>`+U.row('上次更新 10:34','已有记录可继续查看','更新','package-loading')+section('11月06日',parcel()+parcel({product:short(box),platform:'京东',role:'妈妈',price:'¥89.00',status:'运输中',summary:'已到达本市转运中心 · 共 2 个包裹',target:'package-multi',tone:'neutral'}))+U.row('历史与过期记录','已完成、手动和过期订单','','package-history'))},
+    {id:'packages-filter',title:'筛选包裹',group:'包裹',route:'/pages/packages/index · filterPopup',description:'角色、时间与隐藏维度统一收纳；状态和平台保留快捷入口。',back:'packages',sheet:true,content:()=>wrap(section('角色',U.choice('全部角色','包括待归属记录',true)+U.choice('我','',false)+U.choice('妈妈','',false)+U.choice('待归属','',false))+section('时间范围',U.choice('当前订单','超过 30 天的订单归入过期',true)+U.choice('含过期历史','查看所有时间',false))+U.toggle('显示已隐藏记录','可在详情恢复显示',false)+U.row('手动记录','只记录信息，不自动查询物流','','package-edit')),footer:()=>U.button('应用筛选','packages')},
+    {id:'package-detail',title:'包裹详情',group:'包裹',route:'/pages/packages/index · detailPopup',description:'完整商品名、订单级元信息只出现一次；运单级动作保持独立。',back:'packages',sheet:true,content:()=>wrap(productHead()+chips(U.badge('待取件','blue'))+codeHero()+section('最新物流',U.row('已到达青禾小区东门驿站','今天 10:26','轨迹','package-logistics'))+section('订单信息',U.kv('下单时间','11月06日 09:24')+U.kv('订单号','DEMO-20261106-150')+U.kv('运单号','DEMO-WB-00009150')+U.kv('订单状态','卖家已发货'))+U.row('更换站点','当前：青禾小区东门驿站','','station')+U.row('修改下单日期','来源：平台订单详情','','package-date')+demo('更新订单','更新中，现有记录继续保留。')+demo('打开购物 App','在支持的平台打开对应购物 App。')+demo('隐藏订单','此订单及关联取件将隐藏，可显示已隐藏记录后恢复。')),footer:()=>U.button('确认已取到包裹','pickup-history')},
+    {id:'package-multi',title:'一单多个包裹',group:'包裹',route:'/pages/packages/index · 多运单详情',description:'一笔订单两件包裹；领取、归属与物流各自独立。',back:'packages',sheet:true,content:()=>wrap(productHead(box,'京东 · 妈妈 · ¥89.00')+U.note('一笔订单 · 2 个包裹')+section('包裹 1',U.row('中通快递','运单尾号 6281',U.badge('待取','blue'))+`<div class="mini-code">7-4502</div>`+U.row('青禾小区东门驿站','08-B 柜','取件','pickup-multi'))+section('包裹 2',U.row('京东物流','运单尾号 6282',U.badge('运输中'))+U.row('已到达本市转运中心','今天 09:28','物流','package-logistics'))+U.row('有领取归属待确认','转到对应取件码处理','','pickup-multi')+U.note('领取包裹 1 不会将整笔订单标记为完成。'))},
+    {id:'package-expired',title:'过期订单详情',group:'包裹',route:'/pages/packages/index · 归档详情',description:'超过 30 天归档；物流已签收可显示超期确认，未签收仅归档。',back:'package-history',sheet:true,content:()=>wrap(productHead(socks,'京东 · 妈妈 · ¥29.90')+chips(U.badge('过期订单'),U.badge('超期自动确认收到','teal'))+section('归档信息',U.kv('下单日期','10月01日')+U.kv('归档依据','下单日期已超过 30 天')+U.kv('物流状态','已签收'))+U.note('物流未签收的包裹仅归档，不会确认收到。')+U.row('物流轨迹','10月03日已送达','查看','package-logistics')),footer:()=>U.button('恢复到当前订单','packages')},
+    {id:'package-delivery',title:'确认收到',group:'包裹',route:'/pages/packages/index · 送货上门',description:'区分物流已送达与用户已收到；本地记录不触发平台确认收货。',back:'packages',sheet:true,content:()=>wrap(productHead(socks,'京东 · 妈妈 · ¥29.90')+U.badge('已送达 · 待确认','blue')+section('送达信息',U.row('包裹已放置门口','今天 10:02 · 京东物流','轨迹','package-logistics')+U.kv('运单尾号','7736'))+U.note('物流显示送达，请在实际收到后确认。')+section('自动完成记录',U.row('自动完成可撤销','依据和时间保留在包裹详情','查看','package-history'))),footer:()=>U.button('确认已收到','package-history')},
+    {id:'package-date',title:'修改下单日期',group:'包裹',route:'/pages/packages/index · dateEditing',description:'人工日期显式标记来源，可恢复平台日期；不伪造平台信息。',back:'package-detail',sheet:true,content:()=>wrap(U.field('下单日期','2026-11-06','YYYY-MM-DD')+U.note('请填写完整年月日。日期会影响订单排序与 30 天归档。')+U.kv('平台原日期','11月06日 09:24')+demo('恢复平台日期','已恢复平台下单日期（设计演示）')),footer:()=>wrap(U.button('保存日期','package-detail')+U.button('取消','package-detail','secondary'))},
+    {id:'package-edit',title:'添加快递',group:'包裹',route:'/pages/packages/edit',description:'最少两项手动记录，保存后的校验失败单独展示。',back:'packages',content:()=>wrap(U.field('寄件人或包裹名称','','请输入名称')+U.field('快递单号','','6–32 位字母、数字或连字符')+U.note('手动记录仅保存信息，不自动查询物流。')),footer:()=>U.button('保存记录','package-edit-error')},
+    {id:'package-error',title:'包裹记录',group:'包裹',route:'/pages/packages/index · 同步异常',description:'更新失败保留本地记录；账号问题进入账号管理。',back:'packages',tab:'packages',content:()=>wrap(U.note('最近更新未完成，已保留上次同步的记录。','amber')+U.button('重试更新','package-refreshing')+U.row('线上账号需要处理','登录已失效，需要更新登录','','accounts-error')+section('本地记录 · 10:34',parcel()+parcel({product:short(box),platform:'京东',status:'运输中',summary:'显示上次保存的物流',target:'package-logistics'})))},
+    {id:'package-loading',title:'包裹记录',group:'包裹',route:'/pages/packages/index · 首次加载',description:'未完成本地读取前只显示骨架，不提前给出空列表结论。',back:'packages',tab:'packages',content:()=>wrap(`<div class="card inset stack" aria-busy="true"><div class="muted small">正在读取本地记录</div><div class="skeleton" aria-hidden="true"></div><progress class="progress" aria-label="读取本地记录"></progress></div><div class="skeleton" aria-hidden="true"></div>` )},
+    {id:'package-logistics',title:'物流轨迹',group:'包裹',route:'components/LogisticsTimeline.vue',description:'查询失败仍展示缓存，时间线说明来源与时间。',back:'package-detail',sheet:true,content:()=>wrap(`<div class="card inset hrow between"><div><strong>中通快递</strong><div class="small muted">运单 DEMO-WB-00009150</div></div>${demo('复制','已复制演示运单号')}</div>`+U.note('最近查询失败，显示上次保存的轨迹。','amber')+U.kv('轨迹更新','今天 10:26')+U.kv('最近查询','今天 10:34')+logistics()+U.note('以上为已同步记录，更新后会自动显示。'))},
+    {id:'package-history',title:'历史与过期记录',group:'包裹',route:'/pages/packages/index · 历史与过期',description:'已完成、过期与手动是独立口径；保留撤销自动完成、恢复显示及历史日期管理。',back:'packages',content:()=>wrap(U.segmented([['已完成','package-history'],['过期订单','package-expired'],['手动记录','package-edit']])+section('已完成',parcel({product:short(socks),platform:'京东',role:'妈妈',status:'自动完成',summary:'今天 09:42 · 依据：物流明确领取记录',target:'package-detail',tone:'teal'}))+section('完成记录操作',demo('撤销自动完成','已设为未取，自动判断暂停；领取记录和依据保留。')+demo('恢复自动判断','恢复自动判断需要后台支持并具备该包裹领取权限。'))+U.row('过期订单','超过 30 天的订单可恢复至当前','2 笔','package-expired')+U.row('已隐藏记录','打开筛选中的“显示已隐藏记录”','查看','packages-filter')+demo('隐藏当前日期结果','仅隐藏此日期当前筛选出的订单，可在已隐藏记录中恢复。'))},
+    {id:'pickup-unmatched',title:'取件详情',group:'取件',route:'/pages/index/index · 未匹配详情',description:'未匹配也可直接领取；不展示虚构商品、角色或此前领取归属。',back:'pickup',sheet:true,top:[{icon:'more',label:'更多操作',target:'pickup-menu'}],content:()=>wrap(codeHero('98-126','','云杉便利店')+U.row('匹配订单','可稍后关联商品','','pickup-match')+U.row('原始短信','昨天 16:20 · 中通快递','查看','pickup-source')+U.note('仅记录领取，不会确认电商收货。')),footer:()=>U.button('标记已取','pickup-history')},
+    {id:'pickup-linked-source',title:'短信与关联',group:'取件',route:'/pages/index/index · 已关联来源',description:'已匹配来源保留原文、依据及单件或整条解除操作。',back:'pickup-detail',sheet:true,content:()=>wrap(sourcePreview()+section('已关联 1 件',U.row(mug,'我 · 淘宝 · 运单尾号 9150',U.badge('已取','teal'),'package-detail')+U.note('匹配依据：同一运单号。')+demo('解除此件关联','解除后保留原短信、包裹与已取状态，不会自动重新关联。'))+U.row('重新匹配','核对或补充关联包裹','','pickup-match')+U.row('忽略这条短信','可在“我的”恢复','','pickup-ignore')+demo('解除整条短信关联','确认解除整条关联：原短信、包裹与已取状态均保留，解除后不自动重连。'))},
+    {id:'pickup-assignment',title:'确认此前已取',group:'取件',route:'/pages/index/index · 领取归属待确认',description:'只在已有领取数量但归属缺失时出现，与未匹配短信详情分开。',back:'notifications-review',sheet:true,content:()=>wrap(codeHero('7-4502','08-B')+U.note('此前已取 1 件，请确认对应包裹。','amber')+section('已选 1 / 1 件',U.choice(short(box),'妈妈 · 京东 · 运单尾号 6281',true)+U.choice(short(mug),'我 · 淘宝 · 运单尾号 9150',false)+U.choice(short(socks),'妈妈 · 京东 · 运单尾号 7736',false))),footer:()=>U.button('确认此前已取 1 件','pickup-multi')},
+    {id:'pickup-reminder',title:'到站提醒',group:'取件',route:'/pages/index/index · 未识别取件码短信',description:'没有识别到码的短信以原文提供核对入口。',back:'notifications-review',sheet:true,content:()=>wrap(`<div class="card inset stack"><div class="muted small">今天 09:10 · 中通快递</div><p>【青禾驿站】您的包裹已到青禾小区东门店，请携带手机到店领取。</p></div>`+U.note('尚未识别到取件码。','amber')+U.row('短信识别规则','','查看','sms-rules')+U.row('忽略这条短信','可在“我的”恢复','','pickup-ignore'))},
+    {id:'notifications-review',title:'通知中心',group:'取件',route:'/pages/index/index · 待确认通知',description:'待确认类别单独浏览，每条可关闭。',back:'pickup',sheet:true,content:()=>wrap(notificationTabs(1)+section('待确认',notification('已送达，确认收到',short(socks)+' · 妈妈 · 京东',U.badge('1 件','blue'),'package-delivery')+notification('此前已取待归属','7-4502 · 请确认此前已取的 1 件','确认','pickup-assignment')+notification('取件信息待核对','98-126 · 2 个匹配候选','匹配','pickup-match')+notification('一条到站提醒','未识别到取件码','查看','pickup-reminder')))},
+    {id:'notifications-error',title:'通知中心',group:'取件',route:'/pages/index/index · 异常通知',description:'账号、本地读取和短信更新错误均给出对应恢复入口。',back:'pickup',sheet:true,content:()=>wrap(notificationTabs(2)+section('异常',notification('京东账号已失效','更新登录后继续同步','处理','accounts-error')+notification('本地记录读取失败','暂时无法读取本地记录','重试','package-loading')+notification('短信更新未完成','请检查短信读取权限后重试','重试','notifications-sync')))},
+    {id:'notifications-sync',title:'通知中心',group:'取件',route:'/pages/index/index · 同步通知',description:'同步进度和结果可分别关闭，后台任务不阻塞本地取件。',back:'pickup',sheet:true,content:()=>wrap(notificationTabs(3)+section('同步',notification('短信已更新','今天 10:34 · 新增 3 个取件码',U.badge('完成','teal'),'pickup')+notification('线上订单处理中','稍后刷新查看',U.badge('更新中','blue'),'package-refreshing')+notification('最近自动完成','1 个包裹 · 今天 09:42','查看','package-history'))+`<progress class="progress" aria-label="线上订单同步进度"></progress>`)},
+    {id:'station-empty',title:'更换站点',group:'取件',route:'components/StationChooser.vue · 无可选站点',description:'同步站点配置为空的独立状态。',back:'pickup-detail',sheet:true,content:()=>wrap(U.kv('当前站点','未识别站点')+U.empty('暂无可选站点','请先在后台添加并启用站点，然后同步。',U.button('返回取件详情','pickup-detail','secondary')))},
+    {id:'pickup-match-conflict',title:'确认关联差异',group:'取件',route:'/pages/index/index · 匹配冲突确认',description:'所选包裹与短信末端站点不同，需要用户明确再次确认。',back:'pickup-match',sheet:true,content:()=>wrap(U.note('取件信息存在差异。','amber')+productHead(box,'京东 · 妈妈 · 运单尾号 6281')+U.kv('短信站点','云杉便利店')+U.kv('包裹末端站点','青禾小区东门驿站')+U.note('仍要将这个包裹与短信 98-126 关联吗？')),footer:()=>wrap(U.button('仍要关联','pickup-linked-source')+U.button('重新选择','pickup-match','secondary'))},
+    {id:'package-empty',title:'包裹记录',group:'包裹',route:'/pages/packages/index · 无记录',description:'真正没有记录的空状态，提供新增和账号绑定入口。',back:'packages',tab:'packages',top:[{icon:'plus',label:'添加快递',target:'package-edit'}],content:()=>wrap(U.row('全部角色','最近 30 天','筛选','packages-filter')+U.empty('还没有包裹记录','添加一条快递，或绑定账号同步订单。',U.button('添加快递','package-edit'))+U.button('绑定账号','accounts','secondary'))},
+    {id:'package-edit-error',title:'添加快递',group:'包裹',route:'/pages/packages/edit · 校验失败',description:'保存后真实字段错误态，错误在对应字段附近显示。',back:'package-edit',content:()=>wrap(U.field('寄件人或包裹名称','','请输入名称').replace('<input ','<input aria-invalid="true" aria-describedby="package-name-error" ')+`<div id="package-name-error" role="alert">${U.note('请输入名称','red')}</div>`+U.field('快递单号','12','6–32 位字母、数字或连字符').replace('<input ','<input aria-invalid="true" aria-describedby="package-waybill-error" ')+`<div id="package-waybill-error">${U.note('单号须为 6–32 位字母、数字或连字符','red')}</div>`),footer:()=>U.button('保存记录','package-history')},
+    {id:'package-refreshing',title:'包裹记录',group:'包裹',route:'/pages/packages/index · 后台更新',description:'已有本地记录仍可浏览，更新中按钮禁用。',back:'packages',tab:'packages',content:()=>wrap(U.row('全部角色','最近 30 天','筛选','packages-filter')+`<div class="card inset stack"><div class="hrow between"><span>正在更新订单</span><button class="btn secondary" disabled aria-busy="true">更新中</button></div><progress class="progress" aria-label="更新订单"></progress></div>`+section('本地记录 · 10:34',parcel()+parcel({product:short(box),platform:'京东',role:'妈妈',status:'运输中',summary:'已到达本市转运中心',target:'package-multi'})))},
+    {id:'package-logistics-empty',title:'物流轨迹',group:'包裹',route:'components/LogisticsTimeline.vue · 无轨迹',description:'平台暂未提供轨迹时显示查询时间与空状态。',back:'package-detail',sheet:true,content:()=>wrap(U.kv('运单号','DEMO-WB-00006282')+U.kv('最近查询','今天 10:34')+U.empty('暂无物流轨迹','平台暂未提供物流轨迹，更新后会自动显示。',U.button('更新订单','package-refreshing','secondary')))}
+  ];
+  window.SCENES.push(...scenes);
+})();
+</script>
+  <script>(() => {
+  const U = window.UI;
+  const demo = (label, message) => `<button type="button" class="text-action" data-demo="${message}">${label}</button>`;
+  const grouped = (title, content) => U.section(title, `<div class="list">${content}</div>`);
+  const sample = '【示例驿站】您的包裹已到青禾小区东门驿站，取件码 6-1832，请及时领取。';
+  const scenes = [
+    {
+      id: 'my', title: '我的', group: '设置', route: '/pages/my/index', tab: 'my',
+      description: '设置首页。识别统计保持本机口径，常用配置按职责归组。',
+      content: () => `<div class="stack">
+        <div class="card inset"><div class="hrow between"><div><p class="muted small">累计识别</p><strong class="mini-code">128</strong></div><div><p class="muted small">累计取走</p><strong class="mini-code">116</strong></div>${U.badge('本机记录')}</div></div>
+        ${grouped('连接与运行', U.row('线上账号', '家人和平台账号', '3 个账号', 'accounts') + U.row('扫描与权限', '最近扫描 09:42', U.badge('正常', 'teal'), 'scan') + U.row('桌面卡片', '尺寸与隐私显示', '', 'widgets'))}
+        ${grouped('识别与优化', U.row('识别优化', '短信建议、站点增强与人工修正', U.badge('2 条待核对', 'blue'), 'automation') + U.row('短信识别规则', '本机取件码与提醒模板', '8 条', 'sms-rules') + U.row('物流识别规则', '本机到站与站点位置', '6 条', 'logistics-rules'))}
+        ${grouped('帮助与应用', U.row('常见问题', '', '', 'faq') + U.row('关于应用', '许可与更新记录', '', 'about') + U.row('检查更新', '', 'v3.1.33', 'update'))}
+      </div>`
+    },
+    {
+      id: 'accounts', title: '线上账号', group: '设置', route: '/pages/my/online-accounts', back: 'my',
+      description: '已绑定状态。全局同步只保留一个主入口，账号行保留各自的登录与采集情况。',
+      content: () => `<div class="stack">
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>家庭取件服务</strong>${U.badge('已连接', 'teal')}</div><p class="muted small">最近同步 09:40 · 2 个操作待同步</p>${U.button('立即同步', '', 'primary')}</div>
+        ${grouped('已授权账号', U.row('淘宝 · 日常账号', '我 · 最近采集 09:39', U.badge('正常', 'teal')) + U.row('京东 · 家庭账号', '妈妈 · 最近采集 09:38', U.badge('正常', 'teal')) + U.row('拼多多 · 生活账号', '我 · 需要更新登录', U.badge('已失效', 'amber'), 'accounts-error'))}
+        ${grouped('设备绑定', U.kv('服务地址', 'https://parcel-demo.example') + U.kv('更新方式', '后台定时采集，打开应用读取快照') + U.row('更换绑定服务', '本机历史记录保留', '', 'accounts-unbound'))}
+        <div class="card inset stack gap-sm">${demo('管理后台账号', 'Android 安装版会确认并复制后台地址，再由浏览器管理登录。')}${demo('解除设备绑定', '解除前确认：停止本设备线上同步，本地历史仍保留。')}</div>
+      </div>`
+    },
+    {
+      id: 'accounts-unbound', title: '绑定服务', group: '设置', route: '/pages/my/online-accounts', back: 'accounts',
+      description: '未绑定/更换服务表单；扫码、相册和粘贴均只填入待核验信息。',
+      content: () => `<div class="stack">
+        ${U.note('本地取件记录仍可使用。绑定后同步已授权的家人和平台账号。')}
+        <div class="card inset stack"><div class="hrow">${U.button('扫描授权码', '', 'secondary')}${U.button('识别图片', '', 'secondary')}</div>${U.button('粘贴授权信息', '', 'secondary')}<details><summary class="text-action">手动粘贴或修改识别内容</summary><div class="field"><label for="pairing-text">授权信息</label><textarea id="pairing-text" rows="3" placeholder="二维码原文、服务地址或文字授权码"></textarea></div></details></div>
+        <div class="card inset stack">${U.field('服务地址', 'https://parcel-demo.example', '请输入 HTTPS 服务地址', 'url')}${U.field('一次性授权码', 'DEMO-7K4M', '输入后台生成的授权码')}<p class="small muted">授权码 10 分钟内有效。下一步先核验服务与授权范围。</p></div>
+      </div>`,
+      footer: () => U.button('核验授权范围', 'accounts-verify')
+    },
+    {
+      id: 'accounts-verify', title: '确认授权范围', group: '设置', route: '/pages/my/online-accounts · pairingPreview', back: 'accounts-unbound',
+      description: '核验完成后才允许绑定。家人整组授权与指定账号授权分开列明。',
+      content: () => `<div class="stack">
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>家庭取件服务</strong>${U.badge('已核验', 'teal')}</div><p class="small muted">https://parcel-demo.example</p>${U.kv('授权有效至', '今天 10:10')}</div>
+        ${grouped('家人整组授权', U.row('妈妈', '当前 1 个平台账号', U.badge('包含以后新增', 'blue')))}
+        ${grouped('指定账号授权', U.row('淘宝 · 日常账号', '我', U.badge('仅此账号')) + U.row('拼多多 · 生活账号', '我', U.badge('仅此账号')))}
+        ${U.note('指定账号不会自动扩大为家人整组授权。更换服务后，本地历史记录保留。')}
+      </div>`,
+      footer: () => `<div class="hrow">${U.button('返回修改', 'accounts-unbound', 'secondary')}${U.button('确认绑定', 'accounts')}</div>`
+    },
+    {
+      id: 'accounts-error', title: '账号需要处理', group: '设置', route: '/pages/my/online-accounts · error', back: 'accounts',
+      description: '平台登录失效与设备授权失效分开；现存本地记录不隐藏。',
+      content: () => `<div class="stack">
+        ${U.note('拼多多登录已失效，设备绑定仍然有效。', 'amber')}
+        <div class="card inset stack"><div class="hrow between"><strong>生活账号</strong>${U.badge('需要重新登录', 'amber')}</div>${U.kv('所属家人', '我')}${U.kv('最近成功采集', '昨天 18:20')}<p class="muted small">请在后台更新这个平台的登录，再返回同步。</p>${U.button('前往后台更新', '', 'primary')}</div>
+        ${grouped('仍可使用', U.row('本地取件和历史记录', '连接恢复后继续同步', U.badge('已保留', 'teal')))}
+        <details class="card inset"><summary class="text-action">如果是设备授权失效</summary><p class="small muted">重新获取后台授权码，核验后绑定。本地历史不会清除。</p>${U.link('重新绑定服务', 'accounts-unbound')}</details>
+      </div>`,
+      footer: () => U.button('重新同步', 'accounts', 'secondary')
+    },
+    {
+      id: 'automation', title: '识别优化', group: '识别与优化', route: '/pages/my/auto-settings + /pages/my/match-rules', back: 'my',
+      description: '设计建议的集中入口，原有开关和数据来源不变；三个优化流程保持独立。',
+      content: () => `<div class="stack">
+        <div class="card inset"><div class="hrow between"><strong>后台 AI 服务</strong>${U.badge('可用', 'teal')}</div><p class="muted small">家庭服务默认渠道 · 跟随后台设置</p></div>
+        ${grouped('待核对', U.row('短信识别建议', '核对样例后保存到本机规则', U.badge('1 条', 'blue'), 'sms-ai') + U.row('人工修正记录', '查看提交进度与处理回执', U.badge('1 条待核对', 'amber'), 'corrections'))}
+        ${grouped('自动处理', U.row('领取语句监测', '后台已开启 · 仅明确领取才自动完成', U.badge('已开启', 'teal'), 'auto-completions') + U.kv('AI 监测词调优', U.badge('已开启', 'blue')) + U.row('优化设置', '站点片段与人工修正样本', '', 'optimization'))}
+        ${grouped('本机规则', U.row('短信识别规则', '取件码与到站、催取提醒', '8 条', 'sms-rules') + U.row('物流识别规则', '到站事件与站点位置', '6 条', 'logistics-rules'))}
+      </div>`
+    },
+    {
+      id: 'optimization', title: '优化设置', group: '识别与优化', route: '/pages/my/auto-settings · stationEnhancement / manualLearning', back: 'automation',
+      description: '手机采集许可和后台处理职责分开，不增加渠道、密钥或自动批准设置。',
+      content: () => `<div class="stack">
+        ${grouped('站点片段', U.toggle('提交未识别站名', '脱敏后提交已绑定后台整理', true) + U.kv('提交状态', '2 条待上传') + U.kv('最近提交', '今天 09:40'))}
+        ${U.note('只提交站名片段。姓名、电话、单号、取件码与短信正文不上传；建议在后台核对后加入规则。')}
+        ${grouped('人工修正', U.toggle('提交修正样本', '手动匹配或更换站点后保存脱敏样本', true) + U.row('查看修正记录', '本地保存、后台处理、手机接收', '', 'corrections'))}
+        ${U.note('关闭后停止采集和提交新样本，相关撤回仍会同步。')}
+        ${grouped('后台服务', U.row('家庭服务默认渠道', '服务设置在后台统一管理', U.badge('可用', 'teal')) + U.row('线上账号与设备绑定', '', '', 'accounts'))}
+      </div>`
+    },
+    {
+      id: 'scan', title: '扫描与权限', group: '设置', route: '/pages/my/auto-settings · scan / permission', back: 'my',
+      description: '将扫描频率、权限、后台限制和手动扫描放在同一页；没有准点保证。',
+      content: () => `<div class="stack">
+        ${grouped('短信识别', U.toggle('定时识别短信', '由 Android 系统安排执行', true) + U.kv('扫描频率', '约每 1 小时') + U.kv('最近实际扫描', '今天 09:42'))}
+        ${grouped('运行条件', U.row('读取短信', '已允许', U.badge('正常', 'teal')) + U.row('后台运行', '未受省电限制', U.badge('正常', 'teal')))}
+        <div class="card inset stack gap-sm">${demo('应用权限设置', '请在 Android 系统设置中允许读取短信；部分手机另有通知类短信权限。')}${demo('后台运行设置', '打开 Android 后台运行设置。系统休眠或强制停止仍可能延迟扫描。')}</div>
+        ${U.note('本次新增 2 个取件码、1 条提醒。', 'teal')}
+      </div>`,
+      footer: () => U.button('立即扫描', '', 'primary')
+    },
+    {
+      id: 'scan-denied', title: '需要短信权限', group: '设置', route: '/pages/my/auto-settings · smsPermission=false', back: 'scan',
+      description: '权限拒绝状态。显示真实阻断原因，保留本地记录与打开系统设置入口。',
+      content: () => `<div class="stack">
+        ${U.note('未获得短信权限，定时识别尚未开启。', 'amber')}
+        ${grouped('短信识别', U.kv('读取短信', U.badge('未允许', 'amber')) + U.kv('定时识别', '未开启') + U.kv('最近实际扫描', '昨天 18:42'))}
+        <div class="card inset stack gap-sm"><strong>允许读取短信</strong><p class="small muted">在应用权限设置中允许读取短信。部分手机还需要允许“通知类短信”。</p>${U.button('打开应用权限设置', '', 'primary')}</div>
+        ${grouped('本地记录', U.kv('取件码与历史', '已保留') + U.row('线上账号', '线上订单可继续同步', '', 'accounts'))}
+      </div>`
+    },
+    {
+      id: 'widgets', title: '桌面卡片', group: '设置', route: '/pages/my/auto-settings · widget=list', back: 'my',
+      description: '默认 4×2 列表卡片；三个尺寸有独立可切换场景，保留隐私与添加入口。',
+      content: () => `<div class="stack">
+        ${U.segmented([['2 × 2', 'widgets-small'], ['4 × 2', 'widgets'], ['5 × 3', 'widgets-large']], 1)}
+        <div class="card inset stack"><div class="hrow between"><strong>取件列表</strong>${U.badge('3 件待取', 'blue')}</div><div class="stack gap-sm"><div class="hrow between"><div class="hrow"><span class="hero-cabinet">6 柜</span><strong class="mini-code">6-1832</strong></div>${demo('取件', '在桌面卡片标记本件已取；此处为设计预览。')}</div><p class="small muted">青禾小区东门驿站 · 我</p></div><div class="divider"></div><div class="stack gap-sm"><div class="hrow between"><div class="hrow"><span class="hero-cabinet">2 柜</span><strong class="mini-code">2-0417</strong></div>${demo('查看', '共码 2 件，进入取件详情选择本次领取的包裹。')}</div><p class="small muted">云杉便利店 · 妈妈 · 共码 2 件</p></div><div class="hrow between"><span class="small muted">09:42 更新</span>${demo('刷新', '刷新桌面卡片数据。')}</div></div>
+        ${grouped('隐私显示', U.toggle('显示取件信息', '取件码、柜号、公司与地址', true) + U.row('隐私模式预览', '', '', 'widgets-privacy'))}
+      </div>`,
+      footer: () => U.button('添加到桌面', '', 'primary')
+    },
+    {
+      id: 'widgets-small', title: '紧凑桌面卡片', group: '设置', route: '/pages/my/auto-settings · widget=small', back: 'my',
+      description: '2×2 紧凑卡片，突出一个取件码与剩余数量。',
+      content: () => `<div class="stack">
+        ${U.segmented([['2 × 2', 'widgets-small'], ['4 × 2', 'widgets'], ['5 × 3', 'widgets-large']], 0)}
+        <div class="card inset stack"><div class="hrow between"><strong>取件列表</strong>${U.badge('3 件待取', 'blue')}</div><span class="small muted">11 月 7 日</span><div class="hrow"><span class="hero-cabinet">6 号柜</span><span class="small muted">我</span></div><strong class="code-hero">6-1832</strong><p class="small muted">青禾小区东门驿站</p>${U.button('取件', '', 'secondary')}<div class="divider"></div><div class="hrow between"><span class="small muted">还有 1 个取件码</span>${demo('刷新', '刷新桌面卡片数据。')}</div></div>
+        ${grouped('隐私显示', U.toggle('显示取件信息', '取件码、柜号、公司与地址', true) + U.row('隐私模式预览', '', '', 'widgets-privacy'))}
+      </div>`,
+      footer: () => U.button('添加到桌面', '', 'primary')
+    },
+    {
+      id: 'widgets-large', title: '大号桌面卡片', group: '设置', route: '/pages/my/auto-settings · widget=large', back: 'my',
+      description: '5×3 大卡片，保留站点/平台筛选、共码多件、待确认收到与代收包裹。',
+      content: () => `<div class="stack">
+        ${U.segmented([['2 × 2', 'widgets-small'], ['4 × 2', 'widgets'], ['5 × 3', 'widgets-large']], 2)}
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>待取与收货</strong>${demo('全部站点⌄', '选择站点：全部站点、青禾小区东门驿站、云杉便利店。')}</div><div class="hrow between"><div class="stack gap-sm"><div class="hrow"><span class="hero-cabinet">6 柜</span><strong class="mini-code">6-1832</strong></div><span class="small muted">青禾小区东门驿站 · 我</span></div>${demo('取件', '标记本件已取。')}</div><div class="divider"></div><div class="hrow between"><div class="stack gap-sm"><strong class="mini-code">2-0417</strong><span class="small muted">云杉便利店 · 妈妈 · 共码 2 件</span></div>${demo('查看', '共码 2 件，进入详情选择领取。')}</div><div class="divider"></div><div class="hrow between"><div class="stack gap-sm"><strong>日用收纳袋</strong><span class="small muted">已送达 · 待确认</span></div>${demo('确认收到', '按运单确认收到，七秒内可撤销。')}</div><div class="divider"></div><strong>代收包裹 · 3</strong>${U.segmented([['全部', 'widgets-large'], ['淘宝 2', ''], ['京东 1', '']], 0)}${U.kv('棉质收纳套装', '妈妈 · 运输中')}${U.kv('简约桌面灯', '我 · 待发货')}<div class="hrow between"><span class="small muted">09:42 更新</span>${demo('刷新', '刷新桌面卡片数据。')}</div></div>
+        ${grouped('隐私显示', U.toggle('显示取件信息', '取件码、柜号、公司与地址', true) + U.row('隐私模式预览', '', '', 'widgets-privacy'))}
+      </div>`,
+      footer: () => U.button('添加到桌面', '', 'primary')
+    },
+    {
+      id: 'widgets-privacy', title: '桌面卡片隐私', group: '设置', route: '/pages/my/auto-settings · widgetPrivacy', back: 'widgets',
+      description: '隐私模式同时隐藏码、柜号、公司、地址及相关详情，保留进入应用的入口。',
+      content: () => `<div class="stack">
+        ${grouped('隐私显示', U.toggle('显示取件信息', '关闭后在桌面隐藏敏感内容', false))}
+        <div class="card inset stack"><div class="hrow between"><strong>待取与收货</strong>${U.badge('3 件待取')}</div><strong class="code-hero">••••••</strong><p class="muted">隐私模式 · 打开查看</p><div class="divider"></div><strong class="code-hero">••••••</strong><p class="muted">隐私模式 · 打开查看</p><div class="divider"></div><div class="hrow between"><strong>代收包裹</strong><span class="muted">••</span></div><p class="muted small">详情已隐藏</p></div>
+        ${U.note('如果当前桌面不支持直接添加，请在系统小组件列表选择“取件列表”。')}
+      </div>`,
+      footer: () => U.button('返回卡片预览', 'widgets', 'secondary')
+    },
+    {
+      id: 'corrections', title: '人工修正记录', group: '识别与优化', route: '/pages/my/auto-settings · matchingFeedback / corrections', back: 'automation',
+      description: '本地纠错为主线，提交回执附在事件上，避免把同一次纠错重复列成两张卡。',
+      content: () => `<div class="stack">
+        <div class="chips">${U.badge('待提交 1', 'blue')}${U.badge('待核对 1', 'amber')}${U.badge('失败 1', 'red')}</div>
+        ${grouped('今天', U.row('更换取件站点', '云杉店 → 云杉便利店 · 09:35', U.badge('规则已应用', 'teal'), 'correction-detail') + U.row('更换取件站点', '青禾小区东门驿站 · 09:28', U.badge('提交失败', 'red'), 'correction-failed') + U.row('人工匹配包裹', '棉质收纳套装 · 09:20', U.badge('待核对', 'amber')) + U.row('更换取件站点', '青禾小区东门驿站 · 09:12', U.badge('待提交', 'blue')))}
+        ${grouped('更早', U.row('恢复自动站点', '相关样本已同步撤回 · 昨天', U.badge('已撤回')) + U.row('人工匹配包裹', '当时未绑定后台，仅保存本机 · 昨天', U.badge('未提交')))}
+        ${U.note('规则已应用表示收到处理结果，不代表识别效果已验证。')}
+      </div>`
+    },
+    {
+      id: 'correction-detail', title: '本次修正', group: '识别与优化', route: '/pages/my/auto-settings?correctionId=demo-correction', back: 'corrections',
+      description: '纠错深链直接定位同一个事件。展示本地保存、后台结果与手机回执，不编造 AI 推理过程。',
+      content: () => `<div class="stack">
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>更换取件站点</strong>${U.badge('本机已保存', 'teal')}</div>${U.kv('修正前', '云杉店')}${U.kv('修正后', '云杉便利店')}${U.kv('操作时间', '今天 09:35')}</div>
+        ${U.section('提交进度', `<div class="card inset">${U.timeline([{ time: '09:35', text: '保存本地修正与脱敏样本' }, { time: '09:40', text: '后台已接收' }, { time: '09:41', text: '规则已应用 · 版本 24' }, { time: '09:42', text: '手机已保存规则，后台收到导入回执', active: true }])}</div>`)}
+        ${U.note('后续新样本仍需验证识别效果。', 'blue')}
+        ${grouped('提交详情', U.kv('提交尝试', '1 次') + U.kv('最近尝试', '今天 09:40') + U.kv('提交内容', '脱敏站名关系，不含原短信'))}
+      </div>`
+    },
+    {
+      id: 'correction-failed', title: '修正提交失败', group: '识别与优化', route: '/pages/my/auto-settings · matchingFeedback.failed', back: 'corrections',
+      description: '失败样例保留本机修正，显示原始失败回执与尝试时间；通过现有同步流程重试。',
+      content: () => `<div class="stack">
+        ${U.note('连接后台超时，样本尚未获确认。', 'red')}
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>更换取件站点</strong>${U.badge('本机已保存', 'teal')}</div>${U.kv('修正前', '青禾东门')}${U.kv('修正后', '青禾小区东门驿站')}${U.kv('操作时间', '今天 09:28')}</div>
+        ${grouped('提交状态', U.kv('处理结果', U.badge('失败，可重试', 'red')) + U.kv('提交尝试', '2 次') + U.kv('最近尝试', '今天 09:40') + U.kv('手机规则导入', '尚无回执'))}
+        ${U.note('本机修正仍然有效。恢复连接后重新同步，继续提交此样本。')}
+        <div class="list">${U.row('线上账号', '检查服务连接', '', 'accounts')}</div>
+      </div>`,
+      footer: () => U.button('重新同步', '', 'primary')
+    },
+    {
+      id: 'auto-completions', title: '自动取件记录', group: '识别与优化', route: '/pages/my/auto-settings · recentCompletionResults', back: 'automation',
+      description: '自动完成结果记录，非 AI 通用运行日志。监测开关只读后台状态。',
+      content: () => `<div class="stack">
+        ${grouped('后台状态', U.kv('领取语句监测', '已开启') + U.kv('AI 监测词调优', '已开启 · 服务可用'))}
+        ${U.note('仅本人或收件人明确领取才会自动完成。代收、门口放置和泛签收不计入。')}
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>简约棉麻围裙</strong>${U.badge('自动完成', 'teal')}</div><p class="small muted">今天 08:56 · 我 · 淘宝</p>${U.kv('领取证据', '收件人本人已取件')}${U.button('查看包裹', '', 'secondary')}</div>
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>玻璃保鲜盒套装</strong>${U.badge('自动完成', 'teal')}</div><p class="small muted">昨天 18:34 · 妈妈 · 京东</p>${U.kv('领取证据', '本人自提完成')}${U.button('查看包裹', '', 'secondary')}</div>
+        <p class="muted small">可在对应包裹撤销自动完成，或恢复自动判断。</p>
+      </div>`
+    },
+    {
+      id: 'sms-rules', title: '短信识别规则', group: '识别与优化', route: '/pages/my/match-rules', back: 'automation',
+      description: '规则列表专注规则维护，AI 建议与忽略短信保留明确入口。',
+      top: [{ icon: 'plus', label: '添加规则', target: 'sms-edit' }],
+      content: () => `<div class="stack">
+        <div class="list">${U.row('AI 识别建议', '1 条待核对 · 1 条需重试', U.badge('查看', 'blue'), 'sms-ai')}</div>
+        <div class="card inset stack gap-sm">${U.toggle('通用取件短信', '内置 · 提取取件码、公司、地址', true)}<div class="hrow">${U.link('编辑规则', 'sms-edit')}${demo('删除规则', '删除前确认：不再识别新短信，已有取件记录保留。')}</div></div>
+        <div class="card inset stack gap-sm">${U.toggle('示例驿站', '手动添加 · 11 月 6 日', true)}<div class="hrow">${U.link('编辑规则', 'sms-edit')}${demo('删除规则', '删除前确认：不再识别新短信，已有取件记录保留。')}</div></div>
+        <div class="card inset stack gap-sm">${U.toggle('到站提醒', '内置 · 不提取取件码', true)}${U.link('编辑提醒模板', 'sms-edit')}</div>
+        ${grouped('其他', U.row('使用预制规则', '先核对样例再保存', '', 'sms-presets') + U.row('已忽略短信', '可按当前规则恢复识别', '3 条', 'ignored'))}
+      </div>`,
+      footer: () => U.button('添加规则', 'sms-edit')
+    },
+    {
+      id: 'sms-edit', title: '编辑短信规则', group: '识别与优化', route: '/pages/my/match-settings?mode=edit&id=demo-rule', back: 'sms-rules',
+      description: '保留样例、正确码、起止文字与验证门槛；新增、预制和提醒模板复用此结构。',
+      content: () => `<div class="stack">
+        <div class="card inset stack">${U.field('规则名称', '示例驿站', '必填')}<div class="field"><label for="sms-sample">完整短信样例</label><textarea id="sms-sample" rows="4" maxlength="4000">${sample}</textarea></div>${U.field('正确取件码', '6-1832', '先核对这条短信中的取件码')}</div>
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>后台 AI 服务</strong>${U.badge('可用', 'teal')}</div><p class="muted small">只发送合成模板片段，原短信与真实码留在本机。</p>${U.button('生成并验证模板', '', 'secondary')}</div>
+        ${U.section('提取位置', `<div class="card inset stack">${U.field('取件码 · 起始文字', '取件码')}${U.field('取件码 · 结束文字', '，')}${U.field('快递名称 · 起始文字', '【')}${U.field('快递名称 · 结束文字', '】')}${U.field('地址 · 起始文字', '已到')}${U.field('地址 · 结束文字', '，取件码')}</div>`)}
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>样例验证</strong>${U.badge('通过', 'teal')}</div>${U.kv('取件码', '6-1832')}${U.kv('快递名称', '示例驿站')}${U.kv('地址', '青禾小区东门驿站')}<p class="muted small">签名：示例驿站 · 必须包含：取件码</p></div>
+        <details class="card inset"><summary class="text-action">验证说明</summary><p class="small muted">结束文字留空：取件码读取下一个完整码，其他字段读取至短信结尾。样例或正确码变更后，AI 候选需重新生成；不通过时展示原因并保留原规则。到站与催取模板不要求正确取件码，也不生成取件码。</p></details>
+      </div>`,
+      footer: () => U.button('保存规则', '', 'primary')
+    },
+    {
+      id: 'sms-ai', title: '短信 AI 建议', group: '识别与优化', route: '/pages/my/match-rules · AiOptimizationPanel', back: 'automation',
+      description: '自动准备候选建议；确认使用才生效，不展示虚构准确率或运行日志。',
+      content: () => `<div class="stack">
+        ${grouped('自动准备', U.toggle('准备优化建议', '扫描发现合适样例时自动分析', true) + U.kv('后台统一服务', '家庭服务默认渠道'))}
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>示例驿站取件短信</strong>${U.badge('待确认', 'blue')}</div><strong class="mini-code">6-1832</strong><p class="muted small">已通过本机样例与验证码反例校验。</p>${U.button('核对样例与规则', 'sms-ai-detail', 'secondary')}</div>
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>新的取件短信</strong>${U.badge('需重试', 'amber')}</div><p class="small muted">未通过本机样例校验，尚未保存规则。</p><div class="hrow">${demo('重试未完成', '重新分析未完成建议。失败原因保留，现有规则继续有效。')}${demo('忽略建议', '忽略本条候选建议，不修改原短信。')}</div></div>
+        ${grouped('等待处理', U.row('待分析样例', '', U.badge('等待分析')) + U.row('正在准备候选', '', U.badge('分析中', 'blue')))}
+        ${U.note('原短信与真实取件码留在本机。建议确认后才生效。')}
+        ${demo('刷新服务状态', '重新读取已绑定后台的 AI 服务状态。')}
+      </div>`
+    },
+    {
+      id: 'sms-ai-unavailable', title: 'AI 服务暂不可用', group: '识别与优化', route: '/components/AiOptimizationPanel.vue · service.available=false', back: 'sms-ai',
+      description: 'AI 默认服务未配置状态，不禁用本机手动规则。完整 AI 运行日志仍需后台能力支持。',
+      content: () => `<div class="stack">
+        ${U.note('请在后台 AI 设置中选择可用的默认服务。', 'amber')}
+        ${grouped('服务状态', U.kv('后台统一 AI 服务', U.badge('未配置', 'amber')) + U.kv('自动准备建议', '暂不可开启') + U.kv('已保存的本机规则', '继续有效'))}
+        <div class="card inset stack gap-sm"><strong>仍可手动识别</strong><p class="small muted">粘贴短信样例，设置提取文字并验证后保存。</p>${U.button('手动添加规则', 'sms-edit', 'secondary')}</div>
+        <div class="list">${U.row('线上账号', '查看已绑定服务', '', 'accounts')}</div>
+      </div>`,
+      footer: () => U.button('刷新服务状态', '', 'primary')
+    },
+    {
+      id: 'sms-ai-detail', title: '核对识别建议', group: '识别与优化', route: '/components/AiOptimizationPanel.vue · proposalDetails', back: 'sms-ai', sheet: true,
+      description: '候选建议核对弹层，保留本机原样例与具体提取位置。',
+      content: () => `<div class="stack">
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>建议提取的取件码</strong>${U.badge('待确认', 'blue')}</div><strong class="code-hero">6-1832</strong></div>
+        ${U.section('本机短信样例', `<p class="inset">${sample}</p>`)}
+        ${grouped('候选规则', U.kv('名称', '示例驿站取件短信') + U.kv('适用签名', '示例驿站') + U.kv('提取位置', '取件码 → ，') + U.kv('必要文字', '取件码'))}
+        ${U.note('已通过样例与验证码反例校验。确认后保存本机规则。', 'teal')}
+      </div>`,
+      footer: () => `<div class="hrow">${U.button('忽略', 'sms-ai', 'secondary')}${U.button('确认使用', 'sms-rules')}</div>`
+    },
+    {
+      id: 'sms-presets', title: '选择预制规则', group: '识别与优化', route: '/pages/my/match-rules · presetPopup', back: 'sms-rules', sheet: true,
+      description: '选择仅进入编辑核对，不直接覆盖现有规则。',
+      content: () => `<div class="stack">${U.note('选择后核对样例，再保存到本机规则。')}${grouped('取件短信', U.row('通用取件模板', '适用常见取件码语句', '', 'sms-edit') + U.row('示例驿站模板', '适用指定短信签名', '', 'sms-edit'))}${grouped('提醒短信', U.row('到站通知', '仅提醒，不提取取件码', '', 'sms-edit') + U.row('催取提醒', '仅提醒，不创建新取件码', '', 'sms-edit'))}</div>`
+    },
+    {
+      id: 'logistics-rules', title: '物流识别规则', group: '识别与优化', route: '/pages/my/logistics-rules', back: 'automation',
+      description: '本机规则与后台规则明确分开；列表保留启停、编辑、删除、恢复默认。',
+      content: () => `<div class="stack">
+        ${U.note('仅本机生效，不会上传或修改后台物流规则。')}
+        <div class="card inset stack gap-sm">${U.toggle('已暂存至站点', '到站事件 · 内置规则', true)}<div class="hrow">${U.link('编辑规则', 'logistics-edit')}${demo('删除规则', '删除前确认：本机不再使用这条规则识别物流。')}</div></div>
+        <div class="card inset stack gap-sm">${U.toggle('包裹已到', '到站事件 · 手动添加', true)}<div class="hrow">${U.link('编辑规则', 'logistics-edit')}${demo('删除规则', '删除前确认：本机不再使用这条规则识别物流。')}</div></div>
+        <div class="card inset stack gap-sm">${U.toggle('站点位置提示', '仅站点位置 · 内置规则', false)}${U.link('编辑规则', 'logistics-edit')}</div>
+        ${U.note('预计、未到达、退回、中转和催取提醒，不会被当作新的到站事件。')}
+        ${demo('恢复默认规则', '恢复前确认：本机手动添加的物流规则将被删除。')}
+      </div>`,
+      footer: () => U.button('添加规则', 'logistics-edit')
+    },
+    {
+      id: 'logistics-edit', title: '编辑物流规则', group: '识别与优化', route: '/pages/my/logistics-rules · editor', back: 'logistics-rules',
+      description: '两种规则类型可见；多条起始文字和关键词保持各自独立输入。',
+      content: () => `<div class="stack">
+        <div class="card inset stack">${U.field('规则名称', '已暂存至站点')}<fieldset class="stack gap-sm"><legend class="small strong">规则类型</legend><label class="hrow"><input type="radio" name="logistics-kind" value="arrival" checked>到站事件</label><label class="hrow"><input type="radio" name="logistics-kind" value="location">仅站点位置</label></fieldset><div class="field"><label for="logistics-starts">起始文字 · 每行一种</label><textarea id="logistics-starts" rows="3">已暂存至\n包裹已到</textarea></div><div class="field"><label for="logistics-keywords">全部包含关键词 · 可选</label><textarea id="logistics-keywords" rows="2" placeholder="每行一个关键词"></textarea></div>${U.field('结束文字 · 可留空', '，请及时取件')}</div>
+        <div class="card inset stack"><h2 class="section-title">样例测试</h2><div class="field"><label for="logistics-sample">物流文本</label><textarea id="logistics-sample" rows="3">包裹已到青禾小区东门驿站，请及时取件。</textarea></div>${U.field('预期站名 · 可选', '青禾小区东门驿站')}${U.button('测试当前规则', '', 'secondary')}${U.note('测试通过：青禾小区东门驿站 · 到站事件', 'teal')}</div>
+      </div>`,
+      footer: () => U.button('保存规则', '', 'primary')
+    },
+    {
+      id: 'ignored', title: '已忽略短信', group: '识别与优化', route: '/pages/my/ignored', back: 'sms-rules',
+      description: '保留原短信核对与逐条恢复，恢复按当前规则重新处理。',
+      content: () => `<div class="stack">
+        ${U.note('已忽略短信不会再次自动生成取件码。')}
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>示例驿站</strong><span class="small muted">今天 08:20</span></div><p>【示例驿站】请及时领取您寄存的包裹，详情请查看原通知。</p><p class="muted small">忽略原因：不是新的取件通知</p>${U.button('恢复识别', '', 'secondary')}</div>
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>服务通知</strong><span class="small muted">昨天 16:40</span></div><p>【服务通知】您的预约编号为 71428，可在服务页面查看进度。</p><p class="muted small">忽略原因：误识别为取件码</p>${U.button('恢复识别', '', 'secondary')}</div>
+        <p class="small muted">恢复后按当前规则重新识别，不直接恢复旧的错误结果。</p>
+      </div>`
+    },
+    {
+      id: 'faq', title: '常见问题', group: '帮助', route: '/pages/my/faq', back: 'my',
+      description: '按常见故障折叠，移除旧 DeepSeek/原样例上传文案，保留设置直达。',
+      content: () => `<div class="stack">
+        <details class="card inset" open><summary class="strong">为什么没有识别到取件码？</summary><p class="small muted">先确认短信权限与本机规则。某些手机需要额外允许“通知类短信”。没有取件码的到站或催取短信只会作为提醒。</p><div class="hrow">${U.link('扫描与权限', 'scan')}${U.link('短信识别规则', 'sms-rules')}</div></details>
+        <details class="card inset"><summary class="strong">后台扫描为什么没有准点执行？</summary><p class="small muted">系统约每小时安排扫描，休眠、省电或强制停止可能延迟。可查看最近实际扫描时间，也可立即扫描。</p>${U.link('扫描与权限', 'scan')}</details>
+        <details class="card inset"><summary class="strong">短信会上传吗？</summary><p class="small muted">日常识别在本机完成。AI 模板建议只发送合成模板片段，原短信和真实取件码留在本机。可选站点优化只提交脱敏片段或关系。</p>${U.link('优化设置', 'optimization')}</details>
+        <details class="card inset"><summary class="strong">识别错了怎么办？</summary><p class="small muted">可以修改取件记录或忽略来源短信。人工修正和已取状态不会被再次扫描覆盖；已忽略短信可恢复识别。</p>${U.link('已忽略短信', 'ignored')}</details>
+        <details class="card inset"><summary class="strong">快递公司或地址没有识别完整？</summary><p class="small muted">在规则编辑页检查字段的起始与结束文字，并用完整短信核对样例结果。不同格式可以保存不同规则。</p>${U.link('短信识别规则', 'sms-rules')}</details>
+        <details class="card inset"><summary class="strong">线上账号失效会丢记录吗？</summary><p class="small muted">本地历史继续可用。平台账号登录在后台更新，设备授权失效则需要重新核验绑定。</p>${U.link('线上账号', 'accounts')}</details>
+      </div>`
+    },
+    {
+      id: 'about', title: '关于应用', group: '帮助', route: '/pages/my/about', back: 'my',
+      description: '简化功能宣传，保留本地识别、私人版、许可、版本与历史入口。',
+      content: () => `<div class="stack">
+        <div class="card inset stack gap-sm"><h2 class="section-title">快递取件助手</h2><p class="muted">私人版 · v3.1.33</p><p>集中查看短信取件码和已授权的线上包裹。</p><p class="small muted">日常短信识别在本机完成。个人使用，无广告，无需注册。</p></div>
+        ${grouped('应用信息', U.row('检查更新', '', 'v3.1.33', 'update') + U.row('更新记录', '', '', 'changelog'))}
+        <details class="card inset"><summary class="strong">许可与免责声明</summary><p class="small muted">木兰宽松许可证，第 2 版。原项目许可与免责声明随应用保留。</p>${demo('查看完整许可', '木兰宽松许可证，第 2 版 · 完整许可与免责声明。')}</details>
+      </div>`
+    },
+    {
+      id: 'changelog', title: '更新记录', group: '帮助', route: '/pages/my/changelog', back: 'about',
+      description: '当前版本使用 3.1.33；旧版本内容折叠，未来更新只在更新场景中标注为示例。',
+      content: () => `<div class="stack">
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>v3.1.33</strong>${U.badge('当前版本', 'blue')}</div><p class="small muted">11 月 7 日</p><ul class="stack gap-sm"><li>取件码与柜号更清楚地对齐显示。</li><li>站点识别更新后重新检查未分类包裹。</li><li>通知支持逐条关闭，新进展再次提醒。</li></ul></div>
+        <details class="card inset"><summary class="strong">更早更新</summary><ul class="stack gap-sm"><li>保留人工修正与离线操作。</li><li>自动取件记录可定位具体包裹。</li><li>核验家人和指定账号的授权范围。</li><li>完善线上采集异常提示。</li></ul></details>
+      </div>`
+    },
+    {
+      id: 'update', title: '检查更新', group: '帮助', route: '/components/AppUpdate.vue · available', back: 'my', sheet: true,
+      description: '有可用版本的更新弹层，当前版、来源、文件大小与说明均保留。',
+      content: () => `<div class="stack">
+        <div class="card inset">${U.kv('当前版本', 'v3.1.33')}${U.kv('下载来源', '已绑定后台')}</div>
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>发现新版本 v3.1.34（示例）</strong>${U.badge('42.8 MB', 'blue')}</div><ul class="stack gap-sm"><li>改进站点展示与取件状态提示。</li><li>完善更新失败后的重试说明。</li></ul></div>
+        <details class="card inset"><summary class="text-action">其他检查结果</summary><p class="small muted">正在检查、已是最新版本、设备不兼容或网页预览不支持在线更新时，保留当前版本并说明具体状态。</p></details>
+      </div>`,
+      footer: () => U.button('下载更新', 'update-progress')
+    },
+    {
+      id: 'update-progress', title: '下载更新', group: '帮助', route: '/components/AppUpdate.vue · downloading', back: 'my', sheet: true,
+      description: '下载中保留字节进度和明确取消操作；关闭弹层不代表取消。',
+      content: () => `<div class="stack">
+        <div class="card inset">${U.kv('新版本', 'v3.1.34（示例）')}${U.kv('下载来源', '已绑定后台')}</div>
+        <div class="card inset stack"><div class="hrow between"><strong>正在下载</strong><strong>64%</strong></div><progress class="progress" value="64" max="100" aria-label="更新包下载进度">64%</progress><p class="small muted">27.4 MB / 42.8 MB</p>${U.button('取消下载', 'update', 'secondary')}</div>
+      </div>`
+    },
+    {
+      id: 'update-ready', title: '准备安装', group: '帮助', route: '/components/AppUpdate.vue · ready', back: 'my', sheet: true,
+      description: '展示准备完成与未知来源权限状态；安装仅进入 Android 流程，不伪造安装成功。',
+      content: () => `<div class="stack">
+        <div class="card inset stack gap-sm"><div class="hrow between"><strong>更新包已准备好</strong>${U.badge('v3.1.34（示例）', 'teal')}</div>${U.kv('安装包', '42.8 MB')}${U.kv('当前版本', 'v3.1.33')}</div>
+        ${U.note('需要允许本应用安装未知来源应用。', 'amber')}
+        <div class="card inset stack gap-sm"><strong>下一步</strong><p class="small muted">在 Android 设置中允许安装，返回此页再安装更新。安装前仍会校验安装包。</p></div>
+        <details class="card inset"><summary class="text-action">已允许安装时</summary><p class="small muted">主按钮显示“安装更新”。正在校验时禁止重复提交；校验失败展示原因并重新下载。</p></details>
+      </div>`,
+      footer: () => U.button('去允许安装', '', 'primary')
+    },
+    {
+      id: 'update-error', title: '更新未完成', group: '帮助', route: '/components/AppUpdate.vue · error', back: 'my', sheet: true,
+      description: '下载失败与检查失败复用错误容器；保留真实原因和各自恢复操作。',
+      content: () => `<div class="stack">
+        ${U.note('下载中断，请检查网络后重试。', 'red')}
+        <div class="card inset">${U.kv('当前版本', 'v3.1.33')}${U.kv('待下载版本', 'v3.1.34（示例）')}${U.kv('下载来源', '已绑定后台')}</div>
+        ${U.button('重试下载', 'update-progress')}${U.button('重新检查', 'update', 'secondary')}
+        <details class="card inset"><summary class="text-action">检查失败或设备不兼容</summary><p class="small muted">没有有效新版本信息时只提供“重试检查”。设备不兼容时显示系统要求，网页预览则引导使用 Android 安装版。</p></details>
+      </div>`
+    }
+  ];
+  window.SCENES.push(...scenes);
+})();
+</script>
+  <script>(() => {
+  const U=window.UI;
+  let active='pickup', width=390, toastTimer;
+  const groups=['取件','包裹','设置','识别与优化','帮助'];
+  const labels={'pickup':'取件列表 · 按站点','pickup-time':'取件列表 · 按时间','pickup-history':'展开历史取件','pickup-empty':'取件空状态','pickup-long':'长码与缺失信息','pickup-unmatched':'未匹配取件详情','package-error':'包裹更新失败','package-loading':'包裹加载中','package-empty':'包裹空状态','package-refreshing':'后台更新中','notifications-empty':'通知空状态','notifications-review':'待确认通知','notifications-error':'异常通知','notifications-sync':'同步通知','update':'发现新版本'};
+  const displayName=s=>labels[s.id]||s.title;
+  const getScene=id=>window.SCENES.find(s=>s.id===id);
+  const statusbar=()=>'<div class="statusbar"><span>9:41</span><span class="status-icons">▮▮▮ ▰ <i class="battery"></i></span></div>';
+  function phoneHTML(scene) {
+    const top=(scene.top||[]).map(a=>`<button class="icon-button" aria-label="${U.escape(a.label)}" data-go="${U.escape(a.target)}">${U.icon(a.icon)}${a.icon==='bell'?'<span class="notification-dot">2</span>':''}</button>`).join('');
+    const back=scene.back?`<button class="icon-button" aria-label="${scene.sheet?'关闭':'返回'}" data-go="${U.escape(scene.back)}">${U.icon(scene.sheet?'close':'back')}</button>`:'';
+    const tabs=scene.tab?`<nav class="tabbar" aria-label="主导航">${[['pickup','box','取件列表'],['packages','list','包裹记录'],['my','user','我的']].map(([id,icon,label])=>`<button class="${scene.tab===id?'active':''}" ${scene.tab===id?'aria-current="page"':''} data-go="${id}">${U.icon(icon)}<span>${label}</span></button>`).join('')}</nav>`:'';
+    return `<div class="phone ${scene.sheet?'sheet-phone':''}" data-scene="${scene.id}">${scene.sheet?'<div class="sheet-backdrop" aria-hidden="true"><p>取件助手</p></div>':''}${statusbar()}<header class="phone-header ${scene.back?'subpage':''}">${!scene.sheet?back:''}<h1>${U.escape(scene.title)}</h1><div class="header-actions">${top}${scene.sheet?back:''}</div></header><div class="page-content">${scene.content()}</div>${scene.footer?`<footer class="page-footer">${scene.footer()}</footer>`:tabs||'<div class="phone-safearea"></div>'}</div>`;
+  }
+  function renderNav(filter='') {
+    const scenes=window.SCENES.filter(s=>(s.title+s.group+s.description).includes(filter));
+    document.querySelector('#scene-nav').innerHTML=groups.map(group=>`<section class="nav-group"><h2>${group}</h2>${scenes.filter(s=>s.group===group).map(s=>`<button class="nav-item" data-go="${s.id}" ${s.id===active?'aria-current="page"':''}><span>${String(window.SCENES.indexOf(s)+1).padStart(2,'0')}</span>${U.escape(displayName(s))}</button>`).join('')}</section>`).join('');
+  }
+  function render(id,updateHash=true) {
+    const scene=getScene(id)||window.SCENES[0];
+    if(!scene) return;
+    active=scene.id;
+    document.querySelector('#review-stage').hidden=false;
+    document.querySelector('#overview').hidden=true;
+    document.querySelector('#overview-button').textContent='设计总览';
+    document.querySelector('#phone-host').innerHTML=phoneHTML(scene);
+    document.querySelector('#phone-host .phone').style.width=width+'px';
+    if(scene.id==='pickup-conflict')document.querySelectorAll('#phone-host .choice input').forEach(input=>{input.type='radio';input.name='code-choice';});
+    if(scene.id==='packages-filter')document.querySelectorAll('#phone-host .section').forEach((section,i)=>section.querySelectorAll('.choice input').forEach(input=>{input.type='radio';input.name='filter-'+i;}));
+    document.querySelector('#scene-title').textContent=displayName(scene);
+    document.querySelector('#scene-group').textContent=scene.group+' / '+String(window.SCENES.indexOf(scene)+1).padStart(2,'0');
+    document.querySelector('#scene-description').textContent=scene.description;
+    document.querySelector('#scene-route').textContent=scene.route||'共用组件';
+    document.querySelector('#scene-position').textContent=String(window.SCENES.indexOf(scene)+1).padStart(2,'0')+' / '+window.SCENES.length+' 场景';
+    document.querySelector('#scene-select').value=scene.id;
+    if(updateHash) history.replaceState(null,'','#'+scene.id);
+    renderNav(document.querySelector('#scene-search').value);
+  }
+  function overview(sheetIndex) {
+    document.querySelector('#review-stage').hidden=true;
+    document.querySelector('#overview').hidden=false;
+    document.querySelector('#overview-button').textContent='返回逐页';
+    const ids=Number.isInteger(sheetIndex)?window.SCENES.slice(sheetIndex*6,sheetIndex*6+6).map(s=>s.id):['pickup','packages','my','pickup-detail','corrections','widgets'];
+    const label=Number.isInteger(sheetIndex)?`全案 ${sheetIndex+1} / ${Math.ceil(window.SCENES.length/6)}`:'主界面总览';
+    document.querySelector('#overview').innerHTML=`<header class="overview-title"><div><h2>B · 细腻柔雾</h2><p>取件助手 · ${label} / ${window.SCENES.length} 个场景 / 合成示例数据</p></div><span class="eyebrow">SILVER FROST · APPROVED DIRECTION</span></header><div class="overview-grid">${ids.map((id)=>{const s=getScene(id);return `<article class="overview-item"><h3><span>${String(window.SCENES.indexOf(s)+1).padStart(2,'0')}</span>${U.escape(displayName(s))}</h3>${phoneHTML(s)}</article>`;}).join('')}</div>`;
+  }
+  function toast(text) { clearTimeout(toastTimer);const el=document.querySelector('#prototype-toast');el.textContent=text;el.classList.add('visible');toastTimer=setTimeout(()=>el.classList.remove('visible'),3300); }
+  document.addEventListener('click',e=>{
+    const dismiss=e.target.closest('[data-dismiss]');
+    if(dismiss){dismiss.closest('.notification-item')?.remove();toast('已关闭本条通知；业务状态保持不变，有新进展再提醒。');return;}
+    const go=e.target.closest('[data-go]');
+    if(go) { if(getScene(go.dataset.go)){document.body.classList.remove('board');render(go.dataset.go);}else toast('关联页面尚未配置：'+go.dataset.go);return; }
+    const collect=e.target.closest('[data-collect]');
+    if(collect){const done=!collect.classList.contains('done');collect.classList.toggle('done',done);collect.closest('.pickup-card')?.classList.toggle('collected',done);collect.innerHTML=done?U.icon('check')+'已取':'取件';toast(done?'已标记领取 · 演示数据；不操作购物平台':'已撤销领取 · 演示数据');return;}
+    const demo=e.target.closest('[data-demo]');if(demo){toast(demo.dataset.demo);return;}
+    const size=e.target.closest('[data-width]');if(size){width=Number(size.dataset.width);document.querySelectorAll('[data-width]').forEach(b=>b.setAttribute('aria-pressed',b===size));render(active);}
+  });
+  document.addEventListener('change',e=>{
+    if(e.target.matches('[role=switch]'))toast('设计演示：'+(e.target.checked?'已开启':'已关闭')+'，不会改变手机或后台设置。');
+    if(e.target.matches('.choice input') && ['pickup-match','pickup-multi'].includes(active)){
+      const checked=document.querySelectorAll('#phone-host .choice input:checked').length;
+      const primary=document.querySelector('#phone-host .page-footer .btn.primary');
+      if(primary){primary.disabled=checked===0;primary.textContent=active==='pickup-match'?`确认关联所选 ${checked} 件`:`标记所选 ${checked} 件已取`;}
+      if(active==='pickup-match'){const badge=document.querySelector('#phone-host .page-content > .stack > .hrow .badge');if(badge)badge.textContent=`已选 ${checked} / 2 件`;}
+    }
+  });
+  document.querySelector('#overview-button').addEventListener('click',()=>document.querySelector('#overview').hidden?overview():render(active));
+  document.querySelector('#scene-search').addEventListener('input',e=>renderNav(e.target.value));
+  document.querySelector('#scene-select').innerHTML=groups.map(g=>`<optgroup label="${g}">${window.SCENES.filter(s=>s.group===g).map(s=>`<option value="${s.id}">${U.escape(displayName(s))}</option>`).join('')}</optgroup>`).join('');
+  document.querySelector('#scene-select').addEventListener('change',e=>render(e.target.value));
+  for(const [selector,delta] of [['#previous-scene',-1],['#next-scene',1]])document.querySelector(selector).addEventListener('click',()=>render(window.SCENES[(window.SCENES.findIndex(s=>s.id===active)+delta+window.SCENES.length)%window.SCENES.length].id));
+  window.addEventListener('hashchange',()=>render(location.hash.slice(1),false));
+  window.designPreview={render,overview,phoneHTML,setWidth(w){width=w;render(active);},get active(){return active;}};
+  render(location.hash.slice(1)||'pickup',false);
+  const query=new URLSearchParams(location.search);
+  if(query.has('board')){document.body.classList.add('board');const requested=Number(query.get('sheet'));overview(query.has('sheet')&&requested>=1&&requested<=Math.ceil(window.SCENES.length/6)?requested-1:undefined);}
+})();
+</script>
+</body>
+</html>

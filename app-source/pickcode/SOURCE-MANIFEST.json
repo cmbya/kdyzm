@@ -1,0 +1,2520 @@
+{
+  "schemaVersion": 1,
+  "version": "3.1.34",
+  "upstreamRepository": "https://github.com/SongZX0106/PickCode",
+  "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
+  "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
+  "directories": [
+    "pages",
+    "components",
+    "core",
+    "services",
+    "utils",
+    "js_sdk",
+    "uni_modules",
+    "static",
+    "android/app/src/main/java",
+    "android/app/src/main/res",
+    "android/gradle/wrapper"
+  ],
+  "explicitFiles": [
+    "App.vue",
+    "main.js",
+    "index.html",
+    "uni.scss",
+    "manifest.json",
+    "pages.json",
+    "package.json",
+    "package-lock.json",
+    "vite.config.js",
+    "LICENSE",
+    "verification.config.json",
+    ".semgrep.yml",
+    "android/app/src/main/AndroidManifest.xml",
+    "android/app/build.gradle",
+    "android/build.gradle",
+    "android/settings.gradle",
+    "android/gradle.properties",
+    "android/gradlew",
+    "android/gradlew.bat",
+    "android/build.ps1",
+    "server/src/logistics-rules.js",
+    "scripts/uni-build.mjs",
+    "scripts/sync-android.mjs",
+    "scripts/verify.mjs",
+    "scripts/check-policy.mjs",
+    "scripts/scan-secrets.mjs",
+    "scripts/ai-task-store.mjs",
+    "scripts/ai-state.mjs",
+    "scripts/ai-status.mjs",
+    "scripts/ai-task.mjs",
+    "scripts/ai-evidence.mjs",
+    "scripts/ai-context.mjs",
+    "scripts/ai-server.mjs"
+  ],
+  "omittedFiles": [
+    {
+      "path": "static/images/searchCode.png",
+      "reason": "Unused upstream download QR; also excluded from the APK."
+    },
+    {
+      "path": "static/images/index.js",
+      "reason": "Unused upstream image barrel with a stale relative import."
+    }
+  ],
+  "localImportChecks": 159,
+  "files": [
+    {
+      "path": ".semgrep.yml",
+      "size": 259,
+      "sha256": "85fd11b000e39a15acbb115c151f0168bc8a32674e1b01bdacc89d516a2961d2"
+    },
+    {
+      "path": "App.vue",
+      "size": 957,
+      "sha256": "f33018c7baf2f0e19a5e6090807bbb8f2ab791c46d83a3383435bef8cf9f9da2"
+    },
+    {
+      "path": "LICENSE",
+      "size": 9441,
+      "sha256": "5d2bed72b295522b941633247c6f63dee7a3223650635edb55d9156f866dc659"
+    },
+    {
+      "path": "android/app/build.gradle",
+      "size": 3562,
+      "sha256": "3901a16b26a4e4891d61f566a0e37f2bac62fc0765be56af6e8eeea6546c7ca5"
+    },
+    {
+      "path": "android/app/src/main/AndroidManifest.xml",
+      "size": 3283,
+      "sha256": "6c8c7211adb1a40a900d620171a8dd0f52ea078452f32c96b24d232e06135684"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/AiTemplatePrivacy.java",
+      "size": 7598,
+      "sha256": "de2950a4ecd36f22810f1df5b293c0511753cbea889cfc18a389fffc6e4cb0d4"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/AppUpdateManager.java",
+      "size": 14427,
+      "sha256": "77b8b973486ce7b4a0f7024035af9cea22a717d813a2fe85ad60d95f3b291c43"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/AppUpdateManifest.java",
+      "size": 8049,
+      "sha256": "4f45b5c041abe2a1d33def904ff3a63c8b2199f4cd31a86aab2b442f427adc61"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/AppUpdateTransport.java",
+      "size": 12734,
+      "sha256": "5f859c52105d476b33269a9657e1ce06bfc878cd11fa7014b23b50bb7ec91baf"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/AssistantStore.java",
+      "size": 5288,
+      "sha256": "826d9d5f036f25e6cd9f3e670c6c8445db7184cba17a6b13cbcbdf42c3440e9e"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/BackendRoutes.java",
+      "size": 4134,
+      "sha256": "748d00ad42740f921429745fa2f3f35bfa22383adb1f0ba8c8014ee714a7a43f"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/CoreEngine.java",
+      "size": 3393,
+      "sha256": "978082d8310761bbec099ea64224aa29eb9b5518076b75c78e840153bd8808d7"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/DeepSeekClient.java",
+      "size": 5651,
+      "sha256": "7b3ccc20a54c08ad2112a6375549dba1ccdbad90a8507b673508a824159a51be"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/LargeWidgetProvider.java",
+      "size": 12297,
+      "sha256": "a4eec83c18ba500197749f299f75748da4b39a2ac39bd8dd261b6e7eea9a78e3"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/ListWidgetProvider.java",
+      "size": 104,
+      "sha256": "3ed4c987ebe01e0a84a1e53a100bd663e888d05756678b47a77226c165f0c19a"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/MainActivity.java",
+      "size": 33631,
+      "sha256": "59dc253dd70891443d0b3fb6ceb009c2428d3046cff9ad68a7dbdbfefc813a2e"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/OnlineClient.java",
+      "size": 11743,
+      "sha256": "d7f6226d05ebb0b8978e792aecaec89bc9f31e523f94bec90a81eda216b3f23e"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/OnlineEndpoint.java",
+      "size": 1950,
+      "sha256": "9c6aec0f891b0db83cf32531b7cf6af60064e728cd95b3d01e4ecfb948332599"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
+      "size": 71775,
+      "sha256": "14f71494c78174526cbb94acd86ede494fc24a775f8678497faf9d1ece096a41"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
+      "size": 4759,
+      "sha256": "955d2368b12e17db14cc510fb8e72b0ebd04c5ca48cfcbbf925ae1b58dfed120"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncWorker.java",
+      "size": 1375,
+      "sha256": "561d406adbbcef4c173eee78cd8c9f6d8f613f1f96c60a54a70a97ff676c0386"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/PairingScanActivity.java",
+      "size": 12913,
+      "sha256": "6f359c32c222d281d3226d1ccbbee0d1e65ea02f2e2919834051a2cab5ab55bb"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/PickCodeApplication.java",
+      "size": 676,
+      "sha256": "9e8a6ec39dcd07a80e5f34bdc37ddfc4b5bfecdc172407db54073162e3575213"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/ScanScheduler.java",
+      "size": 1162,
+      "sha256": "9901737fb1a070f4745d883aeb96525c23fea3bbe46051e0a29d0e8de8253c39"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/ScanWindow.java",
+      "size": 618,
+      "sha256": "62084364b15b6e7c5467fecd141c3e8a546c8ea7180d15ddb59aaf77437a85ad"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/ScanWorker.java",
+      "size": 1104,
+      "sha256": "34b9791cb6321b423f61bf7c99a4a9ebcaa376d975b2ca1f42fa795597e1e909"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/SecretStore.java",
+      "size": 3929,
+      "sha256": "d9af83bfdb2d9b54e179aa8f14d5bec659ed7baebb32c28f75c764c59ec8de7f"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/SmallWidgetProvider.java",
+      "size": 2193,
+      "sha256": "c15baf139d691c271dfd8d6edca713bd0e1f6d1ce7ad270a6123215c9c64be8c"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/SmsAiManager.java",
+      "size": 22064,
+      "sha256": "3ad5cebc9c8b9f49757c39696616feef3684dd55f4bf5e22af944cbfc0b70d3c"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/SmsScanner.java",
+      "size": 5046,
+      "sha256": "4bfb8b4a0bf537505eaad88530ad7535da8b982e691597aa2bc1f2264b93c6f2"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/TrustedOrigin.java",
+      "size": 1033,
+      "sha256": "7a72d8c9b486e7aeb8545c8d035db736b1456167d93a8f5227e25510300590f0"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/WidgetListService.java",
+      "size": 3299,
+      "sha256": "5741ac6855285a7f31b256ff5f09afc3f05957581cea82c7a9636e13a5be8e80"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/WidgetModel.java",
+      "size": 29655,
+      "sha256": "f1de38ba27e85de93b8d2d7e5f2a64f5c7ececd8a5de696733b22490446c3874"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/WidgetRenderer.java",
+      "size": 41881,
+      "sha256": "a016e0aec245ae74c3c0b7f0405970bdd4067324cc63b046928a7a9c29c6d2d6"
+    },
+    {
+      "path": "android/app/src/main/res/anim/widget_road_enter.xml",
+      "size": 249,
+      "sha256": "571892d73239eb9c8bf2a70abff43e1865cb0dac4d09638b692dbd5f2e76380a"
+    },
+    {
+      "path": "android/app/src/main/res/anim/widget_road_enter_single.xml",
+      "size": 250,
+      "sha256": "05de153b2fa901fdd480b50a4abf01a57b9bd6eb5c05017e5e105efc10781fad"
+    },
+    {
+      "path": "android/app/src/main/res/anim/widget_road_exit.xml",
+      "size": 250,
+      "sha256": "f2af120e00f9910f6f0ba2d930a664f588ee4c97d5b8ee50771c95e6822213c3"
+    },
+    {
+      "path": "android/app/src/main/res/anim/widget_road_exit_single.xml",
+      "size": 251,
+      "sha256": "908b2a4741a2381336125af081e5b09e6d9f83e83df5e82ae5d2b534ff0674d0"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/ic_app.xml",
+      "size": 600,
+      "sha256": "5c1e465c0ccd05693a1483da8a40e6ec304bf68212bdb92e0603697f52047f70"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_background.xml",
+      "size": 423,
+      "sha256": "039469b743ff5dd80ad7d2bb34028c74066231211238c2f270a2299ce6a732b7"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_cabinet_background.xml",
+      "size": 276,
+      "sha256": "4b444e7342d76417de47a1c2f3d8b0a02f5b48d8260650ac446332a4786af957"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_copy_icon.xml",
+      "size": 324,
+      "sha256": "f4e4f6697b5c4f34cd7f894f4fadbf4c4d397ea8c5e54b2024ce17c95932e364"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_large_background.xml",
+      "size": 423,
+      "sha256": "039469b743ff5dd80ad7d2bb34028c74066231211238c2f270a2299ce6a732b7"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_pick_background.xml",
+      "size": 178,
+      "sha256": "b5f699c9a6544f2d1294cf27552c22842a779790028f24de43f145b9d2d3f98f"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_platform_badge.xml",
+      "size": 216,
+      "sha256": "e2a00930e2ed930c96454d952c48b4bdffc11aa535061829ec1bdd2b870314d0"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_platform_filter.xml",
+      "size": 249,
+      "sha256": "3d122ff29a4ec2c2502f1e0aa0859807b1c64af7e98e0aabe3eee49933f4e194"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_platform_filter_active.xml",
+      "size": 249,
+      "sha256": "582df0bb7ec6c2136088304109a45e7559f3f835b6f3235ec297665566ae3aea"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_refresh_icon.xml",
+      "size": 489,
+      "sha256": "de047da3b48710156e7e1eed48bf997bb761002ae2c4b7219ecc4210d05ac747"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_road_background.xml",
+      "size": 221,
+      "sha256": "95b6b63915911517a21789624402597529adf7fc50b9f347e3f761994da55358"
+    },
+    {
+      "path": "android/app/src/main/res/drawable/widget_single_owner_background.xml",
+      "size": 216,
+      "sha256": "2b4144e8f89fe2d7b64a5f11a03064029a59dca3d441d494f9db188354612edc"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget.xml",
+      "size": 2563,
+      "sha256": "9ca93d54577112d03587de32f13aede87ee215f6da6a624d224e65642af94533"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large.xml",
+      "size": 6391,
+      "sha256": "bd32fbca5ea94273cbf300eb70fdf23d2f11c6e5a287abeb075680941444cce4"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large_road_flipper.xml",
+      "size": 350,
+      "sha256": "18649f9e1966a7d520b55b3f006a92744a2c5501e67271b0c8461f4c126128a3"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large_road_flipper_single.xml",
+      "size": 350,
+      "sha256": "18649f9e1966a7d520b55b3f006a92744a2c5501e67271b0c8461f4c126128a3"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large_road_footer.xml",
+      "size": 1998,
+      "sha256": "07572f246a9906c1e911defed3103c9833559c8a66bde4e26eaf8c76bdb11dab"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large_road_page.xml",
+      "size": 454,
+      "sha256": "4793300a5ef2b06da39a959497c840007629bb6620709c1cde55c9229b644631"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large_row.xml",
+      "size": 3487,
+      "sha256": "ecc7b713afd85b9f8b4ca863c6d70c5c9c6a09ac7087f33c6bf21af85c6c2786"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large_single_row.xml",
+      "size": 3655,
+      "sha256": "759b4ca351d6466db3d790e0b05dbc3c5e5ad6871d25b03075403fd30592192f"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_large_undo.xml",
+      "size": 881,
+      "sha256": "4c009cecaf48da3b4b48c0bc4f34a57d9b89843b6e2d21db0f43b98a413a140a"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_receipt_row.xml",
+      "size": 2620,
+      "sha256": "41e770a53b176bc4c6af3e93f190ab52bed1949de890830e2ce344ec722f4b75"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_road_row.xml",
+      "size": 1515,
+      "sha256": "78db6b91a92dd36811108d5eb7a31ce22449f6789bc3e8961a170aa5c67462df"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_row.xml",
+      "size": 2199,
+      "sha256": "9450638891908d9afd825a2ea5a9516908bc2861a3bd04f8a3b552b648f9bfdd"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_row_compact.xml",
+      "size": 2465,
+      "sha256": "ec33b1fc0ecb7ddf3f0ade1c8c6bf5643f81199972e0f1b88e84fcbbcb19dc8e"
+    },
+    {
+      "path": "android/app/src/main/res/layout/widget_station_row.xml",
+      "size": 1138,
+      "sha256": "669d7424f572f49d865c0e9c3ef8ab2b14e9fc2fdd9de0be02e233a2f72f64d1"
+    },
+    {
+      "path": "android/app/src/main/res/values-v27/styles.xml",
+      "size": 257,
+      "sha256": "58f85d74acd635f034e064a03dc0b0885393d86fbdd6f7a0a13646dcf0a4fdb5"
+    },
+    {
+      "path": "android/app/src/main/res/values/strings.xml",
+      "size": 304,
+      "sha256": "650424aa493d1f24bad3d0d684d3b58e9aded9e2e6a49fcb0ce8b0cd5cd1ce50"
+    },
+    {
+      "path": "android/app/src/main/res/values/styles.xml",
+      "size": 511,
+      "sha256": "49bf347ca8ac8ac56902bc88889b535c93922e690f61a3ca1885afe46b3848b3"
+    },
+    {
+      "path": "android/app/src/main/res/xml/app_update_paths.xml",
+      "size": 169,
+      "sha256": "ab5166f9067d9c76489b6bfb0cccb1b5669f9be2b26e3bf762685ab1fcf92e79"
+    },
+    {
+      "path": "android/app/src/main/res/xml/data_extraction_rules.xml",
+      "size": 454,
+      "sha256": "2823dea3b130405003d82965594b38b832dc30ba5dfb677136bdf0ce80e32b8e"
+    },
+    {
+      "path": "android/app/src/main/res/xml/network_security_config.xml",
+      "size": 146,
+      "sha256": "dea35ebed76536c24c13f74036f02dc874f944147cb3a49c2ad0550f71e3e0c7"
+    },
+    {
+      "path": "android/app/src/main/res/xml/widget_large_info.xml",
+      "size": 507,
+      "sha256": "b2cd33e72b7abc5b1d4cd3088d1aedc7d07ec0c6aa6ee90193b9d8835bdbbff1"
+    },
+    {
+      "path": "android/app/src/main/res/xml/widget_list_info.xml",
+      "size": 495,
+      "sha256": "9e95084a76ae65bac029970052e4a47f6651bdab97456932f19a438221a6cdb3"
+    },
+    {
+      "path": "android/app/src/main/res/xml/widget_small_info.xml",
+      "size": 495,
+      "sha256": "5defeb063646d588b4f00758d528ea13356851c47435639f5b6f3a4f287f83ae"
+    },
+    {
+      "path": "android/build.gradle",
+      "size": 73,
+      "sha256": "c3c0cf04da0fc239f391c774554d97d890018ab6e37e87cc62f6070d0c8c9909"
+    },
+    {
+      "path": "android/build.ps1",
+      "size": 1845,
+      "sha256": "61c588bdb1beaef8cbcfedbf4116c76eaa6bc8bb91bf20536371e65900f7d8ed"
+    },
+    {
+      "path": "android/gradle.properties",
+      "size": 140,
+      "sha256": "8097d687b525291028e82bcc3e166f04c064375747cc8556294709dd29140ada"
+    },
+    {
+      "path": "android/gradle/wrapper/gradle-wrapper.jar",
+      "size": 43504,
+      "sha256": "498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17"
+    },
+    {
+      "path": "android/gradle/wrapper/gradle-wrapper.properties",
+      "size": 250,
+      "sha256": "3d91f0932da99885c41e9dc4e85c9f9a2d3bfef4f0ad87473014dc0827a94884"
+    },
+    {
+      "path": "android/gradlew",
+      "size": 8762,
+      "sha256": "a3648413b47ef77af21d5ebc36c687c7d103aaef3e17f33de7d4f080a6f300a3"
+    },
+    {
+      "path": "android/gradlew.bat",
+      "size": 2966,
+      "sha256": "57931b17dd228e5c24dac90e815d0bf82477e831a4618dfab4136f5446b42a9f"
+    },
+    {
+      "path": "android/settings.gradle",
+      "size": 289,
+      "sha256": "49842677e3ac3030b25afba1b6d2a744356f7b1505a257f4251655a4700a35b8"
+    },
+    {
+      "path": "components/AiOptimizationPanel.vue",
+      "size": 11990,
+      "sha256": "c5e33a80a9924ca37c2791e6316a050222b7d13ff478ee568221c8d38afc876f"
+    },
+    {
+      "path": "components/AppUpdate.vue",
+      "size": 12670,
+      "sha256": "19f18d4213ce8365717dd00fdc0509d763c8674d890a3df729fd3a5ffa68f33c"
+    },
+    {
+      "path": "components/EditDialog.vue",
+      "size": 2595,
+      "sha256": "caab008bd55b217af937bff82e2d3f5daa3f490413e074b413c9cea25fe7b547"
+    },
+    {
+      "path": "components/LogisticsTimeline.vue",
+      "size": 4603,
+      "sha256": "657d002bedf2ccac798234440ab04be6a006e7672c8736689f548bc93b4b60f0"
+    },
+    {
+      "path": "components/PickupDetail.vue",
+      "size": 25132,
+      "sha256": "1410631c0b60876409733321531ce40273914330cbb9b464797d0c75f711dd33"
+    },
+    {
+      "path": "components/PickupStamp.vue",
+      "size": 778,
+      "sha256": "65999e6d395e87a0733e9be6bc602efead5450aa3dd4102f621f8b151147c9cc"
+    },
+    {
+      "path": "components/StationChooser.vue",
+      "size": 8780,
+      "sha256": "eeabebf293c001e0cbdd0469b86af8135c582783410ed1b36c527ecd593bf7f1"
+    },
+    {
+      "path": "core/load-core.mjs",
+      "size": 72,
+      "sha256": "445b939d7c61302b3a0bbf9fbbef4f98bba373e41be7eb58ceec904fa26a6ebb"
+    },
+    {
+      "path": "core/package-presentation.js",
+      "size": 8780,
+      "sha256": "334f381bda9d10eac2c5bdb60b769c1690e6027d2ac38fcdeea5589fc4d71281"
+    },
+    {
+      "path": "core/pickcode-core.js",
+      "size": 152381,
+      "sha256": "b568b85270c3d9b10015f8b648c1db05f2dbe318026f0e36673e25238e1a6850"
+    },
+    {
+      "path": "index.html",
+      "size": 713,
+      "sha256": "48ec825b81fa4c2ee36547f3f762b59031b53e74aa4706e979e6aad5a63ddb30"
+    },
+    {
+      "path": "js_sdk/wa-permission/permission.js",
+      "size": 9245,
+      "sha256": "0b7ebd29a7d39a172a5306c13b1191358bca5ce7dcb511b7b7f9cc93d86ce030"
+    },
+    {
+      "path": "main.js",
+      "size": 376,
+      "sha256": "7ed22ac5b23e9605407b261c94867202328b95cbd0ae66e8407fa54ba4cae066"
+    },
+    {
+      "path": "manifest.json",
+      "size": 3242,
+      "sha256": "5e5bd4a443af0be57c1f93d37d66f9fc582371e63aac678249783adc0a1a5958"
+    },
+    {
+      "path": "package-lock.json",
+      "size": 259923,
+      "sha256": "95361c0c292b925c74c394328538c6f89b7671e1a46b75674066b329cb6ce935"
+    },
+    {
+      "path": "package.json",
+      "size": 1203,
+      "sha256": "b63b40d9971f314019a1139481acb74df6e99394502767316ce9d95019bd3bf6"
+    },
+    {
+      "path": "pages.json",
+      "size": 2969,
+      "sha256": "08fa5848c544a7c546d5d2880d7258d4a691fc9da6f05cbf5091aa22696b2666"
+    },
+    {
+      "path": "pages/index/edit-code.vue",
+      "size": 9833,
+      "sha256": "f80f24e4a1f8d4d46ec3e0562d7a0bfee6a215f7a43d425c0dbf221656af3b81"
+    },
+    {
+      "path": "pages/index/index.vue",
+      "size": 65041,
+      "sha256": "4b1285b399e7aa7642190708b91420c23b57a8905f0f5ab08ee3c7be5194dd04"
+    },
+    {
+      "path": "pages/my/about.vue",
+      "size": 2930,
+      "sha256": "17a1c07cd4b3bc88d1f55b7315420e4abb1c3a0e8aab5b2e5ef7bf8343c3afa8"
+    },
+    {
+      "path": "pages/my/auto-settings.vue",
+      "size": 60104,
+      "sha256": "912b2fe7eda0cd0e5b38592ed3af847e66e137f34f75a09eb71d00d158d83f24"
+    },
+    {
+      "path": "pages/my/changelog.vue",
+      "size": 35034,
+      "sha256": "29605339bb6117248de36296c8783792d91640472ef766638c381d63cf00d8f5"
+    },
+    {
+      "path": "pages/my/faq.vue",
+      "size": 4450,
+      "sha256": "bc5e587cdf2e45c4e06c3f710627c1b5306f002de0fd2523b0020975a2a7cf1f"
+    },
+    {
+      "path": "pages/my/ignored.vue",
+      "size": 3883,
+      "sha256": "3a4ba3a59a9ef7ca4a7c94dc7026b80673d1bffe803a3efb967618c56fd51454"
+    },
+    {
+      "path": "pages/my/index.vue",
+      "size": 7659,
+      "sha256": "56c10d3db2e6612a41530551268bc3cebc8c57d7372f9fccba25affb77995224"
+    },
+    {
+      "path": "pages/my/logistics-rules.vue",
+      "size": 13581,
+      "sha256": "38e75342d8193248517c4317e1a283e0f76bee95740289a73b61b5faf9bb7abc"
+    },
+    {
+      "path": "pages/my/match-rules.vue",
+      "size": 9614,
+      "sha256": "3fa48904d456599c73ee2557ae97d63ee48a0164cdafb486de92e8ba76d66bcd"
+    },
+    {
+      "path": "pages/my/match-settings.vue",
+      "size": 15401,
+      "sha256": "2f60d3f46cd2b5e169e12813eb4054ed8fecaa11527adc01e1a986635da8b19c"
+    },
+    {
+      "path": "pages/my/online-accounts.vue",
+      "size": 14438,
+      "sha256": "9883171b877b0f679f1e36f159db1451965f169ea3ffce1104c1ce93dffd1034"
+    },
+    {
+      "path": "pages/packages/edit.vue",
+      "size": 6522,
+      "sha256": "b217776f236eefccf131e1a8d89122bfe648486f9efff4f018d3f99cc5dda515"
+    },
+    {
+      "path": "pages/packages/index.vue",
+      "size": 69869,
+      "sha256": "f4148b73edc1f35191309b9d90eb7ceabe042c7d3265b22b2654811967eebf9a"
+    },
+    {
+      "path": "scripts/ai-context.mjs",
+      "size": 2591,
+      "sha256": "5069988a2880ec1f934baa6564e18ab4fc725ca3d3ac0445f14627217be50f2f"
+    },
+    {
+      "path": "scripts/ai-evidence.mjs",
+      "size": 2382,
+      "sha256": "34d8a7c63306f0e4acf34fdb908f4b66ecce28bcd1894ee3805eab937aac7203"
+    },
+    {
+      "path": "scripts/ai-server.mjs",
+      "size": 4624,
+      "sha256": "de287eb664b5c0f26c4c276c44458e2b1e9c34af15f5c8d37c4cb937728a5556"
+    },
+    {
+      "path": "scripts/ai-state.mjs",
+      "size": 2672,
+      "sha256": "27c37767d6ee0fd7392c31a9b69ad794b341e87b939a349d753c2d9fcf6ec383"
+    },
+    {
+      "path": "scripts/ai-status.mjs",
+      "size": 1107,
+      "sha256": "a5f2e8ef96a52ee351e735d7d9cd1b401b54691413ca2d12d15d75d4f9a73361"
+    },
+    {
+      "path": "scripts/ai-task-store.mjs",
+      "size": 13850,
+      "sha256": "53e7b125932f9e54819fc6cf758a704cca6ad9c65621bca9e771d0f73c68884e"
+    },
+    {
+      "path": "scripts/ai-task.mjs",
+      "size": 8687,
+      "sha256": "6e6e6cf61987e1d01e2e86218d116db7bf48c6843915f92df20013884918e77b"
+    },
+    {
+      "path": "scripts/check-policy.mjs",
+      "size": 3943,
+      "sha256": "34dd1d0c5f92febbbffe0ad44691b873b5a30571d019d97cb9cd0665267980bc"
+    },
+    {
+      "path": "scripts/scan-secrets.mjs",
+      "size": 1675,
+      "sha256": "06e394ad1c6d8bdbb14100af8cd53713fa1eb8391d812b6329b4a08df4063ee0"
+    },
+    {
+      "path": "scripts/sync-android.mjs",
+      "size": 1132,
+      "sha256": "b4be6790d0b4ff9fb69ba399267804ad202dde8c855ce672d3fa4da9f650a8f2"
+    },
+    {
+      "path": "scripts/uni-build.mjs",
+      "size": 532,
+      "sha256": "89a03675ef79704f4acda352a80859e2a5f1743287acf015406aeb8ee788eee8"
+    },
+    {
+      "path": "scripts/verify.mjs",
+      "size": 9297,
+      "sha256": "a7265873925e40fb955561ee0a32f533a849907945f747d55978e006f78767aa"
+    },
+    {
+      "path": "server/src/logistics-rules.js",
+      "size": 25047,
+      "sha256": "75838e064f8d46ea7698ca370f0ed116c3b50f0e4074e1c93534e78a9d50c654"
+    },
+    {
+      "path": "services/ai-service-view.js",
+      "size": 638,
+      "sha256": "4d4b9d14a09bf09347585cc02da364cf5a437349e3ed7bab6bd14a3d52da398d"
+    },
+    {
+      "path": "services/assistant.js",
+      "size": 29592,
+      "sha256": "2a8ba0aba8246133d676c2adb111c31ccd3e426bdd41debeaea63ecc30c0f16c"
+    },
+    {
+      "path": "services/item-patch.js",
+      "size": 353,
+      "sha256": "a5a9007672a4c086f968c42c7bb183e9245a82e21b5b486077e0ab207f9a0b49"
+    },
+    {
+      "path": "services/notification-dismissals.js",
+      "size": 2190,
+      "sha256": "9860ad642f08fb46d1ad7cf561fe1cf4eacbbeef4c07f89005a226e43ae25620"
+    },
+    {
+      "path": "services/pairing-scan.js",
+      "size": 14819,
+      "sha256": "b0d52bacb9e685c5d1c0dc17e2315f3a4ecc7711e6ee236da1c429b1295dd4b7"
+    },
+    {
+      "path": "services/pickup-groups.js",
+      "size": 1687,
+      "sha256": "a6a890eadd693713a89592aa6a9086be74073d901ea18bc39465720d3914311c"
+    },
+    {
+      "path": "services/pickup-matching-view.js",
+      "size": 6322,
+      "sha256": "ddb1a1e20062c74c3cc89c53aa3b383c4e2460f23ecdec2cb8fa971e839de6f0"
+    },
+    {
+      "path": "services/station-presentation.js",
+      "size": 4070,
+      "sha256": "04e04a2f4262af868cb599d7bd3a0cf1070af52649f2a36269376c0915ba7f3e"
+    },
+    {
+      "path": "static/config-icons/1088.png",
+      "size": 276060,
+      "sha256": "49b962423ef024060a0f87b256c7372b3dd43e7c2c49542037c466d3509994e1"
+    },
+    {
+      "path": "static/config-icons/480.png",
+      "size": 155551,
+      "sha256": "ec512176d46f35bd916df536257f25f1f9e42c3d138b8574c010bde287856a87"
+    },
+    {
+      "path": "static/config-icons/720.png",
+      "size": 288789,
+      "sha256": "c9ed6915669569c7c37a254796fe3cc8e9c961815c8ebf7eab1495722ce6c300"
+    },
+    {
+      "path": "static/config-icons/mipmap-hdpi/ic_launcher.png",
+      "size": 7642,
+      "sha256": "ddd5b9e15da243120d8ebaf7840dcee3758abee5cac9df43828813fdd7add650"
+    },
+    {
+      "path": "static/config-icons/mipmap-hdpi/ic_launcher.xml",
+      "size": 269,
+      "sha256": "6be9be8d39cb250f663814bc3ac3ba570d9629be22fbebcc95d0c058e2249717"
+    },
+    {
+      "path": "static/config-icons/mipmap-mdpi/ic_launcher.png",
+      "size": 4018,
+      "sha256": "dbef18e63d44e9219473daed3c7fd7e7f8b4f87aaaa050b620d57fbd30b6e73a"
+    },
+    {
+      "path": "static/config-icons/mipmap-mdpi/ic_launcher.xml",
+      "size": 269,
+      "sha256": "6be9be8d39cb250f663814bc3ac3ba570d9629be22fbebcc95d0c058e2249717"
+    },
+    {
+      "path": "static/config-icons/mipmap-xhdpi/ic_launcher.png",
+      "size": 11926,
+      "sha256": "d5c7d7f38b9d9bd24a82d1e3e07fb92dcc81435d5563b1d85d4ccc04f044f245"
+    },
+    {
+      "path": "static/config-icons/mipmap-xhdpi/ic_launcher.xml",
+      "size": 269,
+      "sha256": "6be9be8d39cb250f663814bc3ac3ba570d9629be22fbebcc95d0c058e2249717"
+    },
+    {
+      "path": "static/config-icons/mipmap-xxhdpi/ic_launcher.png",
+      "size": 22417,
+      "sha256": "12ce318953ba75959fc73627131e9ccc685551bb6b45167a5ef5e5db56974e97"
+    },
+    {
+      "path": "static/config-icons/mipmap-xxhdpi/ic_launcher.xml",
+      "size": 269,
+      "sha256": "6be9be8d39cb250f663814bc3ac3ba570d9629be22fbebcc95d0c058e2249717"
+    },
+    {
+      "path": "static/config-icons/mipmap-xxxhdpi/ic_launcher.png",
+      "size": 33219,
+      "sha256": "5bb8c24fc5f76767bdd7f7471677006d59a426054baa51a969a3966f062a760a"
+    },
+    {
+      "path": "static/config-icons/mipmap-xxxhdpi/ic_launcher.xml",
+      "size": 269,
+      "sha256": "6be9be8d39cb250f663814bc3ac3ba570d9629be22fbebcc95d0c058e2249717"
+    },
+    {
+      "path": "static/config-icons/playstore/icon.png",
+      "size": 119082,
+      "sha256": "46dfa1617efff0250b19ebd1039a3debc613c9c69c7aa82788b1fb8e6cc39f95"
+    },
+    {
+      "path": "static/customicons.css",
+      "size": 327,
+      "sha256": "80feeb77a78e652f009e4a898ba5dad6176ec9f333e0789b81dede0cf0d43445"
+    },
+    {
+      "path": "static/customicons.ttf",
+      "size": 2416,
+      "sha256": "1b95f3a9886b6af5ed236c121bebae64592b14b37977c593e203aa353b916126"
+    },
+    {
+      "path": "static/images/1688.png",
+      "size": 10970,
+      "sha256": "f828687375a5a7259a977d4e947efd851a824e951c77ec39a07fb6401db66d83"
+    },
+    {
+      "path": "static/images/avatar.png",
+      "size": 28784,
+      "sha256": "0038ca85b35b6610dfde8fefd34b3e0335206730a0400e7a3e2357ce9f500a56"
+    },
+    {
+      "path": "static/images/default-avatar.png",
+      "size": 7307,
+      "sha256": "941bac65a97d4b90a10221d24463338ac5ce8840c46aef62742e81325bc1a54c"
+    },
+    {
+      "path": "static/images/douyin.png",
+      "size": 7034,
+      "sha256": "f6e4bdafaac5f390c1072cfe74fb0ef682900f6ecc458004682b5c9f14de5d66"
+    },
+    {
+      "path": "static/images/jd.png",
+      "size": 9421,
+      "sha256": "b0d4b1f45adf83741b3584067e0051f00f6f3ba3117316897f6d24e1cb4526d9"
+    },
+    {
+      "path": "static/images/my-active.png",
+      "size": 5384,
+      "sha256": "c35ae89b1f854bf7e0deba2eee6717ee7da95109cea90f49ab31b38da701e350"
+    },
+    {
+      "path": "static/images/my.png",
+      "size": 5444,
+      "sha256": "4795b33be762181d3e0fe2bfbbd4cad6ec733c220e8c0dd21d559eebdccfebc9"
+    },
+    {
+      "path": "static/images/other.png",
+      "size": 6695,
+      "sha256": "5ff6eefbd835c4e7207fd5c58d0aaefea46015a33d44bcaf98e91e361a69bed9"
+    },
+    {
+      "path": "static/images/package-active.png",
+      "size": 6439,
+      "sha256": "f0ebf085e27bcdb36fc883231f72531871d25dae6a1335b8ac9c33c822a2ab92"
+    },
+    {
+      "path": "static/images/package-illustration.png",
+      "size": 97321,
+      "sha256": "3c9184a7ed2ec646cb9446a2eea70e6e5d1a2b9d70234671813304443f5b1127"
+    },
+    {
+      "path": "static/images/package.png",
+      "size": 6602,
+      "sha256": "6d53d86994a401b76b8a2c36732360ce4e4a43537523cfc40c3868a88f7593a9"
+    },
+    {
+      "path": "static/images/parcel-outline.svg",
+      "size": 270,
+      "sha256": "5c578e14ac665b349534068f7380e339662eeff40d1a263c2fe4f799fae57cc9"
+    },
+    {
+      "path": "static/images/pickup-active.png",
+      "size": 5679,
+      "sha256": "1a8e1c5dc27d6320cf53c5737aadc793fefcf7908fc9d8faf94d6d2c89331e89"
+    },
+    {
+      "path": "static/images/pickup.png",
+      "size": 5533,
+      "sha256": "31de75ae34f6239f3d33c799ec5e49f041ff7610d75bdf35560ddf8528c9a96a"
+    },
+    {
+      "path": "static/images/pinduoduo.png",
+      "size": 17172,
+      "sha256": "29f6eed1f9173a16a89ffe67a8be3f028f3acd1572b28067462925b5d03298fa"
+    },
+    {
+      "path": "static/images/tab-my-active.svg",
+      "size": 253,
+      "sha256": "32ed8b6a9e9b7c896cda40935f96066063fa0a97c5d06322262f4efc78ff4914"
+    },
+    {
+      "path": "static/images/tab-my.svg",
+      "size": 253,
+      "sha256": "131a57bdbd7be03956b60f73d5e850c86d877a17606cb063269b4c4ad1af15d3"
+    },
+    {
+      "path": "static/images/tab-package-active.svg",
+      "size": 270,
+      "sha256": "c5d879d1b855f36392156a746188308d1be65d758b76b3c40972d47f58ad58b6"
+    },
+    {
+      "path": "static/images/tab-package.svg",
+      "size": 270,
+      "sha256": "d9724fcb54f9fdc4be5a7d8655f97e8aad8e7276d934fbdcd09e0b1fa7bc54fa"
+    },
+    {
+      "path": "static/images/tab-pickup-active.svg",
+      "size": 253,
+      "sha256": "e42b120da3f06b76b1e9604707c93e94658b61d7a5af60a2f853ba56638f60f9"
+    },
+    {
+      "path": "static/images/tab-pickup.svg",
+      "size": 253,
+      "sha256": "52a370d431f48d3e670bc3fa69cee30c80d8b3841528c87db1b57e6aba171a9f"
+    },
+    {
+      "path": "static/images/taobao.png",
+      "size": 10002,
+      "sha256": "21ac6a8cac29c966608b8cfabb22397603814a60d50dec76f4f2ac31b62d0007"
+    },
+    {
+      "path": "static/images/weipinhui.png",
+      "size": 8302,
+      "sha256": "1644a7f71f53881af32915f0ed8edd6d17dffc606e4257dd9841b2c45202357b"
+    },
+    {
+      "path": "static/images/xiaohongshu.png",
+      "size": 8804,
+      "sha256": "a547de0d00eee90d97050400f909f6d0b99880156fcdf68961d60d711de527da"
+    },
+    {
+      "path": "static/styles/silver-frost.scss",
+      "size": 3266,
+      "sha256": "823e66eebd95034539d21a5f377de93197001e5dced0b8823c173126d75f70f5"
+    },
+    {
+      "path": "static/yizhan.png",
+      "size": 9758,
+      "sha256": "7af4349dd8436c92255098a5afb3904f7f962fdd049ebc766f6f192af66f6c65"
+    },
+    {
+      "path": "uni.scss",
+      "size": 48,
+      "sha256": "46567771c4f978367ad67ca6dd265221dbd641b066b8fbff794bdfea06a70209"
+    },
+    {
+      "path": "uni_modules/uni-badge/changelog.md",
+      "size": 1949,
+      "sha256": "bb529bae2eac4c0cbeff513ec88f197f1859765ba68266afe8ba9535ab0d976c"
+    },
+    {
+      "path": "uni_modules/uni-badge/components/uni-badge/uni-badge.vue",
+      "size": 5751,
+      "sha256": "10d8b41081abf08cb835777e005c6c2d90f2778a9432937eb84cde3b31b91a70"
+    },
+    {
+      "path": "uni_modules/uni-badge/package.json",
+      "size": 1866,
+      "sha256": "b94fd3a618a37a262891091546d154ab5d9683b2d58fa7c44021dfe88edf111b"
+    },
+    {
+      "path": "uni_modules/uni-badge/readme.md",
+      "size": 416,
+      "sha256": "4a8d22e0e5eff5db2a9753b55eb52c0b5b61f077daae0ce8af9037ae7d34a819"
+    },
+    {
+      "path": "uni_modules/uni-breadcrumb/changelog.md",
+      "size": 182,
+      "sha256": "1bfb3f5031f14d51ad55ccba0506c1997395570cefe25f523e7ad3cd81f81894"
+    },
+    {
+      "path": "uni_modules/uni-breadcrumb/components/uni-breadcrumb-item/uni-breadcrumb-item.vue",
+      "size": 2431,
+      "sha256": "5d10830bae869d82c7d5851dc909ca619f3bc196be8b7d03a54fe9cbd61542fb"
+    },
+    {
+      "path": "uni_modules/uni-breadcrumb/components/uni-breadcrumb/uni-breadcrumb.vue",
+      "size": 868,
+      "sha256": "a3c87368715fa0840b89263b99daa468149863cca57b80cc9152e5a6112c732b"
+    },
+    {
+      "path": "uni_modules/uni-breadcrumb/package.json",
+      "size": 1769,
+      "sha256": "a64faccca7a42bde2462c5939336faa20ff40dc6ee22538b2d789ae3dd25d68d"
+    },
+    {
+      "path": "uni_modules/uni-breadcrumb/readme.md",
+      "size": 1824,
+      "sha256": "44a776f9515649216f90cd7359e2f41d4b156aef60190ca069fe87379457fa5c"
+    },
+    {
+      "path": "uni_modules/uni-calendar/changelog.md",
+      "size": 1205,
+      "sha256": "47de5880a36a57043f86a12f71b5fd8e7cc2f3d8021bea2cd2b6a8f6c39c7b89"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/calendar.js",
+      "size": 25395,
+      "sha256": "187462f0544420a9f36d2580752ff2106f796f378624f1ad8165fed47b272237"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/i18n/en.json",
+      "size": 303,
+      "sha256": "e1c678b2b131a560ad83e0d946022df5c34155574cf52c4c6c5a580771e73d16"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/i18n/zh-Hans.json",
+      "size": 308,
+      "sha256": "8d1cb85523233da03a99a09cd517b2448979ffc5f45dd059dfbb55ae6fe54a0c"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/i18n/zh-Hant.json",
+      "size": 308,
+      "sha256": "5734d38ff208e39c6c17c05d925c64c1496791ed80c421bb8ad766e936b3b7e6"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/uni-calendar-item.vue",
+      "size": 5632,
+      "sha256": "591b3d45179b2328733f3a8f642b9daec6aed89cd0ada2ce9f378fd03d38f888"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/uni-calendar.vue",
+      "size": 13772,
+      "sha256": "ed2e7b39087d51e656c21f3a0c14fc40825b9c96cf1eb6713b9edca1a6e23604"
+    },
+    {
+      "path": "uni_modules/uni-calendar/components/uni-calendar/util.js",
+      "size": 9291,
+      "sha256": "335716d47f9b2f7bffa7ef4a9d461e67d02ffc999f2a2e63150cc5996eccf44b"
+    },
+    {
+      "path": "uni_modules/uni-calendar/package.json",
+      "size": 1750,
+      "sha256": "00a90ab49c920b4888c135b13b133d720414082179d0c735ba75874fd2bd2ee6"
+    },
+    {
+      "path": "uni_modules/uni-calendar/readme.md",
+      "size": 3220,
+      "sha256": "c68a9154af57bad6d7a7fb66d35fb2e9450f05b9ae01cc001b7302b95f5c41d7"
+    },
+    {
+      "path": "uni_modules/uni-card/changelog.md",
+      "size": 1342,
+      "sha256": "1727eb026b1e41b91c0bc66d85508d53e64ce656fea9de3e8a3fab06aa3fe956"
+    },
+    {
+      "path": "uni_modules/uni-card/components/uni-card/uni-card.vue",
+      "size": 6632,
+      "sha256": "e26dba8d05cfd1e5e88e364e2674fc29fb219d5cb56d5b99f39fab23bba137cf"
+    },
+    {
+      "path": "uni_modules/uni-card/package.json",
+      "size": 1832,
+      "sha256": "d6d9889410f26789e78273128b669d05d1177a836daf550bbbabb72f73917c03"
+    },
+    {
+      "path": "uni_modules/uni-card/readme.md",
+      "size": 301,
+      "sha256": "ed8dc2c16ba2639592c9c4cd1adbc53b5d162b40403b541f01c717aeaacd4b05"
+    },
+    {
+      "path": "uni_modules/uni-collapse/changelog.md",
+      "size": 1822,
+      "sha256": "7b6c9305a562b34427b743b85b49cdf56f973c8587187f37c70d08746306e94b"
+    },
+    {
+      "path": "uni_modules/uni-collapse/components/uni-collapse-item/uni-collapse-item.vue",
+      "size": 9405,
+      "sha256": "4e286ec9cec3660776b3c7d5917ce3ed3583c9880916bc700e15348798436cbf"
+    },
+    {
+      "path": "uni_modules/uni-collapse/components/uni-collapse/uni-collapse.vue",
+      "size": 3505,
+      "sha256": "42855658c7bb17e2d8ac58d7066ef61f8d8170a54945c9fa6f4439c886c50f7d"
+    },
+    {
+      "path": "uni_modules/uni-collapse/package.json",
+      "size": 1823,
+      "sha256": "6250b3c5b3c4ea18c5b5ca1efe30bd20b2ec72bc163a21ba7256806bf2cfd08b"
+    },
+    {
+      "path": "uni_modules/uni-collapse/readme.md",
+      "size": 537,
+      "sha256": "c0702d7d7b28164d3149c9d14b0f7e800c5d931e529c3f3ae75041fd00e895dd"
+    },
+    {
+      "path": "uni_modules/uni-combox/changelog.md",
+      "size": 825,
+      "sha256": "73a7a2a67e92c3f8c39c02b762014005101e5460904b9872fd6f0249ce854e42"
+    },
+    {
+      "path": "uni_modules/uni-combox/components/uni-combox/uni-combox.vue",
+      "size": 6081,
+      "sha256": "c23d13bdc53eb28c729aa44f0c388a078309eaa643f5fb0d220ab543992883a3"
+    },
+    {
+      "path": "uni_modules/uni-combox/package.json",
+      "size": 1844,
+      "sha256": "ec65af76920b6e14b0a7a222e050c0b1e48829f7d68f86b5a6643a6d8f1572e0"
+    },
+    {
+      "path": "uni_modules/uni-combox/readme.md",
+      "size": 305,
+      "sha256": "97b4d1c3fbd8629120a3ca966c82c8092e12313e8095fcf093bf3a734e3edf82"
+    },
+    {
+      "path": "uni_modules/uni-countdown/changelog.md",
+      "size": 1228,
+      "sha256": "d468ec91c5a1f300010267b445227183e2f7adb5888a9756ffcf74b1ae279987"
+    },
+    {
+      "path": "uni_modules/uni-countdown/components/uni-countdown/i18n/en.json",
+      "size": 113,
+      "sha256": "4a3cdbb096b8faf6d5a3955f2823ddf5bec27e76dd74902e0271aebb96ef52d8"
+    },
+    {
+      "path": "uni_modules/uni-countdown/components/uni-countdown/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-countdown/components/uni-countdown/i18n/zh-Hans.json",
+      "size": 119,
+      "sha256": "cc8c01f4593ead880839d93c0a1399551b0fd657563e8bc5a32880d450dad350"
+    },
+    {
+      "path": "uni_modules/uni-countdown/components/uni-countdown/i18n/zh-Hant.json",
+      "size": 119,
+      "sha256": "adabdab73faa2772803cb5d03576fdd594952e5f6dc72494903ff85747c74d26"
+    },
+    {
+      "path": "uni_modules/uni-countdown/components/uni-countdown/uni-countdown.vue",
+      "size": 6787,
+      "sha256": "1016e6c0df680723a07ebb1603b85270313f5aeda7048542938ca389ce566b5f"
+    },
+    {
+      "path": "uni_modules/uni-countdown/package.json",
+      "size": 1753,
+      "sha256": "e97548b3d2ba66618d9e9c5e5e74f954d5c1752d2b7cdc286205c890d1ba55d3"
+    },
+    {
+      "path": "uni_modules/uni-countdown/readme.md",
+      "size": 315,
+      "sha256": "844637f17d1531565deca5c4ccfb10bedac9a629a4267a3b3c90fb5628c254e8"
+    },
+    {
+      "path": "uni_modules/uni-data-checkbox/changelog.md",
+      "size": 2171,
+      "sha256": "603b6e3252940afae383c10b588d2b990d677ed23b1349bf50a1ca5dafab0ae1"
+    },
+    {
+      "path": "uni_modules/uni-data-checkbox/components/uni-data-checkbox/uni-data-checkbox.vue",
+      "size": 21295,
+      "sha256": "587e8fdb37d80893bd05ae04e3740ac9b90e5f80ba8e46b977b55c922f031d9e"
+    },
+    {
+      "path": "uni_modules/uni-data-checkbox/package.json",
+      "size": 1826,
+      "sha256": "253d8caeb37084e463e8a4c4ef2e680538012f810df44f466c3fb466b4ebd266"
+    },
+    {
+      "path": "uni_modules/uni-data-checkbox/readme.md",
+      "size": 1293,
+      "sha256": "570cebc610bb20030e54f91554688100fb13d7f333c5b4a975334b65e17fd002"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/changelog.md",
+      "size": 3588,
+      "sha256": "a0815433e652cabe87f9c7a640c2c187c94a86b42993ce99051ea54e23fa81df"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-picker/keypress.js",
+      "size": 1155,
+      "sha256": "32abd331f6edf31ae89de007f635017a24580aafbb2bb31213514ad4ca518205"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-picker/uni-data-picker.uvue",
+      "size": 10061,
+      "sha256": "99f4299fd4c25f4206fff726bbe2ed5a88d1e49d2f98cca9e172e22226ba8b5a"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-picker/uni-data-picker.vue",
+      "size": 14470,
+      "sha256": "d49da03304cc190b95bd6f06075892d45db951058fdca8bbc15a6ef6621157ea"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-pickerview/loading.uts",
+      "size": 6220,
+      "sha256": "9a9abffcacbc502380e1799dad20ebfc63b8757b06ec9e84d4c178091970f239"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-pickerview/uni-data-picker.js",
+      "size": 14852,
+      "sha256": "6734b7dd3b7f8847ea414f4fb47c1fbb4dd63eec1acfc2451ecb1396a3f73ef3"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-pickerview/uni-data-picker.uts",
+      "size": 19486,
+      "sha256": "54952998b1453bb2bbf978164aed0026a3c09985821935fee3f8afc6c88697f0"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-pickerview/uni-data-pickerview.css",
+      "size": 1191,
+      "sha256": "473d8be21bb0b8f6f152e308bed1e6a593995fd39bcd9d283a887d23d510e7b4"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-pickerview/uni-data-pickerview.uvue",
+      "size": 2519,
+      "sha256": "8f51d1c7e737a5164194cf4b6c0c62d95e5f0d5bd19139b0b30f81056b42898b"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/components/uni-data-pickerview/uni-data-pickerview.vue",
+      "size": 8036,
+      "sha256": "1baa5a0dc1a7d7bf8b7fb80d0770a93a6c19552023b200835bdb8a80154b13a2"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/package.json",
+      "size": 1986,
+      "sha256": "10b1e81aebe1dc28fce5cf0474b7292283828135e4a156a954cb1fab7fd013c0"
+    },
+    {
+      "path": "uni_modules/uni-data-picker/readme.md",
+      "size": 1487,
+      "sha256": "f4428d1270d36e96e56e6ef0e3953629bd4ed129a258ae03603ef8e5e21c2660"
+    },
+    {
+      "path": "uni_modules/uni-data-select/changelog.md",
+      "size": 1569,
+      "sha256": "1f830ae36c3ccbb2a7ce4acc864d1eb05cf582777d3434bbe1bc715f55d8e739"
+    },
+    {
+      "path": "uni_modules/uni-data-select/components/uni-data-select/uni-data-select.vue",
+      "size": 12939,
+      "sha256": "9aef37de1d5c57210962e15b29e05111eedfd0bc71653bd360dcea7567325fe8"
+    },
+    {
+      "path": "uni_modules/uni-data-select/package.json",
+      "size": 1864,
+      "sha256": "94a352c1effe7d0eed0af3f2dd2f9a858a03aba63005df60fa90893489dfbdb6"
+    },
+    {
+      "path": "uni_modules/uni-data-select/readme.md",
+      "size": 370,
+      "sha256": "1cfb84cc20e870962ba3da01cd35efb8747517d25d730d27ac0817b08973b238"
+    },
+    {
+      "path": "uni_modules/uni-dateformat/changelog.md",
+      "size": 583,
+      "sha256": "ed194efdfe2b83ade50f8271ac8655b16eb70fbd26f8c1398a9ab3c5c36d2363"
+    },
+    {
+      "path": "uni_modules/uni-dateformat/components/uni-dateformat/date-format.js",
+      "size": 4047,
+      "sha256": "df28f41f549bdb4749427317a2752cef249fd8531cbbe7081ef2456e620846f5"
+    },
+    {
+      "path": "uni_modules/uni-dateformat/components/uni-dateformat/uni-dateformat.vue",
+      "size": 1786,
+      "sha256": "3ee714ea97b3dfb17ea5f735fbbdca34c7f3af34b0e918bdb66c8bde3e6b2404"
+    },
+    {
+      "path": "uni_modules/uni-dateformat/package.json",
+      "size": 1904,
+      "sha256": "de74431ab3ff8f4928a3698a90ddbade130b6517c029f4a83b1496f519ed29b6"
+    },
+    {
+      "path": "uni_modules/uni-dateformat/readme.md",
+      "size": 334,
+      "sha256": "f3aa80c71ac105e03f41cd141f5cb09817728a134afac40e8a8b298fc0dfd29d"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/changelog.md",
+      "size": 8998,
+      "sha256": "e699d2afc96f14a63c95526c42db2f6df75c0d66cacad7af1ef70e452554ab03"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/calendar-item.vue",
+      "size": 4289,
+      "sha256": "6cfe0879d7b31d76f0bb520354a5b325f312be5da15339e32e8df669773b4bfe"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/calendar.vue",
+      "size": 23049,
+      "sha256": "df51007f934ac59d63e31365034df297796932ddabbafa82ba572927a3878dc0"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/en.json",
+      "size": 785,
+      "sha256": "50609f48bec728faa03c5c6c249b90d8d645d31f4cf74e978521642c45706b54"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/zh-Hans.json",
+      "size": 804,
+      "sha256": "3e4bd5104681a4eb54aaab82bbed59481912470c8434ff002050c1acb91983e0"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/i18n/zh-Hant.json",
+      "size": 824,
+      "sha256": "3571893340c30eb5e92dbdac79e49f1b7fadc3069d618cae7d7769a478ca216f"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/time-picker.vue",
+      "size": 23821,
+      "sha256": "a14c1deb4698133b5e2e7c1a48518425694eb04f9feaf6f979fcb288c28dcacd"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/uni-datetime-picker.vue",
+      "size": 29833,
+      "sha256": "bbee882571d0ee6e77387b4ad21f424289562d756b6ed20b96644f351a78d867"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/components/uni-datetime-picker/util.js",
+      "size": 10481,
+      "sha256": "d3bada35d3ac06f0518939adba926dcec81bb8d94b8e9ee3296d405d25c86942"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/package.json",
+      "size": 1919,
+      "sha256": "32f68f114f481b30c32815a729edf753bc713ec4a41e2dae626816a6c7cb96aa"
+    },
+    {
+      "path": "uni_modules/uni-datetime-picker/readme.md",
+      "size": 1255,
+      "sha256": "f91d9b8d0d0fa84d046309faa914f26f45298304920d22217a5d414c2153a4ea"
+    },
+    {
+      "path": "uni_modules/uni-drawer/changelog.md",
+      "size": 733,
+      "sha256": "a1736c2b3d9d7c2f5708790a51d1937fcc89cf6aa6173b637893f93bd47de3f6"
+    },
+    {
+      "path": "uni_modules/uni-drawer/components/uni-drawer/keypress.js",
+      "size": 1164,
+      "sha256": "f0cf03192f170041f686b3b915b7c34334259e511022cbc309ab51b1620cf1d9"
+    },
+    {
+      "path": "uni_modules/uni-drawer/components/uni-drawer/uni-drawer.vue",
+      "size": 4171,
+      "sha256": "c4b949ade46a62a825393cb071259b2872fbe88d9ccd5b5428c5d84ea15c9a9c"
+    },
+    {
+      "path": "uni_modules/uni-drawer/package.json",
+      "size": 1838,
+      "sha256": "8254bfea61e2a2c564c229650ebfaca0521745fdf1a85231db184e21b50cd538"
+    },
+    {
+      "path": "uni_modules/uni-drawer/readme.md",
+      "size": 303,
+      "sha256": "4967b862559f53f2270a8ef8a0a13f8a31a06b489b4681da100abbb016dc1600"
+    },
+    {
+      "path": "uni_modules/uni-easyinput/changelog.md",
+      "size": 3349,
+      "sha256": "21e2ffa92f80d2891166e574fedcc8fa1a833fbbfc7774e6af3adedb2001af50"
+    },
+    {
+      "path": "uni_modules/uni-easyinput/components/uni-easyinput/common.js",
+      "size": 1305,
+      "sha256": "26a191305e77b8ef6c0dcc110c849260356ce7a2f743306a9629a2e2bc490463"
+    },
+    {
+      "path": "uni_modules/uni-easyinput/components/uni-easyinput/uni-easyinput.vue",
+      "size": 18772,
+      "sha256": "f1ef498522d905e6350fe17d994ee9470b17b08143af75c843322231cfadd066"
+    },
+    {
+      "path": "uni_modules/uni-easyinput/package.json",
+      "size": 1856,
+      "sha256": "dd32c54c50c6c609b5ba0e9310a3dfb622dd3ce6d0457c52c3a1907c0aa4b2c5"
+    },
+    {
+      "path": "uni_modules/uni-easyinput/readme.md",
+      "size": 527,
+      "sha256": "f31e91ed59e1ad20f57ba1291660a712f32cac5e9e2ad527a0aa7533cb4f0ffb"
+    },
+    {
+      "path": "uni_modules/uni-fab/changelog.md",
+      "size": 1347,
+      "sha256": "0e9b4d4a684157839ba126b0eecec590a429f54c5ec5a73d55dfe42851c93ba0"
+    },
+    {
+      "path": "uni_modules/uni-fab/components/uni-fab/uni-fab.vue",
+      "size": 11651,
+      "sha256": "d7cef0ea436bd73cc13554a05c172c61e581a1f9e32f510ba844e4d8a04f8758"
+    },
+    {
+      "path": "uni_modules/uni-fab/package.json",
+      "size": 1814,
+      "sha256": "c6f38834beb168dfebfc2a78c5d6d58f3c09ec414a927b7a0d1ace4cd6051c07"
+    },
+    {
+      "path": "uni_modules/uni-fab/readme.md",
+      "size": 313,
+      "sha256": "3cf7add397984f3e139f5f6ba2dc2815e0e2747ff80e1f8b3172baa868209564"
+    },
+    {
+      "path": "uni_modules/uni-fav/changelog.md",
+      "size": 974,
+      "sha256": "b5019acd39a44597b4b39d86a684f7ce325a1949d74273688a73934fa8ad9c83"
+    },
+    {
+      "path": "uni_modules/uni-fav/components/uni-fav/i18n/en.json",
+      "size": 73,
+      "sha256": "2574daf1c80a1d8e3b7d45d915b3095ad63eca1eae231304026797b0d0fe31c6"
+    },
+    {
+      "path": "uni_modules/uni-fav/components/uni-fav/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-fav/components/uni-fav/i18n/zh-Hans.json",
+      "size": 72,
+      "sha256": "e5d8e787513ddf2bd4ce18453866898c413c7169a7ebdfee5510cc58a1361867"
+    },
+    {
+      "path": "uni_modules/uni-fav/components/uni-fav/i18n/zh-Hant.json",
+      "size": 72,
+      "sha256": "e5d8e787513ddf2bd4ce18453866898c413c7169a7ebdfee5510cc58a1361867"
+    },
+    {
+      "path": "uni_modules/uni-fav/components/uni-fav/uni-fav.vue",
+      "size": 4008,
+      "sha256": "41d8001a769f5c740de95720fb5ffa887f9031b815c44da69e1ac826fcd25c7c"
+    },
+    {
+      "path": "uni_modules/uni-fav/package.json",
+      "size": 1832,
+      "sha256": "beda7ade7ffbc658c8960c5ca621a078496cc4242cd461d2b66349de225b37af"
+    },
+    {
+      "path": "uni_modules/uni-fav/readme.md",
+      "size": 342,
+      "sha256": "f0321a4bff6cdffcfb3619fb8a4d5cf25271dc5f08345ea6a8c0a50bcf185b72"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/changelog.md",
+      "size": 3566,
+      "sha256": "49825ce7e086d57e0ce4362998c3792bd409ce11f79fbf8fb754293f522e5043"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/components/uni-file-picker/choose-and-upload-file.js",
+      "size": 6304,
+      "sha256": "c4a5754a4982fae33e6e58ee4b9da6b6ec2045dda8c8e37c7d8e86c6359afccc"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/components/uni-file-picker/uni-file-picker.vue",
+      "size": 17535,
+      "sha256": "ed018a6bee2ec4519d3a87cdab81e14ed9bcea28149d9d3be5cd59d154de512e"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/components/uni-file-picker/upload-file.vue",
+      "size": 7015,
+      "sha256": "08ec0712ca66890bf053fd04e199ce6852d83972dce7546ef2c89b94a0b18766"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/components/uni-file-picker/upload-image.vue",
+      "size": 6319,
+      "sha256": "2981d9fcf3fc953ea395ba9418e1772045576d95cba702c716c1561dcfab1e13"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/components/uni-file-picker/utils.js",
+      "size": 2436,
+      "sha256": "6bbefc5727a63e04b0aa0bf843b576a665a21db9ed2ce0013368007da43878f5"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/package.json",
+      "size": 1857,
+      "sha256": "d60a2eefbfb0c6b42b63523647228d53a22beadcd78173f2a4256456efe9be95"
+    },
+    {
+      "path": "uni_modules/uni-file-picker/readme.md",
+      "size": 423,
+      "sha256": "29191d3a5bb9179249c5b5b9fead9944e51bf59f925d1c6db9a3a9a4aaf1c9a5"
+    },
+    {
+      "path": "uni_modules/uni-forms/changelog.md",
+      "size": 4825,
+      "sha256": "d5ce2d923233dd751635047861f46d97860a1b1b2ec45d65c34bacfb4208ad00"
+    },
+    {
+      "path": "uni_modules/uni-forms/components/uni-forms-item/uni-forms-item.vue",
+      "size": 15873,
+      "sha256": "4b3bff4d75476f1c2fdaf34161794a058770d75413442817431d9b011d801bcc"
+    },
+    {
+      "path": "uni_modules/uni-forms/components/uni-forms/uni-forms.vue",
+      "size": 11088,
+      "sha256": "33485e169ddc751f01e1612e192c8fe77cbcfed104fbadef328d5fb2e1319e67"
+    },
+    {
+      "path": "uni_modules/uni-forms/components/uni-forms/utils.js",
+      "size": 8004,
+      "sha256": "22f6a39df8c54395679a7cccc94234caebe29c0b442e405d7691a308c4c819cb"
+    },
+    {
+      "path": "uni_modules/uni-forms/components/uni-forms/validate.js",
+      "size": 12293,
+      "sha256": "add49e55a4640b9b95b2bf00f63774dd58c180edb24c71b29c198a2b661c0065"
+    },
+    {
+      "path": "uni_modules/uni-forms/package.json",
+      "size": 1897,
+      "sha256": "31d9ce44186c28721883bfa7403b17b2575d81f931f36ded461460a2bd8cd426"
+    },
+    {
+      "path": "uni_modules/uni-forms/readme.md",
+      "size": 1393,
+      "sha256": "39beaa265c2662b7755dea6326e5477fba948befd22d2cac0965b027ddd78f71"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/changelog.md",
+      "size": 899,
+      "sha256": "0f14b100d21dbd117dcf1d411a1da6acf865389b1660ac0b7e90a04aecc3f889"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/components/uni-goods-nav/i18n/en.json",
+      "size": 190,
+      "sha256": "a05cd2bf7fe0050abc10e957fc1959a66426116e999e7636b96440c4900737fe"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/components/uni-goods-nav/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/components/uni-goods-nav/i18n/zh-Hans.json",
+      "size": 206,
+      "sha256": "fac27528ebadc5b3b5cc166250ceca034ca99423409cfe84848248d5c83e80f1"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/components/uni-goods-nav/i18n/zh-Hant.json",
+      "size": 206,
+      "sha256": "7569229b6744e18c35528d644bcdac7bd874e098d973b9bc33179f60da9f603c"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/components/uni-goods-nav/uni-goods-nav.vue",
+      "size": 5335,
+      "sha256": "ddf3ae3f855ae7882fb4739ea6769657611ca8a51d82e3a499986c9a9a1129be"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/package.json",
+      "size": 1893,
+      "sha256": "d50194842149492357dd486d256aa668571c83c5cbe45e176b69bccfbaa9c878"
+    },
+    {
+      "path": "uni_modules/uni-goods-nav/readme.md",
+      "size": 340,
+      "sha256": "da22a95102ba63235eaa8cc7665594baf2bd9056a9942858023c83b6c99ac458"
+    },
+    {
+      "path": "uni_modules/uni-grid/changelog.md",
+      "size": 731,
+      "sha256": "fa0448727303be212d66c1ca1cec01718f9302446cf0b34910a10429cee2e4d0"
+    },
+    {
+      "path": "uni_modules/uni-grid/components/uni-grid-item/uni-grid-item.vue",
+      "size": 2935,
+      "sha256": "c3603217bea1b19a2eb9afb8868b9d288eda5e7313688d776ba508aaa1e6c0e0"
+    },
+    {
+      "path": "uni_modules/uni-grid/components/uni-grid/uni-grid.vue",
+      "size": 3004,
+      "sha256": "688d2709be46037c29d7cf6c50560b9390dd1d96fd2751ec857e7d5510c149bc"
+    },
+    {
+      "path": "uni_modules/uni-grid/package.json",
+      "size": 1844,
+      "sha256": "9dee7b08a290796cca7fece8dfcd8e23265cbd9e501ab604aae425f72eda4253"
+    },
+    {
+      "path": "uni_modules/uni-grid/readme.md",
+      "size": 291,
+      "sha256": "768b458ccd794a5fbf18782c0a75d24914f424535eff2d3889153cf1e01633a4"
+    },
+    {
+      "path": "uni_modules/uni-group/changelog.md",
+      "size": 821,
+      "sha256": "b841bad65c673367c238d0d10e232b87d4936aa528e95616579a343a2cbf0ae6"
+    },
+    {
+      "path": "uni_modules/uni-group/components/uni-group/uni-group.vue",
+      "size": 2636,
+      "sha256": "2ade3b4601fb56c363e171be7fa1c622d76448bd0e88ea9bb61fb811c428ad1e"
+    },
+    {
+      "path": "uni_modules/uni-group/package.json",
+      "size": 1847,
+      "sha256": "2304bed2ececc9ef4cd1941639b0388d577b239172035441675626d5664574f2"
+    },
+    {
+      "path": "uni_modules/uni-group/readme.md",
+      "size": 357,
+      "sha256": "43ae5671347d6b22431433e0f49424a76659ad076c4e86f6df33db7d31ddeb74"
+    },
+    {
+      "path": "uni_modules/uni-icons/changelog.md",
+      "size": 1740,
+      "sha256": "4e1a83c344ccce73e83256a040edfa92056461ce9517a401c2c721324362a6f9"
+    },
+    {
+      "path": "uni_modules/uni-icons/components/uni-icons/uni-icons.uvue",
+      "size": 2022,
+      "sha256": "9aafd0c7395f66227463951d8fd3eb2cfc4cc7373c4efe95c36176942e574721"
+    },
+    {
+      "path": "uni_modules/uni-icons/components/uni-icons/uni-icons.vue",
+      "size": 2404,
+      "sha256": "5226b4549f289fbdececea805c9fab874708cc3b5a782874f3fadb7f0a6adc62"
+    },
+    {
+      "path": "uni_modules/uni-icons/components/uni-icons/uniicons.css",
+      "size": 8815,
+      "sha256": "8be5c95bdab96bdb9d3ecd47a46bfebc75548b7fdfcdcb0a8b70c2b0e22937df"
+    },
+    {
+      "path": "uni_modules/uni-icons/components/uni-icons/uniicons.ttf",
+      "size": 35824,
+      "sha256": "32e978a546182be7be788ebf4dbce57b8cc8b6f4d9da0c9d3a46a5e030bc1efc"
+    },
+    {
+      "path": "uni_modules/uni-icons/components/uni-icons/uniicons_file.ts",
+      "size": 11321,
+      "sha256": "4d6a76bd3c876f0a25a62de5432e0777e7280afb014fd777c00135e181df9afc"
+    },
+    {
+      "path": "uni_modules/uni-icons/components/uni-icons/uniicons_file_vue.js",
+      "size": 11056,
+      "sha256": "1dcce72c6664025cd1744bf2577593c4491d6e4f06bf1fa11b1e98f38b8306db"
+    },
+    {
+      "path": "uni_modules/uni-icons/package.json",
+      "size": 1914,
+      "sha256": "0ce569d657aea75095bc8da29a8a18f23a8175470d55f926ee30451450923ef1"
+    },
+    {
+      "path": "uni_modules/uni-icons/readme.md",
+      "size": 305,
+      "sha256": "6e86e3d16f31c929cf01d3d9c84a958989723a1ab5fbd8b8e10d98293a74ad19"
+    },
+    {
+      "path": "uni_modules/uni-indexed-list/changelog.md",
+      "size": 883,
+      "sha256": "0cd911fc1bc88cbf15bcf3e3a27ee09c4c3879499826cdd458555a2c178d6c78"
+    },
+    {
+      "path": "uni_modules/uni-indexed-list/components/uni-indexed-list/uni-indexed-list-item.vue",
+      "size": 3289,
+      "sha256": "92362dda502079a6de2721b5b696ed89666515ed6730d1f7ef7afaaefad0c4d3"
+    },
+    {
+      "path": "uni_modules/uni-indexed-list/components/uni-indexed-list/uni-indexed-list.vue",
+      "size": 9020,
+      "sha256": "71920c5c4783da7d657e3a24c4d17ffea6b34b0185c3614a6b3b79a737b79107"
+    },
+    {
+      "path": "uni_modules/uni-indexed-list/package.json",
+      "size": 1934,
+      "sha256": "a8ae1464d7e63291ee31abe02e536c7d470b59c2f4bede4205c420bb9b1aa011"
+    },
+    {
+      "path": "uni_modules/uni-indexed-list/readme.md",
+      "size": 341,
+      "sha256": "7d979e0185a210dd7148cc8486de9f02148f124842fe6c94040836cf73b9eb3e"
+    },
+    {
+      "path": "uni_modules/uni-link/changelog.md",
+      "size": 722,
+      "sha256": "20476421a18a7bf2089987f2ec7c1091551b33c6f27965ae394e6e91f7f4deba"
+    },
+    {
+      "path": "uni_modules/uni-link/components/uni-link/uni-link.vue",
+      "size": 3187,
+      "sha256": "de8f567411093d1c162bd70c5206bd02f688c7ac124ffa3635e4d59cbcb2f460"
+    },
+    {
+      "path": "uni_modules/uni-link/package.json",
+      "size": 1884,
+      "sha256": "08e59f1298399c3b1b08eb4460d850f3ae9e193d4f87bef2eaaa17b7703ff82a"
+    },
+    {
+      "path": "uni_modules/uni-link/readme.md",
+      "size": 409,
+      "sha256": "637ccc63327b319628dd67c864eb107302f7b135859fa8673443ecfda5672229"
+    },
+    {
+      "path": "uni_modules/uni-list/changelog.md",
+      "size": 2628,
+      "sha256": "3381ca44fbb8566be8357bf4f44b64735e802f3ba6cd74dafc094eb0ea880989"
+    },
+    {
+      "path": "uni_modules/uni-list/components/uni-list-ad/uni-list-ad.vue",
+      "size": 2233,
+      "sha256": "565d00a7779c027276b7f37038b54cc9706d012ba953bcc006e22efd59733889"
+    },
+    {
+      "path": "uni_modules/uni-list/components/uni-list-chat/uni-list-chat.scss",
+      "size": 1576,
+      "sha256": "add54f33ef0c1abe8ff9d4296986f6e4a2cb025d1b22083f53e4f77fe072a378"
+    },
+    {
+      "path": "uni_modules/uni-list/components/uni-list-chat/uni-list-chat.vue",
+      "size": 14017,
+      "sha256": "47e1b3db50080e6c17892925450ce1fffb0d1a3dce2956f2b4d5a21b8a11b2c6"
+    },
+    {
+      "path": "uni_modules/uni-list/components/uni-list-item/uni-list-item.vue",
+      "size": 13178,
+      "sha256": "e88cb991b0d4b1aa6b83a1bafe244f75a63a613f9d004b2b50e245988ee01761"
+    },
+    {
+      "path": "uni_modules/uni-list/components/uni-list/uni-list.vue",
+      "size": 2524,
+      "sha256": "e2064405d6392918892503524328b6c3b22f2976335b25c05d1ee89e626ba227"
+    },
+    {
+      "path": "uni_modules/uni-list/components/uni-list/uni-refresh.vue",
+      "size": 1617,
+      "sha256": "8047ffcbde88e10ec6b1f322052760722a5f37eb0cdc09738648d3688bebd8ad"
+    },
+    {
+      "path": "uni_modules/uni-list/components/uni-list/uni-refresh.wxs",
+      "size": 2280,
+      "sha256": "c2df0b7ef69f1423259a6ab79306c2ea4168febb3878201edd6421f4a096600d"
+    },
+    {
+      "path": "uni_modules/uni-list/package.json",
+      "size": 1812,
+      "sha256": "b9dc7ea59668ad9a8aa89c9ed4d1f2f9c9d25a6b1fedd6b5a603e6edda387102"
+    },
+    {
+      "path": "uni_modules/uni-list/readme.md",
+      "size": 15935,
+      "sha256": "484944932d8473fa832e16085f75a8e468427fde5f091a3ba47d63dc45280791"
+    },
+    {
+      "path": "uni_modules/uni-load-more/changelog.md",
+      "size": 994,
+      "sha256": "15df8d990197ca238508033ba55048e3c0e1edb9d644a70d3df926a03c55c42c"
+    },
+    {
+      "path": "uni_modules/uni-load-more/components/uni-load-more/i18n/en.json",
+      "size": 157,
+      "sha256": "adf994e3d14662d622275645870a321d3b2dd9641b144170b1d75b36fd5cc9b7"
+    },
+    {
+      "path": "uni_modules/uni-load-more/components/uni-load-more/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-load-more/components/uni-load-more/i18n/zh-Hans.json",
+      "size": 169,
+      "sha256": "ea549da2a1f7f00af39089343782ac2063f870618412fcac5c8af8ca3e08b8d0"
+    },
+    {
+      "path": "uni_modules/uni-load-more/components/uni-load-more/i18n/zh-Hant.json",
+      "size": 169,
+      "sha256": "6fe0cedb1f95b9aab49bf05e4f0629c4fa26d86448cffbf3524389283d349e2c"
+    },
+    {
+      "path": "uni_modules/uni-load-more/components/uni-load-more/uni-load-more.vue",
+      "size": 15178,
+      "sha256": "3cd427428e1aaea54fae10f19b5bfff0e0a8758f848c36de09a87fc566cc3d01"
+    },
+    {
+      "path": "uni_modules/uni-load-more/package.json",
+      "size": 1844,
+      "sha256": "80d73aae4091e661d6a4322ed70eaa1ea67bc077ef95dad7d5030ace5f66cd2f"
+    },
+    {
+      "path": "uni_modules/uni-load-more/readme.md",
+      "size": 384,
+      "sha256": "888873124364350c31d80af2fa33ee75c1208e6dca0942eb0660927d6dcbd1fa"
+    },
+    {
+      "path": "uni_modules/uni-nav-bar/changelog.md",
+      "size": 2241,
+      "sha256": "4aa8e5704f9a20dfd89bd2c1c5aa652e87d39bee55825233065cfe246e8cb027"
+    },
+    {
+      "path": "uni_modules/uni-nav-bar/components/uni-nav-bar/uni-nav-bar.vue",
+      "size": 8556,
+      "sha256": "dbcfa5d1a371d0dbacb1dde96d66d530f88ec5f36f37dfdebaf52e65bcc8a30f"
+    },
+    {
+      "path": "uni_modules/uni-nav-bar/components/uni-nav-bar/uni-status-bar.vue",
+      "size": 428,
+      "sha256": "6d559c9bc0f20f0f46132a2ef6c274f2ec7b8b41d2a65cda9a7a141b2532636d"
+    },
+    {
+      "path": "uni_modules/uni-nav-bar/package.json",
+      "size": 1824,
+      "sha256": "05f7f954d67589be85be0d2070e8283cef7408eb5953e1fee8078c286bbc8099"
+    },
+    {
+      "path": "uni_modules/uni-nav-bar/readme.md",
+      "size": 344,
+      "sha256": "3a4cfb6de2df505f945613ab7648e4369b095706836f053ba221369c1f21d5b3"
+    },
+    {
+      "path": "uni_modules/uni-notice-bar/changelog.md",
+      "size": 1023,
+      "sha256": "a1a9ed28785aec1db9e3a2c51c5caba0d83f6c6b3a204da48d1ee9a97ed7999a"
+    },
+    {
+      "path": "uni_modules/uni-notice-bar/components/uni-notice-bar/uni-notice-bar.vue",
+      "size": 11164,
+      "sha256": "e2728d218ef687ea5c8522d01da9e1c90644bae965aa0d376e8c9f0caff87691"
+    },
+    {
+      "path": "uni_modules/uni-notice-bar/package.json",
+      "size": 1852,
+      "sha256": "3fee3f8c5ba177503e11a60fe9130b6e1effac95e3c953c357785bb75ef4dd07"
+    },
+    {
+      "path": "uni_modules/uni-notice-bar/readme.md",
+      "size": 326,
+      "sha256": "d1ee62f9ccb17b7cd0f31f0e89928f7cdee7b89df394a4898468d230e7b9dae0"
+    },
+    {
+      "path": "uni_modules/uni-number-box/changelog.md",
+      "size": 1681,
+      "sha256": "33e380e8a7af461f49b13b9f9326ffe93511b72e6e356fb1060ad776905f47b1"
+    },
+    {
+      "path": "uni_modules/uni-number-box/components/uni-number-box/uni-number-box.vue",
+      "size": 5594,
+      "sha256": "44bdac0116452a785c11fba4dde973d2a3bc26d57c9eaeb0630265c0e562d10e"
+    },
+    {
+      "path": "uni_modules/uni-number-box/package.json",
+      "size": 1863,
+      "sha256": "c63e51210ade766624a64eab0dd1f23192adf1763bde3c2c1233831cd721429e"
+    },
+    {
+      "path": "uni_modules/uni-number-box/readme.md",
+      "size": 349,
+      "sha256": "1a1a56cb7b69f71d0a657e00ed300288b29be9ec8d445c2d9bbf5b272d95ad4e"
+    },
+    {
+      "path": "uni_modules/uni-pagination/changelog.md",
+      "size": 1306,
+      "sha256": "58c31c935d6a95ba3b9ab7d08369fba8aee2dd3b88a9d2f59be74566a648ab75"
+    },
+    {
+      "path": "uni_modules/uni-pagination/components/uni-pagination/i18n/en.json",
+      "size": 126,
+      "sha256": "5276f89ebbd554dc2d26ba6a8bbf5b9e737e7d021744792fb673a3c3f247a974"
+    },
+    {
+      "path": "uni_modules/uni-pagination/components/uni-pagination/i18n/es.json",
+      "size": 139,
+      "sha256": "d48516e7228a0adc7820e8e411243e260cecef139bfa09446f04e96dc76a567a"
+    },
+    {
+      "path": "uni_modules/uni-pagination/components/uni-pagination/i18n/fr.json",
+      "size": 142,
+      "sha256": "146a19319b3ebbe32718722ebb7effeee96aedf38dc97e608f427ae878684d72"
+    },
+    {
+      "path": "uni_modules/uni-pagination/components/uni-pagination/i18n/index.js",
+      "size": 238,
+      "sha256": "19c60ed0ef6f122a7e370b448b4384da61d1170b8ea7b956ddca95e7fa8d87e4"
+    },
+    {
+      "path": "uni_modules/uni-pagination/components/uni-pagination/i18n/zh-Hans.json",
+      "size": 133,
+      "sha256": "30ced14b76fea846ecae55c391ba6860b1a08ca176ec1130a9371eb17725b5ec"
+    },
+    {
+      "path": "uni_modules/uni-pagination/components/uni-pagination/i18n/zh-Hant.json",
+      "size": 133,
+      "sha256": "14a3fe25d71067b0a749866e23ac532875c7f07e62414ba7b7a489e98c901bf3"
+    },
+    {
+      "path": "uni_modules/uni-pagination/components/uni-pagination/uni-pagination.vue",
+      "size": 11700,
+      "sha256": "22ef702c373baf079d9149defc3063c6c78909b35c5a210d19d615b00dc2bafb"
+    },
+    {
+      "path": "uni_modules/uni-pagination/package.json",
+      "size": 1807,
+      "sha256": "48f9e127f95cd35c49ddfa4f1366d4367c9dd12635bbdc59c736f4052e3ad6f4"
+    },
+    {
+      "path": "uni_modules/uni-pagination/readme.md",
+      "size": 362,
+      "sha256": "55dd5d49c3b65331d9a9edab461783455870214cbf316d02caf288c969f40c03"
+    },
+    {
+      "path": "uni_modules/uni-popup/changelog.md",
+      "size": 3907,
+      "sha256": "2a67abb4a6af5e1e35304cb354200ea263c5b57f0ef68e59853e5a1c180faf9a"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup-dialog/keypress.js",
+      "size": 1155,
+      "sha256": "32abd331f6edf31ae89de007f635017a24580aafbb2bb31213514ad4ca518205"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup-dialog/uni-popup-dialog.vue",
+      "size": 6601,
+      "sha256": "08ecdebf196d115ce171c86d34889d9c10da769bf6ba978af4f2434b77b63d9c"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup-message/uni-popup-message.vue",
+      "size": 2773,
+      "sha256": "cb10a1cbd52c71c3dd0dd5588ff29ecadb4fc7908edf8e57b959b685fbe19faf"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup-share/uni-popup-share.vue",
+      "size": 4079,
+      "sha256": "cd64bf98952aeb5f87c7a940af597badc3b60d648a5a59f3f38e3de3c2d8d0e5"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/i18n/en.json",
+      "size": 171,
+      "sha256": "48cdd0fd3b2d54424f7ca41cad66be4e3e7186a654a3391229a02f141b6c5509"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/i18n/zh-Hans.json",
+      "size": 177,
+      "sha256": "8a43606ab1b3f5cd0d3239a5b7fec9810abc84dfa8c15b8dcf66c188cf435d01"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/i18n/zh-Hant.json",
+      "size": 175,
+      "sha256": "06e04dd8d02d7d360d7dfa8ee384fb82ccb8c231d7a02d0f39ec1b50ef2c325c"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/keypress.js",
+      "size": 1164,
+      "sha256": "f0cf03192f170041f686b3b915b7c34334259e511022cbc309ab51b1620cf1d9"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/popup.js",
+      "size": 444,
+      "sha256": "5cc51e60232f25d49fe2631241c7dcb3586a3ff6791a9e2e865032a109937cb4"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/uni-popup.uvue",
+      "size": 1949,
+      "sha256": "aa9d63b64efef2c828360ae16ca0f978461a739f18d39a9c7e9ed82387467fc6"
+    },
+    {
+      "path": "uni_modules/uni-popup/components/uni-popup/uni-popup.vue",
+      "size": 12549,
+      "sha256": "4aae77cf036de7dc0bf98dee6ee3032e1b3f6d3b3c05479e422fa7b87a7d81ad"
+    },
+    {
+      "path": "uni_modules/uni-popup/package.json",
+      "size": 1713,
+      "sha256": "83f32e09f8f5f7a88cf7e3cf2ebaaaf09cd3c5282f076e5a4ea4f0331e23224b"
+    },
+    {
+      "path": "uni_modules/uni-popup/readme.md",
+      "size": 405,
+      "sha256": "8606e63b438c4a535ffe12c1987e7998e73a14c40ca7d2ea29178e204b9fe64d"
+    },
+    {
+      "path": "uni_modules/uni-rate/changelog.md",
+      "size": 1142,
+      "sha256": "6347b909f8fc361e6c68dc5d096cd23040544609017092a9b26482902e69b03a"
+    },
+    {
+      "path": "uni_modules/uni-rate/components/uni-rate/uni-rate.vue",
+      "size": 9112,
+      "sha256": "e16db8c57e789b87e291301a8b9f70de80534db7dce15bb5dd0905be469cc43a"
+    },
+    {
+      "path": "uni_modules/uni-rate/package.json",
+      "size": 1849,
+      "sha256": "7c6711490e9bc8152410d09475ed92c275708b45c4aac4ead191c0426ac43a89"
+    },
+    {
+      "path": "uni_modules/uni-rate/readme.md",
+      "size": 378,
+      "sha256": "1780bd926f05fbec05cba7c4cf312ce2da152c594d13e02fa32c7cdbb3fcdc1d"
+    },
+    {
+      "path": "uni_modules/uni-row/changelog.md",
+      "size": 604,
+      "sha256": "58f66b7da0b778350633e843ad81795fc946cf75c21235dc35323fa8df14372a"
+    },
+    {
+      "path": "uni_modules/uni-row/components/uni-col/uni-col.vue",
+      "size": 8028,
+      "sha256": "e86964c1dc68636c2432ed980182b28ae09a213ed7d458e97fdd64cce14eb4e4"
+    },
+    {
+      "path": "uni_modules/uni-row/components/uni-row/uni-row.vue",
+      "size": 4138,
+      "sha256": "2724b198070dc7155c4130239133ba698165794b7b50c43aadcecf04a5e570f5"
+    },
+    {
+      "path": "uni_modules/uni-row/package.json",
+      "size": 1864,
+      "sha256": "7c5121234879604b3462252dadc3d9d6558f46c857946de0769236ba341d60e5"
+    },
+    {
+      "path": "uni_modules/uni-row/readme.md",
+      "size": 384,
+      "sha256": "e592513a00a265e3a7f07fe228d7335ad9136bfc5ae55a05359adff9f2fb606a"
+    },
+    {
+      "path": "uni_modules/uni-scss/changelog.md",
+      "size": 247,
+      "sha256": "2061aaac17cdbedb1fa4f40fbc4f9f05450994f3381b79e2f8785b52801805d7"
+    },
+    {
+      "path": "uni_modules/uni-scss/index.scss",
+      "size": 32,
+      "sha256": "3a6f0b78ecd95539185182c0790bbf721cd112d7439498db306ae08fbc220ac6"
+    },
+    {
+      "path": "uni_modules/uni-scss/package.json",
+      "size": 1840,
+      "sha256": "b5a4eb2bdb96d2983cf9c3ea75072949960d24ddb0f9395c0cf4845e9793d7c8"
+    },
+    {
+      "path": "uni_modules/uni-scss/readme.md",
+      "size": 371,
+      "sha256": "118f6118c3d430e3e98e172ffec452fef8ef3d29b306521b0bf8b5449cc0cb40"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/index.scss",
+      "size": 244,
+      "sha256": "f7b2a1f877f8ec762c83217352d3622384c50ab23ce2cc614107880500786ee2"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/setting/_border.scss",
+      "size": 51,
+      "sha256": "cbd7c6c9aa58e2eac05af6e666ba3877362e309bc0573dac2a7c5abebcb3c004"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/setting/_color.scss",
+      "size": 1557,
+      "sha256": "286e32c88622cc312352c9ae70a76f13aeb78466479ef7895ac5a445f6dc9ae4"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/setting/_radius.scss",
+      "size": 1485,
+      "sha256": "467c72c16a74070b05d41fbdefc3761dab280781e5d5c84353f09f6914ee22a0"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/setting/_space.scss",
+      "size": 1269,
+      "sha256": "554ab14ec187ddd6f45c02cdc4791e9620caac9537f46ddfb59b686f2ded5799"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/setting/_styles.scss",
+      "size": 3420,
+      "sha256": "a48ddd73f2260f951d8d09315bdbb7e64837a41e80902e5104dea451ac65ca34"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/setting/_text.scss",
+      "size": 418,
+      "sha256": "64bcba78230d1c31fee6163e4038eedffa40c4fd560383b5439c8606ba33265a"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/setting/_variables.scss",
+      "size": 3899,
+      "sha256": "49cd060631b08bf89430856514780f8eb92aa243f87188831fa82c399d7e31c4"
+    },
+    {
+      "path": "uni_modules/uni-scss/styles/tools/functions.scss",
+      "size": 659,
+      "sha256": "37268968fa2e1f16660e0a8f68a9ceca91ffa483555bd282a143470b62b9ff40"
+    },
+    {
+      "path": "uni_modules/uni-scss/theme.scss",
+      "size": 672,
+      "sha256": "c3942b823f1baf9721abae59fcf7c0eb3fd6ee51f81e29ade9ae5c249d12e384"
+    },
+    {
+      "path": "uni_modules/uni-scss/variables.scss",
+      "size": 1826,
+      "sha256": "ddcc3161e81c1b37393c14f0ce1afee9cdab2c4546abdac132f89a0cc125ad98"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/changelog.md",
+      "size": 1962,
+      "sha256": "3011c6d7f48e3e82701d75c8b055179a6e5f05d50ed66f4ff489a000bd5a17dd"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/components/uni-search-bar/i18n/en.json",
+      "size": 96,
+      "sha256": "a07d33ab37a7658fc54952e026afbf17626644a4d93990413155c955e3d289f4"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/components/uni-search-bar/i18n/index.js",
+      "size": 170,
+      "sha256": "a108d3404b8850aa986608614eb5a767962206e4d16a4628a756516c5ca6cec8"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/components/uni-search-bar/i18n/zh-Hans.json",
+      "size": 99,
+      "sha256": "756b9d35221ff8dd9a3ec8bfc03f952efc5bd5f1947430ca87dde7e95ae38c98"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/components/uni-search-bar/i18n/zh-Hant.json",
+      "size": 99,
+      "sha256": "8b5dd831b54937cb10f66d3231a34d8ba6aa7f00f1f23b7c158dd1177ab20c1a"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/components/uni-search-bar/uni-search-bar.vue",
+      "size": 7613,
+      "sha256": "af99e60de9914cb7aa5d21fda0a1cb312fabdf720d5adc034691520ac7564890"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/package.json",
+      "size": 1834,
+      "sha256": "1d65d306dc4f98c046eabdc63c4a6e693fcaa272e1639a1ec564ef086e9b8708"
+    },
+    {
+      "path": "uni_modules/uni-search-bar/readme.md",
+      "size": 324,
+      "sha256": "e2dfe2b71aabb08d4da7b467e1b65ac9028d163e236f4e362f5f0bf83e658689"
+    },
+    {
+      "path": "uni_modules/uni-section/changelog.md",
+      "size": 39,
+      "sha256": "ece264d986fe8f99fcdde853a4119c5c29e3e8f1a5cd59132b3125cd32add864"
+    },
+    {
+      "path": "uni_modules/uni-section/components/uni-section/uni-section.vue",
+      "size": 3867,
+      "sha256": "c2d37d887bd5b96b09e91d3c383f5a8bc763bbbaab8da5a3273e9105c80b5055"
+    },
+    {
+      "path": "uni_modules/uni-section/package.json",
+      "size": 1779,
+      "sha256": "06a03a4160c494ce13f595991913af7c2efeb6950135c2f5b71b14b828144aba"
+    },
+    {
+      "path": "uni_modules/uni-section/readme.md",
+      "size": 352,
+      "sha256": "8e5d62adc49ed1a43f98399ac4abd16a218c54885676d1e50395ffe72d682710"
+    },
+    {
+      "path": "uni_modules/uni-segmented-control/changelog.md",
+      "size": 876,
+      "sha256": "643b5448b321eadd20ac6cbfacee94bdf766eb5d0dbf23f02cd01d0e10b6d01d"
+    },
+    {
+      "path": "uni_modules/uni-segmented-control/components/uni-segmented-control/uni-segmented-control.vue",
+      "size": 3914,
+      "sha256": "0d0fd556806ad4bc8ee7a25912be236599d91b9d015020c5d8b5e21c1eb35a56"
+    },
+    {
+      "path": "uni_modules/uni-segmented-control/package.json",
+      "size": 1860,
+      "sha256": "8ad1e1bdf29d31725d561682bc96f94860f8dfd6f1985e85ae637b6d0cd8a15d"
+    },
+    {
+      "path": "uni_modules/uni-segmented-control/readme.md",
+      "size": 362,
+      "sha256": "3726f0896c75a2e928270950ea71ce063f3689edd77bb508eb699319fdce5d80"
+    },
+    {
+      "path": "uni_modules/uni-steps/changelog.md",
+      "size": 888,
+      "sha256": "3187296d5e8efb5a6dd17b0ba2e3b3b4a22610b3d5b8624e673fc93bd3b3c5c2"
+    },
+    {
+      "path": "uni_modules/uni-steps/components/uni-steps/uni-steps.vue",
+      "size": 6848,
+      "sha256": "024a50c4ef52f2e13706fcce4bd4150bcacc9094238604aac66ffa83c49b48f0"
+    },
+    {
+      "path": "uni_modules/uni-steps/package.json",
+      "size": 1830,
+      "sha256": "ea7061f8d38cc29564a9f4ebba436df8a1a88a6e7c3b05242691a6940df59f1a"
+    },
+    {
+      "path": "uni_modules/uni-steps/readme.md",
+      "size": 322,
+      "sha256": "765f4cbd6dc856ac5b0826ba88c49b606d5956f8918f45e7c6f2a931c4c779c9"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/changelog.md",
+      "size": 2380,
+      "sha256": "546248b73b1ad1fae124afc886eba772595ee01b4c574a512a9e546d3b4637bb"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/bindingx.js",
+      "size": 6835,
+      "sha256": "1dc31374c985330f44fdff422484b49efbf36bacc2ee398529e2663aaef6d69e"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/isPC.js",
+      "size": 323,
+      "sha256": "954d31e209ebc523d1bacfe7da7b72314372d281cb61cad11557123a126bcb5c"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/mpalipay.js",
+      "size": 4260,
+      "sha256": "c478418c8f224c4e33c198e1d0717641667615f4b5b1de7b422c7a5a816ed90e"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/mpother.js",
+      "size": 5895,
+      "sha256": "5256c7e1c2433d9e57f645f3e1a634dd262622cc07b4a640f941a7c0477960ec"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/mpwxs.js",
+      "size": 1620,
+      "sha256": "10f91c37c51fdb63aac8e6319dc17bf5a381e05c81c5b6d0be3756e77fb19f23"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/render.js",
+      "size": 7260,
+      "sha256": "f1750a33d80e0e7c4456d392d426e9d64dfdec6ec281cc4d9b33f4ccf5d325e1"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/uni-swipe-action-item.vue",
+      "size": 10827,
+      "sha256": "238bb3d990e653fdaacee26d7cd3522da9dc67a23e443b8c3c78b166beeb144c"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action-item/wx.wxs",
+      "size": 8437,
+      "sha256": "59e97b900786a0b060931f1663b7a194dc6bd5d3bcc6ab7d028fa33aa89c9ae2"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/components/uni-swipe-action/uni-swipe-action.vue",
+      "size": 1316,
+      "sha256": "093f8aa0c760423b2343df4fd8813f9ae7b92ba234d002fa9d06f8fef21f084b"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/package.json",
+      "size": 1592,
+      "sha256": "a9f4680edd6dd7487589a7e03c793ec6f2519779132fa65f6d6b3db425bcf5f8"
+    },
+    {
+      "path": "uni_modules/uni-swipe-action/readme.md",
+      "size": 366,
+      "sha256": "2fdbf76e9b607f07e5321010233c22fd6f21d9584882b98e5ba61aa13c06ef4c"
+    },
+    {
+      "path": "uni_modules/uni-swiper-dot/changelog.md",
+      "size": 714,
+      "sha256": "1e10cd4e63d509bfe338398dcf12b76d2508e3308b29fad160acb63c083ceee0"
+    },
+    {
+      "path": "uni_modules/uni-swiper-dot/components/uni-swiper-dot/uni-swiper-dot.vue",
+      "size": 6597,
+      "sha256": "139bc0f0e6cc5dc54832939e2713348145337cedfae0b05029b8b765b655a2c7"
+    },
+    {
+      "path": "uni_modules/uni-swiper-dot/package.json",
+      "size": 1834,
+      "sha256": "0aa1cd6a6a051406bafbfdc5f96b3c91c14bb270e3a496b1591c8d62c64a92d2"
+    },
+    {
+      "path": "uni_modules/uni-swiper-dot/readme.md",
+      "size": 337,
+      "sha256": "13dbfc0ddfc2cdc10933123a77986122d103147f3c3ba3b61f40e015690a20d9"
+    },
+    {
+      "path": "uni_modules/uni-table/changelog.md",
+      "size": 1381,
+      "sha256": "c7466b243d2521201452d447d1ca48715fb4ad8f0fab8f632ccfc67c4897a29d"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-table/uni-table.vue",
+      "size": 10486,
+      "sha256": "37d59e10dbcd14fdf8ad4b6538b4770a1d9609b952bdd6631dcfcedb015326c0"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-tbody/uni-tbody.vue",
+      "size": 362,
+      "sha256": "9f390bf393273fd3a4af2d20f69b82fd086b30f320853c846544f5d34837f21e"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-td/uni-td.vue",
+      "size": 1891,
+      "sha256": "ccc741ec7d27f418b3acd7f5eb2d29a718cea67721300b0d61c8cc4a916e0e4a"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-th/filter-dropdown.vue",
+      "size": 11128,
+      "sha256": "dd725f42d3651ef943b6e77babc1f17c4b7d278123bedff6816f23cd342780f4"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-th/uni-th.vue",
+      "size": 6912,
+      "sha256": "6a6938f7c652de0c5c4e007fab782075b4e3147c8a68c73bf6436d547cfa5e59"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-thead/uni-thead.vue",
+      "size": 2865,
+      "sha256": "eb00a97ae02c68fe06d9dd03adb7b61d5864502d6a0b79a8ca280e95ea25c3c1"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-tr/table-checkbox.vue",
+      "size": 3561,
+      "sha256": "a6c071cbe71f1510ae92abc0e351decdafed5955164063ed86bb0e9b6fc26b08"
+    },
+    {
+      "path": "uni_modules/uni-table/components/uni-tr/uni-tr.vue",
+      "size": 4528,
+      "sha256": "558d976bf291168d3bd8eae144bbf8af768c259a6cec7251de5a22f6a4eda42c"
+    },
+    {
+      "path": "uni_modules/uni-table/i18n/en.json",
+      "size": 285,
+      "sha256": "2f04bc4a0ac909ec01052a989e8263a7f1830115b3f74890722d49d05fe7fd4c"
+    },
+    {
+      "path": "uni_modules/uni-table/i18n/es.json",
+      "size": 290,
+      "sha256": "86c7fae8f8b465d08ad88ee4d970e9c7bc7df23668c742328f6e432df200c1c3"
+    },
+    {
+      "path": "uni_modules/uni-table/i18n/fr.json",
+      "size": 303,
+      "sha256": "192db887a054e7ba99670626d77d8e1452b0e8d50f9963910fa8a6e6fac4349c"
+    },
+    {
+      "path": "uni_modules/uni-table/i18n/index.js",
+      "size": 238,
+      "sha256": "19c60ed0ef6f122a7e370b448b4384da61d1170b8ea7b956ddca95e7fa8d87e4"
+    },
+    {
+      "path": "uni_modules/uni-table/i18n/zh-Hans.json",
+      "size": 278,
+      "sha256": "4b0a8dcabefa2efd07c3746ef9d6ebe7c57ea7b81706f39b14c83e6712fc5367"
+    },
+    {
+      "path": "uni_modules/uni-table/i18n/zh-Hant.json",
+      "size": 278,
+      "sha256": "6366cdc86ca502b6c801f4654c9bd9171ab280decf128be6d019d0c3c3046631"
+    },
+    {
+      "path": "uni_modules/uni-table/package.json",
+      "size": 1795,
+      "sha256": "d5a40b6727ce787346cb58b95c3f8898b0ac080b1705d192ad57e0f6557ca09c"
+    },
+    {
+      "path": "uni_modules/uni-table/readme.md",
+      "size": 329,
+      "sha256": "a3c8fed900481b917f3d2fc64af5e3672056063cabae77abc6607a13a3f39896"
+    },
+    {
+      "path": "uni_modules/uni-tag/changelog.md",
+      "size": 1187,
+      "sha256": "79bb87289e8e50586b33f27d47150772e51201ef4cbae26b598191ebbf1cc9f0"
+    },
+    {
+      "path": "uni_modules/uni-tag/components/uni-tag/uni-tag.vue",
+      "size": 5202,
+      "sha256": "20aea2450b74a94ed87bf640aabb643155116cdb8f9d297952e646ce2e67760c"
+    },
+    {
+      "path": "uni_modules/uni-tag/package.json",
+      "size": 1811,
+      "sha256": "f79ecd1b99b61d370f9fd45d6b3519a34a64e311aa8f97089517a57c598a6d45"
+    },
+    {
+      "path": "uni_modules/uni-tag/readme.md",
+      "size": 364,
+      "sha256": "2c7b29858855ea2f2f0683a1b7c31638cff18a01f4091fc0e0ce422af8398b20"
+    },
+    {
+      "path": "uni_modules/uni-test/changelog.md",
+      "size": 913,
+      "sha256": "63e914d9cc18b4e9820adf5b30a4312defd947122c96743d0cf0600645c39870"
+    },
+    {
+      "path": "uni_modules/uni-test/components/uni-test/uni-test.vue",
+      "size": 293,
+      "sha256": "a64302dadbfb5fd3c7d940e5688fb571c1ba6801dc475320137a1379c4a7d8d6"
+    },
+    {
+      "path": "uni_modules/uni-test/package.json",
+      "size": 1731,
+      "sha256": "b1d98aaeadd9fa307006bd56436c18303d8d28cbae5f5e40a211010a87a75fb7"
+    },
+    {
+      "path": "uni_modules/uni-test/readme.md",
+      "size": 288,
+      "sha256": "d49749211067721a82d349665c6a7ffd915e70c18812ac9aa28c99e15c8c66ad"
+    },
+    {
+      "path": "uni_modules/uni-title/changelog.md",
+      "size": 511,
+      "sha256": "15762514faaf17e11eb899ae2087ec962090e0e317e1e91fdec896e10016b6b3"
+    },
+    {
+      "path": "uni_modules/uni-title/components/uni-title/uni-title.vue",
+      "size": 3427,
+      "sha256": "505ba9822dea2ddec6ec3ec42c59ea30095cd623c87667c6fdaf4cd1257b82df"
+    },
+    {
+      "path": "uni_modules/uni-title/package.json",
+      "size": 1919,
+      "sha256": "9cfef193780821af6afc1fd2595d62b15dae804e0d21741a0e3bbe73665d87ef"
+    },
+    {
+      "path": "uni_modules/uni-title/readme.md",
+      "size": 420,
+      "sha256": "78f0c87523f66ba1c1d56614efcbed14adbd7ab25e70786070d936620651aec8"
+    },
+    {
+      "path": "uni_modules/uni-tooltip/changelog.md",
+      "size": 537,
+      "sha256": "1ce7582b9190a17d347a65001b1f0920192600693ddea8ed19045f8252d04f16"
+    },
+    {
+      "path": "uni_modules/uni-tooltip/components/uni-tooltip/uni-tooltip.vue",
+      "size": 2153,
+      "sha256": "756bc3ab1d38c31c9666bcb490c3cbbaebf29552bf747a914789b7346c39fa65"
+    },
+    {
+      "path": "uni_modules/uni-tooltip/package.json",
+      "size": 1757,
+      "sha256": "ca38c2c5afcdcb90724132349fa5900ce7fea750d7879614d45f9f5ffc92f801"
+    },
+    {
+      "path": "uni_modules/uni-tooltip/readme.md",
+      "size": 418,
+      "sha256": "95aaeeda72e43ae2d26d50e87807fca447a40e36c3c9098b6bbd0195ace56c34"
+    },
+    {
+      "path": "uni_modules/uni-transition/changelog.md",
+      "size": 1155,
+      "sha256": "a100e1891dd37a8512407c7bd560c7092f0c9300be32ad7630da739cf1c1eafa"
+    },
+    {
+      "path": "uni_modules/uni-transition/components/uni-transition/createAnimation.js",
+      "size": 3412,
+      "sha256": "9fb91e895e3a0dd883cad5ffe342c2d25f03db05807d1f720508f81315fb0893"
+    },
+    {
+      "path": "uni_modules/uni-transition/components/uni-transition/uni-transition.vue",
+      "size": 7189,
+      "sha256": "9faec7bd74fdcbdaeb737eeb15c7eed357a9debe280f70101a0df7039e568c5f"
+    },
+    {
+      "path": "uni_modules/uni-transition/package.json",
+      "size": 1799,
+      "sha256": "3ccfcb10f75128acda842e54b3e066145a22b6dbbe0ebccabd2063165e25d62c"
+    },
+    {
+      "path": "uni_modules/uni-transition/readme.md",
+      "size": 324,
+      "sha256": "0c06f16576529731d25f83cad4d11dcf9323e08eadfba5efe5abfd8580f01564"
+    },
+    {
+      "path": "uni_modules/uni-ui/changelog.md",
+      "size": 40614,
+      "sha256": "c2f3ddd61edf465996dbcfbd61490d2d1946653a97e092a176a3f9d197a9f7ff"
+    },
+    {
+      "path": "uni_modules/uni-ui/components/uni-ui/uni-ui.vue",
+      "size": 108,
+      "sha256": "5c440d1cc30477dc57b3d3b13758da305f2093dad5e58e51a3e46a9a09c73164"
+    },
+    {
+      "path": "uni_modules/uni-ui/package.json",
+      "size": 2807,
+      "sha256": "99a3d52baef868692ab9e400c0128a844200099b7f0e58b0c7716fdc5cad24ea"
+    },
+    {
+      "path": "uni_modules/uni-ui/readme.md",
+      "size": 12864,
+      "sha256": "a47beac1f7285e59d757acdb33a5ddc2fde114d9ff5f30f56b0358b208ee2e3b"
+    },
+    {
+      "path": "utils/index.js",
+      "size": 503,
+      "sha256": "7c6c7af843ec739366ddf855f6d61ceb4d3b8d75e2ecdd59fceaa3a89c4f3341"
+    },
+    {
+      "path": "verification.config.json",
+      "size": 1681,
+      "sha256": "79d0ecdc47c94818adbd812c60008f3efc917ff642b804bc91263121fdc893dd"
+    },
+    {
+      "path": "vite.config.js",
+      "size": 407,
+      "sha256": "a40d6efe3a1b55f4a895e168c55a1fc4fb0cc648c8b4a4d773bd7af7201989e4"
+    }
+  ],
+  "generatedFiles": [
+    {
+      "path": ".gitattributes",
+      "size": 69,
+      "sha256": "26c0b8c374bec8340a39b78a0a4f425a57014bee25e72c5f4214ae9ed14fae9f"
+    },
+    {
+      "path": "README.md",
+      "size": 2055,
+      "sha256": "c8fbb4456e6d060d1ddd21189eab4a556fa131ca7fb6e8c9fdf76b7c76a77e3a"
+    },
+    {
+      "path": ".gitignore",
+      "size": 238,
+      "sha256": "a79451400e9870b5bd80c847b91372e085a1e133e0c378d3a8cd3561e7cbf907"
+    }
+  ]
+}

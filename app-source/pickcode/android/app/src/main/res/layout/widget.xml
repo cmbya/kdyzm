@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="8dp" android:background="@drawable/widget_background">
+    <LinearLayout android:id="@+id/widget_header" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:paddingBottom="4dp">
+        <TextView android:id="@+id/widget_title" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:text="@string/widget_title" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" android:textSize="14sp" android:textColor="#0867FF" />
+        <TextView android:id="@+id/widget_count" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:maxLines="1" android:includeFontPadding="false" android:textSize="11sp" android:textColor="#536073" />
+    </LinearLayout>
+    <LinearLayout android:id="@+id/widget_rows" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:orientation="vertical" android:gravity="top" />
+    <TextView android:id="@+id/widget_empty" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:gravity="center" android:maxLines="2" android:ellipsize="end" android:includeFontPadding="false" android:text="@string/widget_empty" android:textSize="12sp" android:textColor="#536073" />
+    <LinearLayout android:id="@+id/widget_footer" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:paddingTop="4dp" android:paddingBottom="4dp">
+        <TextView android:id="@+id/widget_status" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" android:text="@string/widget_start" android:textSize="11sp" android:textColor="#536073" />
+        <TextView android:id="@+id/widget_refresh" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minWidth="36dp" android:gravity="end|center_vertical"
+            android:paddingStart="8dp" android:includeFontPadding="false" android:text="@string/widget_refresh" android:textSize="12sp" android:textColor="#0867FF" />
+    </LinearLayout>
+</LinearLayout>

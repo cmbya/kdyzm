@@ -2,11 +2,11 @@
 
 手机优先读取已绑定后台内置的 `app-update.json`，后台缺包、不可用或没有更新版本时读取本仓库Latest Release，下载安装包后交给Android确认。更新不依赖Docker账号或Cookie。App 3.1.4首次需手动覆盖安装，后续使用「我的 → 检查更新」。旧私人版不要卸载；覆盖安装保留绑定、短信和领取记录。
 
-当前App版本标签为 `app-v3.1.33`，服务端为 `3.1.29`，插件为 `1.2.0`。本轮修复承运商泛称重复包裹、未分类站点重识别与匹配，新增未取优先/同柜排序、C取件卡和通知逐条关闭，详见[本轮升级说明](pickup-refinements-3.1.33.md)。App保留包裹单页总览、取件自动监测、采集状态一致性、启动缓存和后台下发的可信局域网HTTPS地址，更新检查与下载保留摘要及签名校验。配置与限制见 [缓存与局域网说明](local-cache-and-lan.md)。稳定App Release公开后会触发容器流水线重建，内置刚发布的升级包；历史App不覆盖当前main镜像。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。已有NAS需拉取新镜像并重建容器，保留数据卷、加密密钥和绑定。固定下载入口：
+当前App版本标签为 `app-v3.1.34`，服务端为 `3.1.30`，插件为 `1.2.0`。本轮完成 B 版细腻柔雾全界面改版与信息整理，详见[本轮升级说明](app-silver-frost-3.1.34.md)。App保留包裹单页总览、取件自动监测、采集状态一致性、启动缓存和后台下发的可信局域网HTTPS地址，更新检查与下载保留摘要及签名校验。配置与限制见 [缓存与局域网说明](local-cache-and-lan.md)。稳定App Release公开后会触发容器流水线重建，内置刚发布的升级包；历史App不覆盖当前main镜像。Latest Release专用于稳定App更新，不把Docker标签创建为Latest Release。已有NAS需拉取新镜像并重建容器，保留数据卷、加密密钥和绑定。固定下载入口：
 
 `https://github.com/zsdd2/kdyzm/releases/latest/download/app-update.json`
 
-本轮App版本为 `3.1.33` / `30133`，沿用原签名。按下方步骤发布为Latest后，旧App即可检查并下载更新。
+本轮App版本为 `3.1.34` / `30134`，沿用原签名。按下方步骤发布为Latest后，旧App即可检查并下载更新。
 
 自App3.1.18起优先从已绑定后台检查与下载，后台缺包、不可用或版本不高于已安装App时查询GitHub；内置目录由构建期脚本完整校验。详见 [后台优先升级](backend-app-updates-3.1.15.md)。
 
@@ -27,7 +27,7 @@
    node scripts/app-release.mjs publish --dir '<输出目录>' --target '<本仓库已推送的40位提交SHA>' --previous-apk '<上一版APK绝对路径>' --build-tools 'F:/Android/Sdk/build-tools/35.0.0'
    ```
 
-   先创建草稿、上传三份文件、重新下载逐字节校验，再发布为Latest。网络中断后可用同一命令继续匹配草稿；公开版本不会覆盖，错误草稿内容不自动覆盖。App源码仍保留在原工作区，此仓库的App Release提供安装包与更新清单，源码压缩包是服务端源码。
+   先创建草稿、上传三份文件、重新下载逐字节校验，再发布为Latest。网络中断后可用同一命令继续匹配草稿；公开版本不会覆盖，错误草稿内容不自动覆盖。App生产源码已按白名单发布于 `app-source/pickcode`；Release提供安装包与更新清单，GitHub自动源码压缩包包含仓库公开内容。真实测试样例和私有开发历史不公开。
 5. 发布后匿名下载Latest清单和APK，核对大小/SHA256，并在旧版手机测试检查、下载、授权和覆盖安装。不要将本机浏览器或JVM测试视为OPPO真机安装验收。
 
 ## 签名与安装边界

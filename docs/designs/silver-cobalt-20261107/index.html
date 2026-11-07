@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>取件助手 · B 版细腻柔雾全案</title>
+  <link rel="stylesheet" href="design.css">
+</head>
+<body>
+  <aside class="catalog" aria-label="设计稿目录">
+    <div class="brand"><span class="brand-icon" aria-hidden="true">↗</span><div>取件助手<small>界面设计全案 / 2026.11</small></div></div>
+    <div class="catalog-intro">B · 细腻柔雾<span>银灰磨砂与钴蓝，贯穿每一次取件。</span></div>
+    <label class="catalog-search">查找页面<input id="scene-search" type="search" placeholder="页面、弹层或状态"></label>
+    <nav id="scene-nav"></nav>
+    <div class="catalog-bottom">B 版方向已选定 · 全案源稿<br>全部为合成示例，不连接真实账号。</div>
+  </aside>
+  <main class="workspace">
+    <header class="workbar">
+      <div class="work-title"><span class="eyebrow">PICKCODE / DESIGN SYSTEM</span><h1>每一屏，都清晰有序。</h1></div>
+      <div class="work-actions"><button id="overview-button" class="tool-button">设计总览</button><div class="sizes" aria-label="预览宽度"><button data-width="360">360</button><button data-width="390" aria-pressed="true">390</button><button data-width="430">430</button></div></div>
+    </header>
+    <label class="mobile-select">查看页面<select id="scene-select"></select></label>
+    <div class="review-stage" id="review-stage">
+      <section class="preview-column" aria-label="手机界面预览"><div id="phone-host"></div><div class="preview-caption"><span id="scene-position"></span><span>可点击操作 · 仅演示</span></div></section>
+      <aside class="design-notes"><div class="eyebrow" id="scene-group"></div><h2 id="scene-title"></h2><p id="scene-description"></p><div class="note-rule"></div><h3>这套界面的共同规则</h3><ul><li>取件码与柜号优先，操作靠右。</li><li>商品约十字，缺失字段保留对齐槽位。</li><li>平台只出现一次，详细证据按需展开。</li><li>所有状态同时用文字表达。</li></ul><div class="route-note"><span>对应现有页面 / 组件</span><code id="scene-route"></code></div><div class="review-hint">这里的页面拆分是设计建议。正式 App 仍保持原样，审阅后再进入 Figma 与实施。</div><div class="scene-pager"><button id="previous-scene" class="tool-button">← 上一页</button><button id="next-scene" class="tool-button">下一页 →</button></div></aside>
+    </div>
+    <section id="overview" class="overview" hidden aria-label="设计总览"></section>
+  </main>
+  <div id="prototype-toast" role="status" aria-live="polite"></div>
+  <script src="ui.js"></script>
+  <script src="pickup.js"></script>
+  <script src="settings.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

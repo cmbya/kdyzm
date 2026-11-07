@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/row_root"
+    android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+    android:paddingTop="3dp" android:paddingBottom="3dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/row_cabinet" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:maxWidth="64dp" android:layout_marginEnd="6dp" android:paddingStart="4dp" android:paddingEnd="4dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+            android:background="@drawable/widget_cabinet_background" android:textColor="#077370" android:textSize="10sp" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" android:visibility="gone" />
+        <TextView android:id="@+id/row_code" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:maxLines="2" android:includeFontPadding="false" android:textSize="15sp" android:fontFamily="monospace" android:textColor="#172233" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+        <TextView android:id="@+id/row_company" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+            android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" android:textSize="11sp" android:textColor="#536073" />
+        <TextView android:id="@+id/row_pick" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="30dp"
+            android:paddingTop="4dp" android:paddingBottom="4dp" android:gravity="end|center_vertical" android:includeFontPadding="false"
+            android:text="@string/widget_picked" android:textColor="#0867FF" android:textSize="12sp" />
+    </LinearLayout>
+    <TextView android:id="@+id/row_address" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" android:textSize="11sp" android:textColor="#536073" />
+    <TextView android:layout_width="match_parent" android:layout_height="1dp" android:background="#EEF1F5" />
+</LinearLayout>

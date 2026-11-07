@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:paddingTop="2dp" android:paddingBottom="2dp">
+        <LinearLayout android:id="@+id/large_row_copy" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginEnd="8dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <TextView android:id="@+id/large_row_cabinet" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:maxWidth="64dp" android:layout_marginEnd="6dp" android:paddingStart="4dp" android:paddingEnd="4dp" android:paddingTop="3dp" android:paddingBottom="3dp"
+                    android:background="@drawable/widget_cabinet_background" android:textColor="#077370" android:textSize="10sp" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" android:visibility="gone" />
+                <TextView android:id="@+id/large_row_code" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif" android:textStyle="bold" android:textSize="24sp" android:textColor="#172233" android:maxLines="2" android:includeFontPadding="false"
+                    android:drawableEnd="@drawable/widget_copy_icon" android:drawablePadding="4dp" />
+            </LinearLayout>
+            <TextView android:id="@+id/large_row_station" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp"
+                android:textSize="10sp" android:textColor="#536073" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/large_row_owner_column" android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginEnd="8dp">
+            <TextView android:id="@+id/large_row_owner" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:textSize="11sp" android:textColor="#172233" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" />
+            <TextView android:id="@+id/large_row_summary" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="5dp"
+                android:textSize="10sp" android:textColor="#536073" android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" />
+        </LinearLayout>
+        <TextView android:id="@+id/large_row_pick" android:layout_width="57dp" android:layout_height="44dp" android:gravity="center"
+            android:background="@drawable/widget_pick_background" android:text="取件 ✓" android:textColor="#FFFFFF" android:textSize="12sp" android:textStyle="bold"
+            android:maxLines="1" android:ellipsize="end" android:includeFontPadding="false" />
+    </LinearLayout>
+    <TextView android:id="@+id/large_row_divider" android:layout_width="match_parent" android:layout_height="1dp" android:background="#EDF0F5" />
+</LinearLayout>

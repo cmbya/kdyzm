@@ -1,0 +1,73 @@
+/* B · 细腻柔雾 — one material for pages, cards and overlays. */
+:root, page {
+  --sf-page: #e8edf3;
+  --sf-text: #172233;
+  --sf-muted: #536073;
+  --sf-blue: #0867ff;
+  --sf-teal: #077370;
+  --sf-mint: #dcf2ef;
+  --sf-edge: rgba(255, 255, 255, .88);
+  --sf-glass: linear-gradient(125deg, rgba(255,255,255,.50), rgba(249,251,255,.34) 50%, rgba(240,245,252,.42));
+  --sf-sheet: linear-gradient(145deg, rgba(245,248,252,.96), rgba(228,235,244,.94));
+  --sf-shadow: inset 0 1px 1px rgba(255,255,255,.90), inset 0 -1px 0 rgba(255,255,255,.25), 0 12px 30px rgba(61,78,105,.08);
+  --sf-blur: 26px;
+  --sf-filter: blur(var(--sf-blur)) saturate(104%);
+  --sf-surface-fallback: #f5f8fc;
+}
+
+page {
+  color: var(--sf-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  background: radial-gradient(ellipse at 3% 8%, #f5f7fa 0%, transparent 52%), radial-gradient(ellipse at 100% 61%, #dce4ef80 0%, transparent 62%), linear-gradient(135deg, #e8edf3 0%, #e9edf4 46%, #e0e7f0 78%, #eff3f8 100%);
+  background-attachment: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-page { min-height: 100%; color: var(--sf-text); background: transparent; }
+.sf-surface {
+  background: var(--sf-glass);
+  border: 1px solid var(--sf-edge);
+  box-shadow: var(--sf-shadow);
+  -webkit-backdrop-filter: var(--sf-filter);
+  backdrop-filter: var(--sf-filter);
+}
+
+button, input, textarea { font-family: inherit; }
+button:focus-visible, [role='button']:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 3px solid var(--sf-blue);
+  outline-offset: 3px;
+}
+
+/* The Android host renders the same H5 navigation, including its safe-area inset. */
+uni-tabbar .uni-tabbar {
+  background: var(--sf-glass) !important;
+  border-radius: 26px 26px 0 0;
+  border-top: 1px solid var(--sf-edge);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 -4px 24px rgba(61,78,105,.05);
+  -webkit-backdrop-filter: blur(28px) saturate(104%);
+  backdrop-filter: blur(28px) saturate(104%);
+}
+uni-tabbar .uni-tabbar__bd { min-height: 64px; }
+uni-tabbar .uni-tabbar__label { font-size: 12px !important; line-height: 18px; font-weight: 600; }
+uni-tabbar .uni-tabbar-border { display: none; }
+uni-page-head .uni-page-head {
+  color: var(--sf-text) !important;
+  background: var(--sf-glass) !important;
+  border-bottom: 1px solid var(--sf-edge);
+  -webkit-backdrop-filter: var(--sf-filter);
+  backdrop-filter: var(--sf-filter);
+}
+uni-page-head .uni-page-head__title { font-size: 19px !important; font-weight: 700; }
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root, page { --sf-glass: var(--sf-surface-fallback); --sf-sheet: var(--sf-surface-fallback); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+@media (forced-colors: active) {
+  :root, page { --sf-page: Canvas; --sf-text: CanvasText; --sf-muted: CanvasText; --sf-blue: LinkText; --sf-teal: CanvasText; --sf-mint: Canvas; --sf-glass: Canvas; --sf-sheet: Canvas; --sf-edge: ButtonBorder; --sf-shadow: none; }
+  .sf-surface { border-color: ButtonBorder; }
+}

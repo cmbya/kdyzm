@@ -1,0 +1,7 @@
+<resources>
+    <string name="widget_title">取件列表</string>
+    <string name="widget_refresh">刷新</string>
+    <string name="widget_empty">暂无待取包裹</string>
+    <string name="widget_start">打开助手开始扫描</string>
+    <string name="widget_picked">取件</string>
+</resources>

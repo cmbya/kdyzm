@@ -1,0 +1,14 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+const root=path.dirname(fileURLToPath(import.meta.url));
+let html=fs.readFileSync(path.join(root,'index.html'),'utf8');
+const css=fs.readFileSync(path.join(root,'design.css'),'utf8').replace("url('grain.svg')",`url('data:image/svg+xml,${encodeURIComponent(fs.readFileSync(path.join(root,'grain.svg'),'utf8'))}')`);
+html=html.replace('<link rel="stylesheet" href="design.css">',`<style>${css}</style>`);
+for(const file of ['ui.js','pickup.js','settings.js','app.js'])html=html.replace(`<script src="${file}"></script>`,`<script>${fs.readFileSync(path.join(root,file),'utf8').replaceAll('</script','<\\/script')}</script>`);
+fs.writeFileSync(path.join(root,'全案预览.html'),html);
+console.log('Exported self-contained 全案预览.html');
+const scenes=JSON.parse(fs.readFileSync(path.join(root,'scene-map.json'),'utf8'));
+const boards=Array.from({length:Math.ceil(scenes.length/6)},(_,i)=>`<article><a href="boards-b/${String(i+1).padStart(2,'0')}.png"><img loading="lazy" src="boards-b/${String(i+1).padStart(2,'0')}.png" alt="第 ${i+1} 张全案总览"></a><h2>${String(i+1).padStart(2,'0')} / ${Math.ceil(scenes.length/6)}</h2><p>${scenes.slice(i*6,i*6+6).map(s=>s.title).join(' · ')}</p></article>`).join('');
+fs.writeFileSync(path.join(root,'全案图集.html'),`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>B · 细腻柔雾完整图集</title><style>body{margin:0;padding:32px;background:#edf1f6;color:#172233;font:14px/1.8 -apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif}h1{font-size:28px;margin:0}h2{font-size:17px;margin:12px 0 0}p{color:#536073}a{color:#0962d5}main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px;margin-top:28px}article{min-width:0}img{width:100%;display:block;border-radius:16px;box-shadow:0 10px 35px #485b7312}img:hover{outline:2px solid #0867ff}a:focus-visible{outline:3px solid #0867ff;outline-offset:4px}@media(max-width:700px){body{padding:20px}main{grid-template-columns:1fr}}</style><h1>B · 细腻柔雾完整图集</h1><p>14 个现有页面 · ${scenes.length} 个场景 · 13 张总览。点击图片查看原尺寸。每屏可滚动内容及操作状态请打开交互稿。</p><a href="全案预览.html">打开完整交互源稿 →</a><main>${boards}</main></html>`);
+console.log('Exported 13-board 全案图集.html');

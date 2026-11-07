@@ -1,0 +1,120 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": { "navigationStyle": "custom" }
+    },
+    {
+      "path": "pages/my/online-accounts",
+      "style": { "navigationBarTitleText": "线上账号" }
+    },
+    {
+      "path": "pages/my/auto-settings",
+      "style": { "navigationBarTitleText": "定时识别与桌面卡片" }
+    },
+    {
+      "path": "pages/my/ignored",
+      "style": { "navigationBarTitleText": "已忽略短信" }
+    },
+    {
+      "path": "pages/index/edit-code",
+      "style": {
+        "navigationBarTitleText": "编辑取件码"
+      }
+    },
+    {
+      "path": "pages/packages/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/packages/edit",
+      "style": {
+        "navigationBarTitleText": "添加快递"
+      }
+    },
+    {
+      "path": "pages/my/index",
+      "style": {
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/my/match-settings",
+      "style": {
+        "navigationBarTitleText": "短信识别规则"
+      }
+    },
+    {
+      "path": "pages/my/match-rules",
+      "style": {
+        "navigationBarTitleText": "匹配规则"
+      }
+    },
+    {
+      "path": "pages/my/logistics-rules",
+      "style": {
+        "navigationBarTitleText": "物流识别规则"
+      }
+    },
+    {
+      "path": "pages/my/faq",
+      "style": {
+        "navigationBarTitleText": "常见问题"
+      }
+    },
+    {
+      "path": "pages/my/about",
+      "style": {
+        "navigationBarTitleText": "软件介绍"
+      }
+    },
+    {
+      "path": "pages/my/changelog",
+      "style": {
+        "navigationBarTitleText": "更新记录"
+      }
+    }
+  ],
+  "tabBar": {
+    "color": "#536073",
+    "selectedColor": "#0867ff",
+    "backgroundColor": "#e8edf3",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "取件列表",
+        "iconPath": "static/images/tab-pickup.svg",
+        "selectedIconPath": "static/images/tab-pickup-active.svg"
+      },
+      {
+        "pagePath": "pages/packages/index",
+        "text": "包裹记录",
+        "iconPath": "static/images/tab-package.svg",
+        "selectedIconPath": "static/images/tab-package-active.svg"
+      },
+      {
+        "pagePath": "pages/my/index",
+        "text": "我的",
+        "iconPath": "static/images/tab-my.svg",
+        "selectedIconPath": "static/images/tab-my-active.svg"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarBackgroundColor": "#e8edf3",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#e8edf3",
+    "rpxCalcMaxDeviceWidth": 500,
+    "rpxCalcBaseDeviceWidth": 375,
+    "rpxCalcIncludeWidth": 750,
+    "pageAnimation": true,
+    "app-plus": {
+      "animationType": "slide-in-right",
+      "animationDuration": 300,
+      "bounce": "none"
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "tasks": {
+    "policy": {
+      "command": "node",
+      "args": ["scripts/check-policy.mjs"],
+      "timeoutSeconds": 10
+    },
+    "unit-tests": {
+      "command": "node",
+      "args": ["--test", "tests/*.test.mjs"],
+      "timeoutSeconds": 30
+    },
+    "secret-scan": {
+      "command": "node",
+      "args": ["scripts/scan-secrets.mjs"],
+      "timeoutSeconds": 30
+    },
+    "server-tests": {
+      "command": "node",
+      "args": ["--test", "server/test/*.test.mjs"],
+      "timeoutSeconds": 60
+    },
+    "h5-build": {
+      "command": "node",
+      "args": ["scripts/uni-build.mjs", "build"],
+      "timeoutSeconds": 120
+    },
+    "android-assets": {
+      "command": "node",
+      "args": ["scripts/sync-android.mjs"],
+      "timeoutSeconds": 30
+    },
+    "android-build-test-lint": {
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "android/build.ps1"],
+      "timeoutSeconds": 360
+    },
+    "semgrep": {
+      "command": "semgrep",
+      "args": ["--config", ".semgrep.yml", "--error"],
+      "timeoutSeconds": 600,
+      "whenEnv": "ENABLE_SEMGREP"
+    },
+    "npm-audit": {
+      "command": "npm",
+      "args": ["audit", "--audit-level=high"],
+      "timeoutSeconds": 600,
+      "whenEnv": "ENABLE_NPM_AUDIT"
+    }
+  },
+  "profiles": {
+    "fast": {
+      "tasks": ["policy", "unit-tests"],
+      "budgetSeconds": 30
+    },
+    "full": {
+      "extends": "fast",
+      "tasks": ["server-tests", "secret-scan", "h5-build", "android-assets", "android-build-test-lint"],
+      "budgetSeconds": 600
+    },
+    "nightly": {
+      "extends": "full",
+      "tasks": ["semgrep", "npm-audit"],
+      "budgetSeconds": 3600
+    }
+  }
+}
