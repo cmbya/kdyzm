@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
 import { serverVersion, capabilities } from './version.mjs';
-import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus } from './collector-enrichment.mjs';
+import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, providerEventFields, mergeProviderEventFields } from './collector-enrichment.mjs';
 import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
@@ -18,14 +18,15 @@ function logisticsData(input, old = {}) {
   const checkedAt = validTime(input.logisticsCheckedAt);
   if (checkedAt && checkedAt < (old.logisticsCheckedAt || 0)) return logisticsData({}, old);
   const supplied = Array.isArray(input.logisticsEvents) ? input.logisticsEvents : [];
-  const seen = new Set();
+  const seen = new Map();
   const events = [...supplied, ...(old.logisticsEvents || [])].filter(e => e && typeof e === 'object').map(e => ({
     time: validTime(e.time), timeText: shortText(e.timeText, 100), description: shortText(e.description, 600), location: shortText(e.location, 120),
-    ...(['second', 'minute', 'unknown'].includes(e.timePrecision) ? { timePrecision: e.timePrecision } : {})
+    ...(['second', 'minute', 'unknown'].includes(e.timePrecision) ? { timePrecision: e.timePrecision } : {}), ...providerEventFields(e)
   })).filter(e => {
     const key = JSON.stringify([e.time, e.time ? '' : e.timeText, e.description, e.location]);
-    if (!e.description || seen.has(key)) return false;
-    seen.add(key); return true;
+    if (!e.description) return false;
+    if (seen.has(key)) { mergeProviderEventFields(seen.get(key), e); return false; }
+    seen.set(key, e); return true;
   }).sort((a, b) => b.time - a.time);
   const state = ['ok', 'empty', 'error', 'unavailable'].includes(input.logisticsState) ? input.logisticsState : old.logisticsState || '';
   return { logisticsEvents: events.slice(0, 100), logisticsState: state,

@@ -13,10 +13,21 @@ const nonParcel = /(?:领取|提取|取出|收取)(?:了|到|成功)?(?:取件�
 const instruction = /(?:须要?|应当?|务必|要求|指定|仅限|支持|安排|选择|勾选|开通|开启|提供|使用|推荐)(?:由|为)?(?:本人|收件人|用户|客户|您).{0,8}(?:签收|领取|取件|取出|提货|提取|自提|收取)|(?:签收|领取|取件|取出|提货|提取|自提|收取)(?:服务|要求|方式|说明|须知|标准|规则|选项|条款|功能|业务|模式|流程|协议|类型)/u;
 const uncertainty = /[?？]|[吗么呢](?:[。！!，,;；\s]|$)|是否|是不是|有无|核实|核验|询问|待确认|待核|待查|待验证|疑似|疑问|据称|声称|不确定|无法确认|真伪|属实/u;
 
+export function completionNarrative(description) {
+  if (typeof description !== 'string') return '';
+  return description.normalize('NFKC').split(/[，,。；;\r\n]/u).filter(part => {
+    const value = part.trim();
+    const contact = /^(?:(?:如有(?:任何)?(?:疑问|问题)|如需帮助)(?:请|可)?(?:联系|电联|致电|拨打)|(?:请|可)(?:联系|电联|致电|拨打)|(?:快递员|配送员|派件员|网点|代收点|客服|投诉)(?:电话)?\s*[:：])/u.test(value);
+    // Ignore standalone contact boilerplate only; a correction or delivery action must still veto completion.
+    const action = /签收|领取|取件|取走|取出|提货|提取|自提|收取|收到|退回|退货|退件|返件|代签|代收|拒收|拒签|取消|撤销|核实|核验|是否|疑似|未|没有|预计|等待/u.test(value.replace(/代收点/gu, ''));
+    return !contact || action;
+  }).join('，');
+}
+
 export function completionKind(description) {
-  const text = compact(description);
+  const narrative = completionNarrative(description), text = compact(narrative);
   // Keep question punctuation until uncertainty is checked; compacting it would turn a question into a fact.
-  if (!text || uncertainty.test(description) || uncertainty.test(text) || forbidden.test(text) || incomplete.test(text) || nonParcel.test(text) || instruction.test(text)) return '';
+  if (!text || uncertainty.test(narrative) || uncertainty.test(text) || forbidden.test(text) || incomplete.test(text) || nonParcel.test(text) || instruction.test(text)) return '';
   if (signature.test(text)) return 'recipient_signed';
   if (collection.test(text) || collectionExtension.test(text)) return 'user_collected';
   return '';
@@ -25,7 +36,17 @@ export function completionKind(description) {
 export const builtinPickupCompletionRules = Object.freeze([
   { id: 'builtin-recipient-signature-v1', version: 1, kind: 'recipient_signed', keywords: [], enabled: true, origin: 'builtin' },
   { id: 'builtin-user-collection-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
+  { id: 'builtin-pdd-out-cabinet-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
 ]);
+
+function providerCollection(event) {
+  if (event?.provider !== 'pdd' || event.providerStatus !== 'OUT_CABINET' || event.providerStatusTag !== '已取件'
+    || event.providerSubStatus !== 'OUT_CABINET_501') return false;
+  const narrative = completionNarrative(event.description), text = compact(narrative).replace(/代收点/gu, '');
+  // The location label is compatible with a confirmed exit; explicit failure/correction still wins.
+  return !uncertainty.test(narrative) && !uncertainty.test(text) && !forbidden.test(text) && !incomplete.test(text)
+    && !nonParcel.test(text) && !instruction.test(text);
+}
 
 export function validatePickupCompletionRule(input) {
   onlyKeys(input, ['id', 'version', 'kind', 'keywords', 'enabled', 'origin']);
@@ -49,18 +70,23 @@ export function completionConflict(description) {
 
 export function detectPickupCompletion(shipment, { rules = [], now = Date.now() } = {}) {
   const events = Array.isArray(shipment?.logisticsEvents) ? shipment.logisticsEvents : [];
-  const candidates = events.filter(event => validTime(event?.time) && event.time <= now && completionKind(event.description))
+  const candidates = events.filter(event => validTime(event?.time) && event.time <= now && (providerCollection(event) || completionKind(event.description)))
     .sort((a, b) => b.time - a.time);
   for (const event of candidates) {
     if (validTime(shipment.arrivalAt) && shipment.arrivalAt >= event.time) continue;
-    if (events.some(other => completionConflict(other?.description) && (!validTime(other.time) || other.time >= event.time))) continue;
-    const kind = completionKind(event.description), description = String(event.description).slice(0, 600), value = compact(description);
-    const builtins = signature.test(value) || collection.test(value) ? builtinPickupCompletionRules : [];
+    if (events.some(other => !providerCollection(other) && (other?.provider === 'pdd' && other.providerStatus === 'IN_CABINET' || completionConflict(other?.description))
+      && (!validTime(other.time) || other.time >= event.time))) continue;
+    const structured = providerCollection(event), kind = structured ? 'user_collected' : completionKind(event.description);
+    const description = String(event.description).slice(0, 600), value = compact(description);
+    const builtins = structured ? builtinPickupCompletionRules.filter(rule => rule.id === 'builtin-pdd-out-cabinet-v1')
+      : signature.test(value) || collection.test(value) ? builtinPickupCompletionRules.filter(rule => rule.id !== 'builtin-pdd-out-cabinet-v1') : [];
     const rule = [...builtins, ...rules.filter(rule => rule.enabled && rule.kind === kind && rule.keywords?.length && rule.keywords.every(keyword => value.includes(compact(keyword))))]
       .find(rule => rule.enabled && rule.kind === kind);
     if (!rule) continue;
-    return { kind, description, eventTime: event.time,
-      fingerprint: createHash('sha256').update(JSON.stringify([event.time, description, kind])).digest('hex'), ruleId: rule.id, ruleVersion: rule.version };
+    const provider = structured ? { provider: 'pdd', providerStatus: event.providerStatus, providerStatusTag: event.providerStatusTag,
+      providerSubStatus: event.providerSubStatus, providerStatusText: event.providerStatusText || '' } : {};
+    return { kind, description, eventTime: event.time, ...provider,
+      fingerprint: createHash('sha256').update(JSON.stringify([event.time, description, kind, ...(structured ? [provider] : [])])).digest('hex'), ruleId: rule.id, ruleVersion: rule.version };
   }
   return null;
 }

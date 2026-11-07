@@ -45,6 +45,20 @@ export async function platformRequest(url, cookie, { fetchImpl = fetch, method =
   for await (const chunk of response.body) { size += chunk.length; if (size > limit) { upstream(); } chunks.push(chunk); }
   return { text: new TextDecoder(encoding).decode(Buffer.concat(chunks)), headers: response.headers };
 }
+async function parallelLogistics(items, collect) {
+  const results = [];
+  let next = 0, failure;
+  // Stop dispatching on expiry, but drain the in-flight peer before returning the error.
+  await Promise.all(Array.from({ length: Math.min(2, items.length) }, async () => {
+    while (!failure && next < items.length) {
+      const index = next++;
+      try { results[index] = await collect(items[index]); }
+      catch (error) { failure ||= error; }
+    }
+  }));
+  if (failure) throw failure;
+  return results;
+}
 function json(text) {
   try { return JSON.parse(text); } catch { throw new CollectorError('UPSTREAM_FORMAT', '平台返回结构已变化，保留上次成功数据'); }
 }
@@ -211,7 +225,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
   const logisticsTracked = new Set([...trackedOrderIds, ...activeKnownOrders(knownOrders, new Set(), knownOrders.length).map(order => order.platformOrderId)].map(String));
   const known = new Map(knownOrders.map(order => [asText(order.platformOrderId), order]));
   const knownParcels = id => targetOrder ? (known.get(id)?.shipments || []).filter(parcel => asText(parcel.waybillNo)) : activeKnownParcels(known.get(id));
-  const supplements = [];
+  const logisticsOrders = [];
   let dateBudget = 10;
   let skippedCount = 0;
   const dateAttempted = new Set();
@@ -254,24 +268,23 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
         parcel.logisticsCheckedAt = checkedAt;
         if (parcel.logisticsState !== 'unavailable') parcel.logisticsUpdatedAt = checkedAt;
       }
-      supplements.push({ platformOrderId, parcels });
-      shipments.push(...parcels);
       if (!parcels.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
       if (parcels.length > 1 && parcels.some(p => p.logisticsState === 'unavailable')) warnings.push('部分拆单运单仅返回单号，等待平台提供各运单物流');
+      return { platformOrderId, parcels };
     } catch (error) {
       if (error.code === 'ACCOUNT_EXPIRED') throw error;
       // Full PC tracking is independent of SSR availability, including known completed parcels on manual refresh.
       const parcels = knownParcels(platformOrderId).map(parcel => ({ platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
         logisticsEvents: [], logisticsState: 'error', logisticsError: '物流摘要查询失败，已保留原轨迹', logisticsCheckedAt: checkedAt }));
-      shipments.push(...parcels); supplements.push({ platformOrderId, parcels });
       if (!parcels.length) logisticsFailures.push({ platformOrderId, state: 'error', logisticsCheckedAt: checkedAt });
       warnings.push('部分订单物流读取失败，已保留原运单');
+      return { platformOrderId, parcels };
     }
   }
   if (targetOrder) {
     const platformOrderId = asText(targetOrder.platformOrderId), metadata = { platformOrderId };
     await enrichDate(metadata); orderUpdates.push(metadata);
-    await collectLogistics(platformOrderId);
+    logisticsOrders.push(platformOrderId);
   } else {
     try {
       const data = await mtop(session, { tabCode: 'waitConfirm', appVersion: '3.0', OrderType: 'OrderList', condition: { inner: 1, deviceLevel: 'high', version: '1.0.0', reqFrom: 'tbpc' }, appName: 'tborder', templateConfigVersion: 0, forceBoughtlist4: 4, page: '1' }, true);
@@ -315,21 +328,21 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
         // Waiting for seller shipment has no useful logistics detail yet.
         if (kind === 'to_ship') continue;
         if (kind === 'skip' && !logisticsTracked.has(platformOrderId)) continue;
-        await collectLogistics(platformOrderId);
+        logisticsOrders.push(platformOrderId);
       }
       if (!newCount) { warnings.push('平台分页重复，停止本轮采集并保留已有记录'); break; }
       if (page === maxPages) warnings.push('已达到分页上限；缺席订单不会标记为已取或删除');
     }
-    for (const order of activeKnownOrders(knownOrders, seen)) await collectLogistics(asText(order.platformOrderId));
+    for (const order of activeKnownOrders(knownOrders, seen)) logisticsOrders.push(asText(order.platformOrderId));
   }
+  const supplements = await parallelLogistics(logisticsOrders, collectLogistics);
   const lastLogisticsCheck = id => {
     const parcels = knownParcels(id);
     return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsDetailCheckedAt || 0)) : 0;
   };
-  supplements.sort((a, b) => lastLogisticsCheck(a.platformOrderId) - lastLogisticsCheck(b.platformOrderId));
   // SSR can contain only summaries. Query the full PC track even for nonempty SSR,
   // giving the oldest known attempts priority within a separate 20-order budget.
-  for (const { platformOrderId, parcels } of supplements.slice(0, 20)) {
+  await parallelLogistics([...supplements].sort((a, b) => lastLogisticsCheck(a.platformOrderId) - lastLogisticsCheck(b.platformOrderId)).slice(0, 20), async ({ platformOrderId, parcels }) => {
     const checkedAt = now();
     for (const parcel of parcels) Object.assign(parcel, { logisticsCheckedAt: checkedAt, logisticsDetailCheckedAt: checkedAt });
     try {
@@ -342,7 +355,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       if (!parcels.length && asText(data.expressId)) {
         parcel = { platformOrderId, waybillNo: asText(data.expressId), carrier: asText(data.expressName), status: 'unknown', logisticsEvents: [],
           logisticsState: 'empty', logisticsCheckedAt: checkedAt, logisticsDetailCheckedAt: checkedAt };
-        parcels.push(parcel); shipments.push(parcel);
+        parcels.push(parcel);
       }
       if (parcel) {
         const transit = taobaoTransitEvents(data, timestamp);
@@ -375,7 +388,8 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       }
       warnings.push('部分物流轨迹补查失败，已保留上次轨迹');
     }
-  }
+  });
+  for (const { parcels } of supplements) shipments.push(...parcels);
   for (const order of (targetOrder ? [] : knownOrders).filter(item => !seen.has(asText(item.platformOrderId))).sort((a, b) => (a.dateCheckedAt || 0) - (b.dateCheckedAt || 0))) {
     if (dateBudget <= 0) break;
     const metadata = { platformOrderId: asText(order.platformOrderId) };
@@ -531,14 +545,14 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     }
   }
   let skippedCount = 0;
-  for (const [platformOrderId, { order, kind, orderStatus, parcels }] of listedOrders) {
+  const parcelGroups = await parallelLogistics([...listedOrders], async ([platformOrderId, { order, kind, orderStatus, parcels }]) => {
     const metadata = { platformOrderId, title: (order.order_goods || []).map(g => g.goods_name || g.goods_title || '').filter(Boolean).join(' / '),
       amount: Number.isFinite(order.order_amount) ? order.order_amount / 100 : null, orderDate: timestamp(order.order_time || order.created_time || order.create_time),
       ...(timestamp(order.order_time || order.created_time || order.create_time) ? { orderDateOrigin: 'list' } : {}),
       orderStatus, refundStatus: asText(order.refund_status) };
     if (kind === 'skip') {
       skippedCount++; orderUpdates.push(metadata); seen.delete(platformOrderId);
-      continue;
+      return [];
     }
     orders.push(metadata);
     if (parcels.length) {
@@ -558,8 +572,9 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
       if (parcels.some(item => item.waybillNo === asText(parcel.waybillNo))) continue;
       parcels.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
     }
-    shipments.push(...parcels);
-  }
+    return parcels;
+  });
+  for (const parcels of parcelGroups) shipments.push(...parcels);
   const candidates = orders.map(order => ({ platformOrderId: order.platformOrderId, parcels: shipments.filter(parcel => parcel.platformOrderId === order.platformOrderId) }));
   for (const order of activeKnownOrders(knownOrders, seen, logisticsBudget)) {
     const platformOrderId = asText(order.platformOrderId);
@@ -573,9 +588,9 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsCheckedAt || 0)) : 0;
   };
   candidates.sort((a, b) => lastChecked(a.platformOrderId) - lastChecked(b.platformOrderId));
-  for (const candidate of candidates) {
-    if (logisticsBudget <= 0) break;
-    await collectLogistics(candidate.platformOrderId, candidate.parcels);
+  const selected = candidates.filter(candidate => candidate.parcels.length).slice(0, logisticsBudget);
+  await parallelLogistics(selected, candidate => collectLogistics(candidate.platformOrderId, candidate.parcels));
+  for (const candidate of selected) {
     if (candidate.missingFromList) shipments.push(...candidate.parcels.filter(parcel => parcel.logisticsState));
   }
   if (skippedCount) warnings.push(`订单筛选：本轮保留${orders.length}笔，跳过${skippedCount}笔已结束或非待发货/待收货订单`);

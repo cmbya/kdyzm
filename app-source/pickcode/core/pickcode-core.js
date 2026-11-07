@@ -695,7 +695,7 @@ var PickCodeCore = (function () {
   function completionState(input) {
     if(!input||input.version!==1||typeof input.autoPicked!=='boolean'||['','picked','pending'].indexOf(input.manualOverride)<0)return null;
     var e=input.evidence,evidence=null;
-    if(e&&typeof e==='object')evidence={kind:text(e.kind,60),description:text(e.description,600),eventTime:timestamp(e.eventTime),fingerprint:text(e.fingerprint,200),ruleId:text(e.ruleId,120),ruleVersion:text(e.ruleVersion,80)};
+    if(e&&typeof e==='object'){evidence={kind:text(e.kind,60),description:text(e.description,600),eventTime:timestamp(e.eventTime),fingerprint:text(e.fingerprint,200),ruleId:text(e.ruleId,120),ruleVersion:text(e.ruleVersion,80)};mergeProviderEventFields(evidence,e);}
     return {version:1,autoPicked:input.autoPicked,manualOverride:input.manualOverride,completedAt:timestamp(input.completedAt),evidence:evidence};
   }
   function importCompletion(state,s,input,supported) {
@@ -910,15 +910,26 @@ var PickCodeCore = (function () {
     delete value.history;delete value.mergedInto;delete value.protected;delete value.resolvedCodes;
     return value;
   }
+  function mergeProviderEventFields(target,source) {
+    if(source.provider!=='pdd')return;
+    var fields={provider:'pdd'};
+    [['providerStatus',64],['providerStatusTag',120],['providerSubStatus',64],['providerStatusText',120]].forEach(function(pair){
+      var value=source[pair[0]];if(typeof value==='string'&&value.trim())fields[pair[0]]=value.trim().slice(0,pair[1]);
+    });
+    if(Object.keys(fields).some(function(key){return target[key]&&target[key]!==fields[key];}))return;
+    Object.keys(fields).forEach(function(key){target[key]=fields[key];});
+  }
   function logisticsEvents(values) {
     var seen={},events=[];
     (Array.isArray(values)?values:[]).slice(0,1000).forEach(function(value,index){
       if(!value||typeof value!=='object')return;
       var e={time:timestamp(value.time),timeText:text(value.timeText,100),description:text(value.description,600),location:text(value.location,120)};
       if(['second','minute','unknown'].indexOf(value.timePrecision)>=0)e.timePrecision=value.timePrecision;
+      mergeProviderEventFields(e,value);
       var key=JSON.stringify([e.time,e.time?'':e.timeText,e.description,e.location]);
-      if(!e.description||seen[key])return;
-      seen[key]=true;e.index=index;events.push(e);
+      if(!e.description)return;
+      if(seen[key]){mergeProviderEventFields(seen[key],e);return;}
+      seen[key]=e;e.index=index;events.push(e);
     });
     return events.sort(function(a,b){return b.time-a.time||a.index-b.index;}).slice(0,100).map(function(e){delete e.index;return e;});
   }

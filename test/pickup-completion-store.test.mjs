@@ -43,6 +43,17 @@ test('automatic evidence is separate, defaults on, survives refresh and manual r
   assert.equal(store.snapshot(['a']).serverRevision, revision);
 });
 
+test('courier contact details do not block completion and manual pending still wins', t => {
+  const { sync, read, op } = fixture(t);
+  const description = '您的快件已由本人签收，如有疑问请联系快递员：测试员（10000000000）';
+  const shipment = sync([description, '已到达示例菜鸟驿站，请及时取件']);
+  assert.equal(shipment.picked, true);
+  assert.equal(shipment.pickupCompletion.evidence.description, description);
+  op('restore');
+  assert.equal(sync([description]).picked, false);
+  assert.equal(read().pickupCompletion.manualOverride, 'pending');
+});
+
 test('cross-device stale writes, hide and same-millisecond legacy operations preserve the correct decision', t => {
   const { sync, read, op, bind, store } = fixture(t);
   sync(); const second = bind();

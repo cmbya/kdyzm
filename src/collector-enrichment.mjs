@@ -50,8 +50,24 @@ export function logisticsTimePrecision(value) {
   return 'unknown';
 }
 
+export function providerEventFields(event) {
+  if (event?.provider !== 'pdd') return {};
+  const fields = { provider: 'pdd' };
+  for (const [key, limit] of [['providerStatus', 64], ['providerStatusTag', 120], ['providerSubStatus', 64], ['providerStatusText', 120]]) {
+    if (typeof event[key] === 'string' && event[key].trim()) fields[key] = event[key].trim().slice(0, limit);
+  }
+  return fields;
+}
+
+export function mergeProviderEventFields(target, source) {
+  const fields = providerEventFields(source);
+  // Incoming records come first; never splice conflicting historical status fields into their evidence.
+  if (Object.keys(fields).some(key => target[key] && target[key] !== fields[key])) return;
+  Object.assign(target, fields);
+}
+
 export function normalizeLogisticsEvents(events, timestamp) {
-  const seen = new Set(), output = [];
+  const seen = new Map(), output = [];
   for (const event of events.slice(0, 2000)) {
     const normalized = {
       time: logisticsTimestamp(event.time, timestamp),
@@ -59,11 +75,12 @@ export function normalizeLogisticsEvents(events, timestamp) {
       description: shortText(event.description, 600),
       location: shortText(event.location, 120),
       timePrecision: ['second', 'minute', 'unknown'].includes(event.timePrecision) ? event.timePrecision : logisticsTimePrecision(event.time),
+      ...providerEventFields(event),
     };
     if (!normalized.description) continue;
-    const key = JSON.stringify(normalized);
-    if (seen.has(key)) continue;
-    seen.add(key); output.push(normalized);
+    const key = JSON.stringify([normalized.time, normalized.time ? '' : normalized.timeText, normalized.description, normalized.location]);
+    if (seen.has(key)) { mergeProviderEventFields(seen.get(key), normalized); continue; }
+    seen.set(key, normalized); output.push(normalized);
   }
   // Stable sorting keeps unknown timestamps in their original relative order.
   output.sort((a, b) => b.time - a.time);
@@ -89,6 +106,11 @@ export function pddShippingEvents(shipping, timestamp) {
     time: trace.timestamp || trace.time_stamp || trace.timeStamp || trace.time,
     timeText: trace.display_time || trace.displayTime || trace.time || trace.timestamp || trace.time_stamp || trace.timeStamp,
     description: trace.info,
+    provider: 'pdd',
+    providerStatus: trace.status,
+    providerStatusTag: trace.status_tag ?? trace.statusTag,
+    providerSubStatus: trace.sub_status ?? trace.subStatus,
+    providerStatusText: trace.trace_status_tip ?? trace.traceStatusTip,
   })), timestamp);
 }
 

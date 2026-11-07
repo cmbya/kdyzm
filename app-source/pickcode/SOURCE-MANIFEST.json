@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.34",
+  "version": "3.1.35",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "3901a16b26a4e4891d61f566a0e37f2bac62fc0765be56af6e8eeea6546c7ca5"
+      "sha256": "fad9ca781a028da1b277319ab4c9a95cf82b882fe6d39894ee3d83c084f799c6"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -156,8 +156,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
-      "size": 71775,
-      "sha256": "14f71494c78174526cbb94acd86ede494fc24a775f8678497faf9d1ece096a41"
+      "size": 72996,
+      "sha256": "c12098bfacb5bcdb655ae0d141247ad165316b96da15c556864714716c7866d9"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
@@ -231,8 +231,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/WidgetRenderer.java",
-      "size": 41881,
-      "sha256": "a016e0aec245ae74c3c0b7f0405970bdd4067324cc63b046928a7a9c29c6d2d6"
+      "size": 42258,
+      "sha256": "57f8c62dbd1c28ce2119fcfe41b08f12c7dde34c07d8744e01c0ba2395f94d9e"
     },
     {
       "path": "android/app/src/main/res/anim/widget_road_enter.xml",
@@ -321,8 +321,8 @@
     },
     {
       "path": "android/app/src/main/res/layout/widget_large.xml",
-      "size": 6391,
-      "sha256": "bd32fbca5ea94273cbf300eb70fdf23d2f11c6e5a287abeb075680941444cce4"
+      "size": 6664,
+      "sha256": "7dcf90f682ed9273907f23b2bfc2454c25ccc32e5615e45adadc7b6b07361ada"
     },
     {
       "path": "android/app/src/main/res/layout/widget_large_road_flipper.xml",
@@ -366,8 +366,8 @@
     },
     {
       "path": "android/app/src/main/res/layout/widget_road_row.xml",
-      "size": 1515,
-      "sha256": "78db6b91a92dd36811108d5eb7a31ce22449f6789bc3e8961a170aa5c67462df"
+      "size": 1200,
+      "sha256": "06442dda73cdbd9ee1e47ca0c1bd44691f3cd4ce1c4719e55c96648557ea41d4"
     },
     {
       "path": "android/app/src/main/res/layout/widget_row.xml",
@@ -516,8 +516,8 @@
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 152381,
-      "sha256": "b568b85270c3d9b10015f8b648c1db05f2dbe318026f0e36673e25238e1a6850"
+      "size": 153089,
+      "sha256": "af5be4c6d2ba651a4e20c97523314b08097f5430be61285a9ecabbd3af67cb34"
     },
     {
       "path": "index.html",
@@ -537,17 +537,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "5e5bd4a443af0be57c1f93d37d66f9fc582371e63aac678249783adc0a1a5958"
+      "sha256": "a9bacaca263b6ef15951102c928aca3fd7f7ee2299afb0657b4684c5c6c99e50"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "95361c0c292b925c74c394328538c6f89b7671e1a46b75674066b329cb6ce935"
+      "sha256": "ab7ed6cc5b301623cce10120bbfee942ffcb53ef02a56b38a3c5ba5801aa47d3"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "b63b40d9971f314019a1139481acb74df6e99394502767316ce9d95019bd3bf6"
+      "sha256": "b05591b4bd2f8da1919b7bacd8c049667461a0733906e43508f422e028068d12"
     },
     {
       "path": "pages.json",
@@ -576,8 +576,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 35034,
-      "sha256": "29605339bb6117248de36296c8783792d91640472ef766638c381d63cf00d8f5"
+      "size": 35972,
+      "sha256": "85f71afb718397340be26cb6addace8e90c319127408fe4b5fe06d260fa30328"
     },
     {
       "path": "pages/my/faq.vue",
@@ -696,8 +696,8 @@
     },
     {
       "path": "services/assistant.js",
-      "size": 29592,
-      "sha256": "2a8ba0aba8246133d676c2adb111c31ccd3e426bdd41debeaea63ecc30c0f16c"
+      "size": 29743,
+      "sha256": "511a97839c2bfe36f9dd3725d9ae9b2b8f0ac1ee6b9d67814820e272d25b66b7"
     },
     {
       "path": "services/item-patch.js",
@@ -2509,7 +2509,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "c8fbb4456e6d060d1ddd21189eab4a556fa131ca7fb6e8c9fdf76b7c76a77e3a"
+      "sha256": "d98e56a64cf228357bc0476d24a8cef6ed505706edd6c7c538ac27bd14744923"
     },
     {
       "path": ".gitignore",

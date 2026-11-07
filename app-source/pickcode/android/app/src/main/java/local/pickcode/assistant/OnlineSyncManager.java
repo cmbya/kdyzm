@@ -18,7 +18,7 @@ import java.util.concurrent.Executors;
 
 /** Serializes device sessions, not the SQLite store; every network request occurs outside store transactions. */
 public final class OnlineSyncManager {
-    static final int IMPORT_VERSION = 323;
+    static final int IMPORT_VERSION = 324;
     private static final int MAX_JOBS = 100;
     private static final ExecutorService STATION_UPLOADS = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "pickcode-station-fragments");
@@ -31,6 +31,8 @@ public final class OnlineSyncManager {
     private final SharedPreferences metadata;
     private final AssistantStore store;
     private final BackendRoutes routes = new BackendRoutes(BuildConfig.DEBUG);
+    // A 304 keeps this coverage; omitted jobs and a restarted process still use the legacy status endpoint.
+    private final Set<String> snapshotJobIds = new HashSet<>();
     private long connectionCheckedAt;
     private long sessionGeneration;
     private boolean stationUploadRunning;
@@ -78,6 +80,7 @@ public final class OnlineSyncManager {
     }
     private void rotateAiSession() {
         sessionGeneration++;
+        snapshotJobIds.clear();
         try { OnlineSyncScheduler.cancelEnhancement(context); }
         catch (IllegalStateException unavailable) { /* Session validation still retires old work if the scheduler is unavailable. */ }
         if (!metadata.edit().putString("aiSessionEpoch", UUID.randomUUID().toString()).commit()) throw new IllegalStateException("无法保存AI会话");
@@ -314,6 +317,7 @@ public final class OnlineSyncManager {
             }
             JSONObject online = store.snapshot().optJSONObject("online");
             JSONArray jobs = authorizedJobs(safeJobs(online == null ? null : online.optJSONArray("jobs")), latest == null ? online : latest);
+            boolean poll = !start && needsJobPolling(jobs, snapshotJobIds);
             if (start) {
                 if (!hasCapability(online, "syncJobs") || (localOrderId != null && !hasCapability(online, "orderRefresh")))
                     throw new OnlineClient.Failure("feature_unavailable", "请先将后台升级到 3.1.5 或更高版本，再主动刷新；已有数据仍可同步");
@@ -331,12 +335,12 @@ public final class OnlineSyncManager {
                 JSONArray started = safeJobs(result.getJSONArray("jobs"));
                 if (started.length() == 0) throw new OnlineClient.Failure("no_accounts", "没有可刷新的线上账号，请检查后台账号与设备授权");
                 jobs = authorizedJobs(mergeStartedJobs(jobs, started), latest == null ? online : latest);
-            } else {
+            } else if (poll) {
                 // One status request per pending task; collection itself is never waited on in this thread.
-                jobs = pollJobs(client, jobs);
+                jobs = pollJobs(client, jobs, snapshotJobIds);
             }
             store.dispatch("syncMeta", new JSONObject().put("jobs", jobs));
-            latest = pullSnapshot(client, false);
+            if (start || poll || queued != null && queued.length() > 0) latest = pullSnapshot(client, false);
             acknowledgeStationRules(client);
             long now = System.currentTimeMillis();
             // Snapshot import may have retired an old cooldown after a newer account success.
@@ -374,6 +378,9 @@ public final class OnlineSyncManager {
         // Neither an old server revision nor an unsuccessful import may advance the conditional cursor.
         if (!metadata.edit().putString("etag", response.etag).putInt("importVersion", IMPORT_VERSION).commit())
             throw new IllegalStateException("无法保存同步游标");
+        snapshotJobIds.clear();
+        JSONArray includedJobs = response.body.optJSONArray("syncJobs");
+        if (includedJobs != null) for (int i = 0; i < includedJobs.length(); i++) snapshotJobIds.add(includedJobs.getJSONObject(i).getString("id"));
         return response.body;
     }
     private void acknowledgeStationRules(OnlineClient client) {
@@ -387,10 +394,20 @@ public final class OnlineSyncManager {
         } catch (Exception unavailable) { /* A saved import stays valid; retry the receipt on the next sync. */ }
     }
     static JSONArray pollJobs(OnlineClient client, JSONArray previous) throws Exception {
+        return pollJobs(client, previous, java.util.Collections.emptySet());
+    }
+    static boolean needsJobPolling(JSONArray jobs, Set<String> snapshotJobIds) throws Exception {
+        for (int i = 0; i < jobs.length(); i++) {
+            JSONObject job = jobs.getJSONObject(i);
+            if (pendingJob(job) && !snapshotJobIds.contains(job.getString("id"))) return true;
+        }
+        return false;
+    }
+    static JSONArray pollJobs(OnlineClient client, JSONArray previous, Set<String> snapshotJobIds) throws Exception {
         JSONArray result = new JSONArray();
         for (int i = 0; i < previous.length(); i++) {
             JSONObject job = previous.getJSONObject(i);
-            if (pendingJob(job)) {
+            if (pendingJob(job) && !snapshotJobIds.contains(job.getString("id"))) {
                 try {
                     JSONObject response = client.request("GET", "/v1/sync-jobs/" + job.getString("id"), null, null).body;
                     if (response.optJSONObject("job") == null) throw invalidResponse();

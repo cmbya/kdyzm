@@ -195,8 +195,15 @@ public final class WidgetRenderer {
         boolean roadCycles = road.size() > roadShown && roadShown > 0;
         int roadPages = Math.max(1, road.size());
         int roadPage = Math.min(LargeWidgetProvider.page(context, id, true), roadPages - 1);
-        views.setTextViewText(R.id.large_road_heading, width > 0 && width < 220 ? "代收" : "代收包裹");
+        views.setTextViewText(R.id.large_road_heading, width > 0 && width < 220 ? "待收" : "待收包裹");
         views.setTextViewText(R.id.large_road_count, allRoad.size() + "单");
+        int waitingCount = 0;
+        for (WidgetModel.RoadOrder order : road) if ("待发货".equals(order.status)) waitingCount++;
+        int transitCount = road.size() - waitingCount;
+        views.setTextViewText(R.id.large_road_status, (waitingCount > 0 ? "待发货 " + (privacy ? "••" : waitingCount) : "")
+                + (waitingCount > 0 && transitCount > 0 ? " · " : "") + (transitCount > 0 ? "运输中 " + (privacy ? "••" : transitCount) : ""));
+        views.setViewVisibility(R.id.large_road_status, road.isEmpty() ? View.GONE : View.VISIBLE);
+        textDp(context, views, R.id.large_road_status, layout.textSp - 2);
         textDp(context, views, R.id.large_road_heading, layout.textSp);
         textDp(context, views, R.id.large_road_count, layout.textSp - 1);
         views.setInt(R.id.large_road_heading, "setHeight", dp(context, 16));
@@ -208,7 +215,7 @@ public final class WidgetRenderer {
             views.setTextViewText(target, labels[index] + " " + (privacy ? "••" : countForPlatform));
             textDp(context, views, target, width < 320 ? 9 : 10);
             views.setInt(target, "setBackgroundResource", active ? R.drawable.widget_platform_filter_active : R.drawable.widget_platform_filter);
-            views.setContentDescription(target, labels[index] + (privacy ? "，数量已隐藏，" : " " + countForPlatform + "单代收包裹，") + (active ? "已选，再点取消" : "筛选"));
+            views.setContentDescription(target, labels[index] + (privacy ? "，数量已隐藏，" : " " + countForPlatform + "单待收包裹，") + (active ? "已选，再点取消" : "筛选"));
             views.setOnClickPendingIntent(target, action(context, provider, id, LargeWidgetProvider.PLATFORM, platforms[index]));
         }
         // Remove old carousel children before binding the static footer on reapply: children share its view IDs.
@@ -216,10 +223,10 @@ public final class WidgetRenderer {
         bindRoadFooter(context, views, provider, id, layout, snapshot, selectedPlatform, 0, 1);
         views.setViewVisibility(R.id.large_road_footer, roadCycles ? View.GONE : View.VISIBLE);
         views.setOnClickPendingIntent(R.id.large_road_content, packages(context, id));
-        views.setContentDescription(R.id.large_road_content, "代收包裹共 " + road.size() + " 笔，"
+        views.setContentDescription(R.id.large_road_content, "待收包裹共 " + road.size() + " 笔，"
                 + (roadCycles ? "自动循环展示全部包裹，" : "另有 " + (road.size() - roadShown) + " 笔未显示，") + "打开包裹记录");
         views.setViewVisibility(R.id.large_road_empty, roadShown == 0 && layout.roadRows > 0 ? View.VISIBLE : View.GONE);
-        views.setTextViewText(R.id.large_road_empty, road.isEmpty() ? "暂无代收包裹" : "打开包裹记录查看 ›");
+        views.setTextViewText(R.id.large_road_empty, road.isEmpty() ? "暂无待收包裹" : "打开包裹记录查看 ›");
         textDp(context, views, R.id.large_road_empty, layout.textSp);
         if (roadCycles) {
             RemoteViews flipper = new RemoteViews(context.getPackageName(), roadShown == 2
@@ -445,16 +452,11 @@ public final class WidgetRenderer {
     }
     private static RemoteViews roadRow(Context context, WidgetModel.LargeLayout layout, WidgetModel.RoadOrder order) {
         RemoteViews row = new RemoteViews(context.getPackageName(), R.layout.widget_road_row);
-        boolean waiting = "待发货".equals(order.status);
-        row.setTextViewText(R.id.road_row_status, waiting ? "" : order.status);
-        row.setViewVisibility(R.id.road_row_status, waiting ? View.GONE : View.VISIBLE);
-        row.setTextColor(R.id.road_row_status, 0xFF738BA5);
         row.setTextViewText(R.id.road_row_platform, order.platformLabel);
-        row.setViewVisibility(R.id.road_row_platform, order.platformLabel.isEmpty() ? View.GONE : View.VISIBLE);
+        row.setViewVisibility(R.id.road_row_platform, order.platformLabel.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         row.setTextViewText(R.id.road_row_title, order.title);
+        row.setContentDescription(R.id.road_row_title, order.status + "，" + order.title);
         row.setTextViewText(R.id.road_row_owner, order.owner);
-        row.setInt(R.id.road_row_status, "setHeight", dp(context, layout.roadRowHeight - 4));
-        textDp(context, row, R.id.road_row_status, layout.textSp - 1);
         textDp(context, row, R.id.road_row_platform, layout.textSp - 1);
         textDp(context, row, R.id.road_row_title, layout.textSp);
         textDp(context, row, R.id.road_row_owner, layout.textSp - 1);
@@ -472,9 +474,11 @@ public final class WidgetRenderer {
     private static void bindPager(Context context, RemoteViews views, Class<?> provider, int id, boolean road, int page, int pages) {
         int previous = R.id.large_road_previous, next = R.id.large_road_next, number = R.id.large_road_page_number;
         String actionName = LargeWidgetProvider.ROAD_PAGE;
-        String description = "代收包裹";
+        String description = "待收包裹";
         views.setTextViewText(number, (page + 1) + "/" + pages);
         textDp(context, views, number, 9);
+        textDp(context, views, previous, 15);
+        textDp(context, views, next, 15);
         views.setBoolean(previous, "setEnabled", page > 0);
         views.setBoolean(next, "setEnabled", page + 1 < pages);
         views.setFloat(previous, "setAlpha", page > 0 ? 1f : .35f);

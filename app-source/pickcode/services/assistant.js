@@ -190,9 +190,10 @@ async function previewOnline(action, payload) {
         const result = await previewFetch('/v1/snapshot', { headers: previewSession.etag && !payload.force && action !== 'refreshOrder' && !localDispatch('snapshot').online.needsPickupSync ? { 'If-None-Match': previewSession.etag } : {} });
         if (!result.unchanged) {
           if (result.data.serverRevision < localDispatch('snapshot').online.serverRevision) throw new Error('后台返回旧版本数据，已保留本地记录，请稍后重试');
-          localDispatch('syncImport', { snapshot: result.data, syncedAt: Date.now(), importVersion: 323 });
+          localDispatch('syncImport', { snapshot: result.data, syncedAt: Date.now(), importVersion: 324 });
           previewSession.jobAccounts = new Set((result.data.accounts || []).map(account => account.id));
           previewSession.jobOrders = new Set((result.data.orders || []).map(order => order.id));
+          previewSession.snapshotJobIds = new Set((result.data.syncJobs || []).map(job => job.id));
           previewSession.etag = result.etag;
         }
       };
@@ -206,6 +207,7 @@ async function previewOnline(action, payload) {
       }
       const jobAllowed = job => job.orderId ? previewSession.jobOrders?.has(job.orderId) : previewSession.jobAccounts?.has(job.accountId);
       const online = localDispatch('snapshot').online;
+      let needsSnapshot = false;
       if (payload.force || action === 'refreshOrder') {
         if (!online.capabilities?.includes('syncJobs') || (action === 'refreshOrder' && !online.capabilities?.includes('orderRefresh'))) throw new Error('请先将后台升级到3.1.5或以上版本，再重新获取订单');
         const path = action === 'refreshOrder' ? '/v1/orders/' + encodeURIComponent(localDispatch('onlineOrderTarget', { id: payload.id }).orderId) + '/refresh' : '/v1/accounts/sync';
@@ -213,24 +215,24 @@ async function previewOnline(action, payload) {
         if (!Array.isArray(data.jobs)) throw new Error('后台未返回采集任务，请升级后台后重试');
         const retained = (online.jobs || []).filter(job => jobAllowed(job) && !data.jobs.some(next => next.id === job.id) && (['queued','running'].includes(job.state) || !data.jobs.some(next => next.accountId === job.accountId && (!next.orderId || next.orderId === job.orderId))));
         localDispatch('syncMeta', { jobs: retained.concat(data.jobs) });
+        needsSnapshot = true;
       } else {
-        let scopeChanged = false;
         const jobs = await Promise.all((online.jobs || []).filter(jobAllowed).map(async job => {
-          if (!['queued','running'].includes(job.state)) return job;
+          if (!['queued','running'].includes(job.state) || previewSession.snapshotJobIds?.has(job.id)) return job;
+          needsSnapshot = true;
           try {
             const { data } = await previewFetch('/v1/sync-jobs/' + encodeURIComponent(job.id));
             return data.job;
           } catch (error) {
-            if (error.status === 403 && error.code === 'SCOPE_FORBIDDEN') { scopeChanged = true; return null; }
+            if (error.status === 403 && error.code === 'SCOPE_FORBIDDEN') return null;
             if (error.status !== 404 || error.code !== 'NOT_FOUND') throw error;
             return { ...job, state: 'error', retryAt: 0, error: '后台任务状态已失效，请重新刷新' };
           }
         }));
         localDispatch('syncMeta', { jobs: jobs.filter(Boolean) });
-        if (scopeChanged) await readSnapshot();
       }
       // A completed job can advance the snapshot after the first conditional read.
-      if (localDispatch('snapshot').online.jobs?.some(job => job.state === 'completed')) await readSnapshot();
+      if (needsSnapshot) await readSnapshot();
       await acknowledgePreviewStationRules(previewSession);
       const result = localDispatch('syncMeta', { lastSuccessAt: Date.now(), error: '', errorCode: '' });
       uploadPreviewStationCandidates();
@@ -385,10 +387,12 @@ function jobOutcome(snapshot) {
 async function waitForOnline(snapshot, onProgress) {
   const deadline = Date.now() + 25000;
   let outcome = jobOutcome(snapshot);
+  let firstPoll = true;
   while (outcome.pending && !outcome.blocked && Date.now() < deadline) {
     const cooling = snapshot.online.jobs.some(job => job.state === 'queued' && job.retryAt > Date.now());
     onProgress?.({ label: cooling ? '已排队，冷却结束后将自动获取订单…' : '后台正在获取订单与物流…' });
-    await delay(1500);
+    await delay(firstPoll && !cooling ? 300 : 1500);
+    firstPoll = false;
     snapshot = await syncOnline(false);
     outcome = jobOutcome(snapshot);
   }

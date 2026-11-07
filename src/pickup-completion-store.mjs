@@ -74,7 +74,7 @@ export class PickupCompletionStore {
     const state = pickupCompletionState(shipment), prior = state.evidence;
     const enabledRules = [...builtinPickupCompletionRules, ...rules].filter(rule => rule.enabled);
     const priorValid = prior && enabledRules.some(rule => rule.id === prior.ruleId && rule.version === prior.ruleVersion);
-    const projectedEvents = [...(shipment.logisticsEvents || []), ...(prior ? [{ time: prior.eventTime, description: prior.description }] : [])];
+    const projectedEvents = [...(shipment.logisticsEvents || []), ...(prior ? [{ ...prior, time: prior.eventTime }] : [])];
     const evidence = detectPickupCompletion({ ...shipment, logisticsEvents: projectedEvents }, { rules, now: this.now() });
     if (state.autoPicked && (!priorValid || (!evidence && config.enabled))) {
       state.autoPicked = false; state.completedAt = 0; state.evidence = null;

@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.35 · 私人版</text><text class="version-date">2026-11-08</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">物流</text><text class="content">配合后台 3.1.31 保留平台已取件证据，修复明确签收被客服电话话术误判，自动领取后继续保留短信绑定</text></view>
+          <view class="update-item"><text class="tag optimize">同步</text><text class="content">减少重复查询并更快展示同步结果，后台以有限并发加快淘宝与拼多多物流获取</text></view>
+          <view class="update-item"><text class="tag optimize">卡片</text><text class="content">待发货、运输中移到待收包裹标题下，订单平台、商品和家人列保持对齐</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.34 · 私人版</text><text class="version-date">2026-11-07</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">设计</text><text class="content">全部页面和弹层统一为 B 版细腻柔雾，采用银灰背景、细白边缘和轻透玻璃层次</text></view>

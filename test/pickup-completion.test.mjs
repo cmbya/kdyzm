@@ -6,6 +6,42 @@ const NOW = 1800000000000;
 const event = (description, time = NOW - 1000) => ({ time, description });
 const detect = (...logisticsEvents) => detectPickupCompletion({ logisticsEvents }, { now: NOW });
 
+const pddCollected = (time = NOW - 1000) => ({ ...event('【代收点】您的快件已投递，收件人凭取件码在【示例菜鸟驿站】领取，如有疑问请电联代收点：10000000000', time),
+  provider: 'pdd', providerStatus: 'OUT_CABINET', providerStatusTag: '已取件', providerSubStatus: 'OUT_CABINET_501', providerStatusText: '已签收' });
+
+test('verified PDD out-cabinet event is completion even when carrier prose remains a pickup instruction', () => {
+  const collected = pddCollected(), result = detect(collected, event('已暂存至示例菜鸟驿站，请及时领取', NOW - 5000));
+  assert.equal(result?.kind, 'user_collected');
+  assert.equal(result.ruleId, 'builtin-pdd-out-cabinet-v1');
+  assert.equal(result.description, collected.description);
+  assert.equal(result.providerStatus, 'OUT_CABINET');
+  for (const override of [{ provider: '' }, { provider: 'other' }, { providerStatus: 'SIGNED' }, { providerStatusTag: '已签收' },
+    { providerSubStatus: 'OUT_CABINET_UNKNOWN' }, { time: 0 }, { time: NOW + 1 }, { description: '用户未领取，包裹已退回' }]) {
+    assert.equal(detect({ ...collected, ...override }), null, JSON.stringify(override));
+  }
+  assert.equal(detect(collected, event('已退回商家', NOW)), null);
+  assert.equal(detect(collected, { ...event('待取件', NOW), provider: 'pdd', providerStatus: 'IN_CABINET' }), null);
+  assert.equal(detect(collected, event('待取件', collected.time)), null);
+  for (const description of ['用户取件失败，包裹仍在驿站', '用户未取出包裹', '本人签收有误', '收件人领取后通知', '疑似本人取件']) {
+    assert.equal(detect({ ...collected, description }), null, description);
+  }
+});
+
+test('completed recipient actions survive separate courier contact boilerplate', () => {
+  for (const description of [
+    '您的快件已由本人签收，如有疑问请联系快递员：测试员（10000000000）',
+    '用户已取件。快递员：测试员（10000000000），网点电话：10000000001',
+    '收件人领取成功，如有问题请电联代收点：10000000002，快递员：测试员（10000000000）',
+  ]) assert.ok(detect(event(description)), description);
+  for (const description of [
+    '快递员称本人已签收',
+    '本人已签收，如有疑问请联系快递员，但实际未取件',
+    '本人已签收，快递员确认已退回',
+    '本人已签收，如有问题请联系快递员核实是否本人领取',
+    '【代收点】您的快件已投递，收件人凭取件码在【示例菜鸟驿站】领取，如有疑问请电联代收点：10000000002',
+  ]) assert.equal(detect(event(description)), null, description);
+});
+
 test('only explicit recipient signature or completed user collection counts', () => {
   for (const description of ['本人签收', '您的包裹已由本人签收', '收件人已签收', '签收人：本人', '签收人：收件人', '用户已取件', '收件人已取走', '收件人领取成功', '用户取件成功', '您已从丰巢柜取出']) {
     const result = detect(event(description));

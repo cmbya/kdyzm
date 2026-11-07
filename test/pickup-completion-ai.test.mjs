@@ -8,6 +8,13 @@ import { PickupCompletionAi } from '../src/pickup-completion-ai.mjs';
 import { detectPickupCompletion, validatePickupCompletionRule } from '../src/pickup-completion.mjs';
 import { completionFragment, completionNegativeSamples, validateCompletionSuggestion } from '../src/pickup-completion-ai-template.mjs';
 
+test('contact boilerplate keeps explicit completion eligible without sending contact details to AI', () => {
+  assert.deepEqual(completionFragment('本人已完成提货，如有疑问请联系快递员：测试员（10000000000）'),
+    { fragment: '本人已完成提货', kind: 'user_collected' });
+  assert.equal(completionFragment('本人已完成提货，如有疑问请联系快递员，但实际未取件'), null);
+  assert.equal(completionFragment('快递员称本人已完成提货'), null);
+});
+
 const NOW = Date.parse('2026-11-06T12:00:00+08:00'), FRAGMENT = '本人已完成提货';
 const reply = value => ({ choices: [{ message: { content: JSON.stringify(value) } }] });
 const suggestion = (changes = {}) => ({ kind: 'user_collected', keywords: [FRAGMENT], evidence: FRAGMENT, ...changes });
