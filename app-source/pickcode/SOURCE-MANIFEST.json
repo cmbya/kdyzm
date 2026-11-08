@@ -62,7 +62,7 @@
       "reason": "Unused upstream image barrel with a stale relative import."
     }
   ],
-  "localImportChecks": 159,
+  "localImportChecks": 168,
   "files": [
     {
       "path": ".semgrep.yml",
@@ -156,8 +156,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
-      "size": 75997,
-      "sha256": "b4ce2eccb83f496962cc4821a02c23c0e0e760c6281df2a2701db94810af13ca"
+      "size": 76753,
+      "sha256": "f5485ab311f07a536193db9f78eddd00aff457355df75e48bbf4dd48283c4fde"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
@@ -486,13 +486,23 @@
     },
     {
       "path": "components/LogisticsTimeline.vue",
-      "size": 4603,
-      "sha256": "657d002bedf2ccac798234440ab04be6a006e7672c8736689f548bc93b4b60f0"
+      "size": 4674,
+      "sha256": "5ce8428c012d802ddc1ded84784e4281d7cc02b7550f0809f38576bd229fa869"
+    },
+    {
+      "path": "components/OrderOverview.vue",
+      "size": 12679,
+      "sha256": "0093ff60c2e14ee0f8db6c09330f7b6828ae625dada01ded99fbe2f1c9f6aaa8"
+    },
+    {
+      "path": "components/ParcelJourney.vue",
+      "size": 11563,
+      "sha256": "ade0055441600b4168cbf8f952eccf042e4a56f31e58dc108c05f56d3eb0e0c9"
     },
     {
       "path": "components/PickupDetail.vue",
-      "size": 25132,
-      "sha256": "1410631c0b60876409733321531ce40273914330cbb9b464797d0c75f711dd33"
+      "size": 29276,
+      "sha256": "adb570d9074d3769a6131430a1ec3c32137cbe63958e0b4448ff99897259add4"
     },
     {
       "path": "components/PickupStamp.vue",
@@ -516,8 +526,8 @@
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 155910,
-      "sha256": "5ab74d7a47f7fb68d570c1b032b1f81733884371359c55921d70f7e5927368b9"
+      "size": 165706,
+      "sha256": "1b7c2c7cfc968341e49b557a17bbf166358a4097fffd982e90518dae5aa099d4"
     },
     {
       "path": "index.html",
@@ -561,8 +571,8 @@
     },
     {
       "path": "pages/index/index.vue",
-      "size": 65098,
-      "sha256": "346af4fd9fa8882a149f40dda8856e85736404b33953e0a98213b8ef34205344"
+      "size": 67609,
+      "sha256": "cb04dde4c691a8094ae235b4c6f365d9bfeab8cb390500bcd8361134f332720b"
     },
     {
       "path": "pages/my/about.vue",
@@ -621,8 +631,8 @@
     },
     {
       "path": "pages/packages/index.vue",
-      "size": 70323,
-      "sha256": "86a29ff4af54a77eff4f2784f71ee08bdede606a09ed7aa4a304f836d4e361e6"
+      "size": 77218,
+      "sha256": "a69d108fecc4fe48dc0642ea1d61bd8238f96e7534535a64b9a5c382138a6d75"
     },
     {
       "path": "scripts/ai-context.mjs",
@@ -713,6 +723,11 @@
       "path": "services/pairing-scan.js",
       "size": 14819,
       "sha256": "b0d52bacb9e685c5d1c0dc17e2315f3a4ecc7711e6ee236da1c429b1295dd4b7"
+    },
+    {
+      "path": "services/parcel-journey.js",
+      "size": 7045,
+      "sha256": "08a8c4d88eb444a2dcc385271c6080a57d7714c11a31472863272dae904c8e27"
     },
     {
       "path": "services/pickup-groups.js",
@@ -863,6 +878,11 @@
       "path": "static/images/package.png",
       "size": 6602,
       "sha256": "6d53d86994a401b76b8a2c36732360ce4e4a43537523cfc40c3868a88f7593a9"
+    },
+    {
+      "path": "static/images/parcel-journey-car.png",
+      "size": 38440,
+      "sha256": "cd91f41233c451d368241a8b6f3c9f800f7bd6434e72447b5f0891bec2327b5c"
     },
     {
       "path": "static/images/parcel-outline.svg",

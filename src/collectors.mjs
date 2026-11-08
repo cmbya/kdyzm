@@ -3,7 +3,7 @@
 // This adapter intentionally does not inherit upstream's automatic "picked" transitions.
 import { createHash } from 'node:crypto';
 import { discoverPddSplit, fetchPddSplitTrack } from './pdd-split.mjs';
-import { activeKnownOrders, activeKnownParcels, eventStatus, homeDeliveryCompleted, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDate, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
+import { activeKnownOrders, activeKnownParcels, eventStatus, homeDeliveryCompleted, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, orderTimePrecision, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDateEvidence, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
@@ -170,10 +170,11 @@ function taobaoOrderInfo(order) {
   const tradeStatus = asText(order.tradeStatus || order.extra?.tradeStatus || order.statusInfo?.tradeStatus);
   const orderStatus = asText(order.statusText || order.statusInfo?.text || order.extra?.statusText || order.extra?.tradeStatus);
   const orderDate = timestamp(order.createTime || order.orderTime || order.extra?.createTime);
+  const orderDatePrecision = orderTimePrecision(order.createTime || order.orderTime || order.extra?.createTime);
   const rawAmount = order.payInfo?.actualFee ?? order.payInfo?.actualPay;
   const amount = rawAmount != null && /^\d+(?:\.\d+)?$/.test(String(rawAmount)) ? Number(rawAmount) : null;
   const title = (order.subOrders || []).map(s => s.itemInfo?.title || '').filter(Boolean).join(' / ');
-  return { platformOrderId, tradeStatus, orderStatus, orderDate, amount, title, refundStatus: asText(order.refundStatus) };
+  return { platformOrderId, tradeStatus, orderStatus, orderDate, orderDatePrecision, amount, title, refundStatus: asText(order.refundStatus) };
 }
 
 function taobaoOrderKind({ tradeStatus, orderStatus }) {
@@ -186,7 +187,7 @@ function taobaoOrderKind({ tradeStatus, orderStatus }) {
   return 'skip';
 }
 
-export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules) {
+export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules, checkedAt) {
   const packages = fields.multiPackages?.packages || [];
   const baseNo = asText(fields.mailNo || fields.logisticCompany?.mailNo);
   const sources = packages.length ? packages.filter(p => p?.mailNo).map(p => ({ ...p, mailNo: asText(p.mailNo) })) : baseNo ? [{ mailNo: baseNo }] : [];
@@ -223,7 +224,7 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules)
       && !/(?:未|待|拒绝?|请|等待|当面)[^，,。；;！？!?]{0,8}(?:已完成签收|签收成功|已签收)/.test(latestBody);
     const latestSigned = homeDeliveryCompleted(latest) || (!latestTransitTitle && /^(?:签收|已签收|签收成功)$/.test(latestTitle)) || (!latestTransitTitle && latestBodySigned);
     const status = latestAtPickupPoint ? 'arrived' : latestSigned ? 'signed' : latestTransit ? 'transit' : arrived ? 'arrived' : 'unknown';
-    const { events: logisticsEvents, truncated: logisticsTruncated } = taobaoStageEvents(stages, timestamp, stageText);
+    const { events: logisticsEvents, truncated: logisticsTruncated } = taobaoStageEvents(stages, timestamp, stageText, rules, checkedAt);
     const evidence = pickupEvidence(stages.filter(stage => stage && !/^送至/.test(asText(stage.title))).map(stage => {
       const rawTime = stage.time || stage.date || stage.occurTime || stage.subtitle;
       const description = `${stage.title || ''}：${stageText(stage)}`;
@@ -260,9 +261,9 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       const data = await mtop(session, { appVersion: '3.0', appName: 'tborder', archive: false, from: 'OrderListActivity', useV2: 'true',
         bizOrderId: metadata.platformOrderId, extParams: JSON.stringify({ weexPage: 'neworderdetail4', isTBH5: 'true', useNewDetail: true, appChannel: '' }),
         ttid: '201200@taobao_h5_9.18.0', requestIdentity: '#t#ip#h5', condition: JSON.stringify({ version: '1.0.0' }) }, false, true);
-      const orderDate = taobaoDetailDate(data, timestamp);
+      const { orderDate, orderDatePrecision } = taobaoDetailDateEvidence(data, timestamp);
       Object.assign(metadata, { dateState: orderDate ? 'ok' : 'empty', dateError: orderDate ? '' : '平台详情未返回有效下单日期' });
-      if (orderDate) Object.assign(metadata, { orderDate, orderDateOrigin: 'detail' });
+      if (orderDate) Object.assign(metadata, { orderDate, orderDatePrecision, orderDateOrigin: 'detail' });
     } catch (error) {
       if (mustStopLogistics(error, durableLogistics)) { stopped = error; interruption++; throw error; }
       Object.assign(metadata, { dateState: 'error', dateError: error.code === 'UPSTREAM_BLOCKED' ? '平台拒绝日期查询或触发风控，请稍后重试' : '日期查询未完成，已保留原日期' });
@@ -277,7 +278,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       const result = await platformRequest(`https://pages-g.m.taobao.com/wow/z/app/mtb/logisticsV2/h5-detail?x-ssr=true&bizOrderId=${encodeURIComponent(platformOrderId)}`, session.cookie, { fetchImpl });
       const fields = extractSsrFields(result.text);
       if (!fields) warnings.push('部分订单暂无可解析物流，订单仍保留');
-      const parcels = taobaoParcels(fields || {}, platformOrderId, pickupCodes[platformOrderId], rules);
+      const parcels = taobaoParcels(fields || {}, platformOrderId, pickupCodes[platformOrderId], rules, checkedAt);
       // A partial split response must also record the attempt for known active
       // waybills it omits, without copying another parcel's events or pickup code.
       for (const parcel of knownParcels(platformOrderId)) {
@@ -333,7 +334,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
         const kind = taobaoOrderKind(info);
         if (kind === 'skip') skippedCount++;
         const isKnown = tracked.has(platformOrderId);
-        const metadata = { platformOrderId, tradeStatus: info.tradeStatus, orderStatus: info.orderStatus, orderDate: info.orderDate, ...(info.orderDate ? { orderDateOrigin: 'list' } : {}), refundStatus: info.refundStatus };
+        const metadata = { platformOrderId, tradeStatus: info.tradeStatus, orderStatus: info.orderStatus, orderDate: info.orderDate, orderDatePrecision: info.orderDatePrecision, ...(info.orderDate ? { orderDateOrigin: 'list' } : {}), refundStatus: info.refundStatus };
         // Rejected orders are metadata-only. A previously imported order is
         // allowed through for a detail refresh, even after it reaches a terminal
         // platform status, so an old arrival cannot remain stale forever.
@@ -376,10 +377,10 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
         parcels.push(parcel);
       }
       if (parcel) {
-        const transit = taobaoTransitEvents(data, timestamp);
+        const transit = taobaoTransitEvents(data, timestamp, rules, checkedAt);
         const canUpdateStatus = parcel.status === 'unknown' || !parcel.logisticsEvents.length
           || (parcel.logisticsEvents.every(event => event.time > 0) && transit.events[0]?.time >= parcel.logisticsEvents[0].time);
-        const combined = normalizeLogisticsEvents([...transit.events, ...parcel.logisticsEvents], timestamp);
+        const combined = normalizeLogisticsEvents([...transit.events, ...parcel.logisticsEvents], timestamp, rules, checkedAt);
         const events = combined.events;
         if (events.length) {
           parcel.logisticsEvents = events;
@@ -494,7 +495,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
   const splitOptions = platformOrderId => ({ expectedOrderId: platformOrderId, pddCheck,
     platformRequest: url => platformRequest(url, cookie, { fetchImpl, headers }) });
   const applyShipping = (parcel, shipping, checkedAt) => {
-    const { events, truncated } = pddShippingEvents(shipping, timestamp);
+    const { events, truncated } = pddShippingEvents(shipping, timestamp, rules, checkedAt);
     Object.assign(parcel, { logisticsEvents: events, logisticsTruncated: truncated,
       logisticsState: events.length ? 'ok' : 'empty', logisticsError: events.length ? '' : '平台本次未返回物流轨迹',
       logisticsCheckedAt: checkedAt, logisticsUpdatedAt: checkedAt });
@@ -617,7 +618,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
   for (const [platformOrderId, { order, kind, orderStatus, parcels }] of listedOrders) {
     const metadata = { platformOrderId, title: (order.order_goods || []).map(g => g.goods_name || g.goods_title || '').filter(Boolean).join(' / '),
       amount: Number.isFinite(order.order_amount) ? order.order_amount / 100 : null, orderDate: timestamp(order.order_time || order.created_time || order.create_time),
-      ...(timestamp(order.order_time || order.created_time || order.create_time) ? { orderDateOrigin: 'list' } : {}),
+      ...(timestamp(order.order_time || order.created_time || order.create_time) ? { orderDateOrigin: 'list', orderDatePrecision: orderTimePrecision(order.order_time || order.created_time || order.create_time) } : {}),
       orderStatus, refundStatus: asText(order.refund_status) };
     if (kind === 'skip') {
       skippedCount++; orderUpdates.push(metadata); seen.delete(platformOrderId);
@@ -718,7 +719,7 @@ export function jdParcels(data, platformOrderId, checkedAt, rules) {
     if (!Array.isArray(group.orderTrackShowList)) throw new CollectorError('UPSTREAM_FORMAT', '京东物流节点字段已变化，已保留原轨迹');
     const { events, truncated } = normalizeLogisticsEvents(group.orderTrackShowList.map(step => ({
       time: step.CreationTime, description: [asText(step.StatusName), asText(step.Content)].filter(Boolean).join('：'),
-    })), timestamp);
+    })), timestamp, rules, checkedAt);
     const latest = events[0];
     const pickupCode = pickupCycleReset(latest?.description || '') ? '' : asText(group.checkCode).trim() || codeOf(latest?.description || '');
     const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'transit', rules);
@@ -766,7 +767,7 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
       const submitDate = asText(data.processTimeInfo?.submitDate).replace(/\s*<br\s*\/?>\s*/gi, ' ');
       const orderDate = logisticsTimestamp(submitDate, timestamp);
       const terminal = returnedParcels.length && returnedParcels.every(parcel => parcel.status === 'signed');
-      const update = { platformOrderId, ...(orderDate ? { orderDate, orderDateOrigin: 'detail' } : {}), dateCheckedAt: checkedAt,
+      const update = { platformOrderId, ...(orderDate ? { orderDate, orderDatePrecision: orderTimePrecision(submitDate), orderDateOrigin: 'detail' } : {}), dateCheckedAt: checkedAt,
         dateState: orderDate ? 'ok' : 'empty', ...(terminal ? { orderStatus: '已签收' } : {}) };
       orderUpdates.push(update);
       shipments.push(...parcels);
@@ -813,7 +814,7 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
       const rawAmount = order.itemPayInfo?.shouldPay;
       const metadata = { platformOrderId, title: (order.wareList || []).map(ware => asText(ware.name)).filter(Boolean).join(' / '),
         amount: rawAmount != null && /^\d+(?:\.\d+)?$/.test(String(rawAmount)) ? Number(rawAmount) : null,
-        orderDate: timestamp(order.dateSubmit), orderDateOrigin: 'list', tradeStatus: asText(order.statusInfo?.orderState),
+        orderDate: timestamp(order.dateSubmit), orderDatePrecision: orderTimePrecision(order.dateSubmit), orderDateOrigin: 'list', tradeStatus: asText(order.statusInfo?.orderState),
         orderStatus: asText(order.statusInfo?.orderStateName) };
       if (kind === 'skip') { skipped++; orderUpdates.push(metadata); }
       else orders.push(metadata);

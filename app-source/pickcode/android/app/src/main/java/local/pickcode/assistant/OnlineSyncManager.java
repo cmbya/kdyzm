@@ -544,6 +544,15 @@ public final class OnlineSyncManager {
                         || shipment.isEmpty() || shipment.length() > 200)
                     throw new OnlineClient.Failure("invalid_operation", "离线操作格式无效，已保留本地记录");
                 value.put("shipmentId", shipment);
+                if (operation.has("pickedAt")) {
+                    Object raw = operation.get("pickedAt");
+                    double confirmedAt = raw instanceof Number ? ((Number) raw).doubleValue() : Double.NaN;
+                    if (!"pick".equals(action) || Double.isNaN(confirmedAt) || Double.isInfinite(confirmedAt)
+                            || confirmedAt < 0 || confirmedAt > 9007199254740991D || confirmedAt != Math.floor(confirmedAt)
+                            || confirmedAt > operation.getLong("occurredAt"))
+                        throw new OnlineClient.Failure("invalid_operation", "离线领取时间无效，已保留本地记录");
+                    value.put("pickedAt", ((Number) raw).longValue());
+                }
                 if (operation.has("pickupCycleId")) {
                     String cycle = operation.optString("pickupCycleId");
                     if (!cycle.matches("[A-Za-z0-9_-]{1,128}")) throw invalidResponse();

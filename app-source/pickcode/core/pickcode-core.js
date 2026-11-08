@@ -627,6 +627,8 @@ var PickCodeCore = (function () {
   function capability(state,name) { return (state.online.capabilities||[]).indexOf(name)>=0; }
   function extendState(state) {
     state.orders=state.orders||[]; state.shipments=state.shipments||[]; state.operations=state.operations||[];
+    // An old queued operation may already have reached the server. Never add wire fields on retry.
+    state.operations.forEach(function(op){if(op.action==='pick'&&typeof op.wirePickedAt!=='boolean')op.wirePickedAt=false;});
     state.settings=state.settings||{};state.settings.stationEnhancement=state.settings.stationEnhancement===true;state.settings.manualLearning=state.settings.manualLearning!==false;
     state.matchingFeedback=state.matchingFeedback||{items:[],lastError:'',lastUploadAt:0};
     state.matchingFeedback.items=state.matchingFeedback.items||[];
@@ -687,29 +689,60 @@ var PickCodeCore = (function () {
       if(existing){
         existing.shipmentId=s.id;
         var allKnownCollected=!groupNeedsMatchReview(state,i)&&liveSources(state,i).some(function(source){var parsed=sourceParsed(state,source);return parsed.kind==='pickup'&&Number(parsed.packageCount)>=i.members.length;});
-        if(existing.picked&&s.manualPicked===undefined&&(existing.independentPicked===undefined||allKnownCollected)){delete existing.independentPicked;setShipmentPicked(state,s,true);}
+        if(existing.picked&&s.manualPicked===undefined&&(existing.independentPicked===undefined||allKnownCollected)){delete existing.independentPicked;setShipmentPicked(state,s,true,i.members.length>1?commonPickupTime(i.members):recordedPickup(existing));}
       }
       else {existing={id:newId(state,'member-'),shipmentId:s.id,picked:!!s.picked};i.members.push(existing);}
     }
     if(existing.independentPicked!==undefined)existing.picked=!!existing.independentPicked;
-    else if(s.pickupCompletion||s.manualPicked!==undefined||s.picked)existing.picked=!!s.picked;
+    else if(s.pickupCompletion||s.manualPicked!==undefined||s.picked){existing.picked=!!s.picked;savePickupTime(existing,recordedPickup(s));}
     if(i.deleted){s.hidden=true;s.manualHidden=true;}
     return existing;
   }
   function queueOperation(state,s,action) {
     if(!boundShipment(state,s))return;
     var op={id:state.clientId+'-'+newId(state,'op-'),shipmentId:s.remoteId,action:action,occurredAt:Date.now(),serviceKey:s.serviceKey,deviceId:state.online.deviceId};
+    if(action==='pick'){op.pickedAt=timestamp(s.pickedAt);op.wirePickedAt=capability(state,'pickup_confirmed_at_v1');}
     if(['pick','restore','resumeAutoPickup'].indexOf(action)>=0){op.localCycleId=ensurePickupCycle(state,s).id;if(capability(state,'pickup_cycles_v1')&&s.pickupCycle.remoteId)op.pickupCycleId=s.pickupCycle.remoteId;}
     state.operations.push(op);
+    if(['pick','restore','resumeAutoPickup'].indexOf(action)>=0){s.pickupManualAt=op.occurredAt;s.pickupManualAction=action;s.pickupManualOperation=state.online.deviceId+':'+op.id;s.pickupManualPickedAtSent=op.wirePickedAt===true;}
   }
-  function setMemberPicked(state,m,picked,independent) {
+  function recordedPickup(value) {
+    var unknown={at:0,source:'unknown',precision:'unknown'};
+    if(!value||!value.picked)return unknown;
+    if(value.pickedAt!==undefined)return {at:timestamp(value.pickedAt),source:value.pickedAtSource||'unknown',precision:value.pickedAtPrecision||'unknown'};
+    var completion=value.pickupCompletion;
+    if(value.pickupManualAction==='pick'&&completion&&completion.manualOverride==='picked'){
+      var manualAt=timestamp(value.pickupConfirmedAt!==undefined?value.pickupConfirmedAt:value.pickupManualAt);
+      return {at:manualAt,source:manualAt?'user_confirmed':'unknown',precision:manualAt?'second':'unknown'};
+    }
+    var evidence=completion&&completion.evidence;
+    if(completion&&!completion.manualOverride&&completion.autoPicked&&evidence&&['user_collected','recipient_pickup','recipient_signed'].indexOf(evidence.kind)>=0){
+      var at=timestamp(evidence.eventTime),event=(value.logisticsEvents||[]).filter(function(e){return e.time===at&&e.description===evidence.description;})[0];
+      return {at:at,source:evidence.kind==='recipient_signed'?'recipient_signed':'platform_pickup',precision:evidence.timePrecision||event&&event.timePrecision||'unknown'};
+    }
+    return unknown;
+  }
+  function savePickupTime(value,timing) {
+    value.pickedAt=timestamp(timing.at);value.pickedAtSource=value.pickedAt?timing.source:'unknown';value.pickedAtPrecision=value.pickedAt?timing.precision:'unknown';
+  }
+  function clearPickupTime(value) { delete value.pickedAt;delete value.pickedAtSource;delete value.pickedAtPrecision;delete value.pickedAtCycleId; }
+  function commonPickupTime(members) {
+    var rows=members.filter(function(m){return m.picked;}).map(recordedPickup),first=rows[0];
+    return first&&first.at&&rows.every(function(row){return row.at===first.at&&row.source===first.source;})?first:{at:0,source:'unknown',precision:'unknown'};
+  }
+  function setMemberPicked(state,m,picked,independent,timing) {
+    timing=timing===undefined?(m.picked?recordedPickup(m):{at:Date.now(),source:'user_confirmed',precision:'second'}):timing;
     m.picked=!!picked;
+    if(picked)savePickupTime(m,timing);else clearPickupTime(m);
     if(independent||!m.shipmentId||m.independentPicked!==undefined){m.independentPicked=!!picked;return;}
     var s=byId(state.shipments,m.shipmentId);
-    if(s)setShipmentPicked(state,s,picked);
+    if(s)setShipmentPicked(state,s,picked,timing);
   }
-  function setShipmentPicked(state,s,picked) {
+  function setShipmentPicked(state,s,picked,timing) {
+    timing=timing===undefined?(s.picked?recordedPickup(s):{at:Date.now(),source:'user_confirmed',precision:'second'}):timing;
     s.picked=!!picked;s.manualPicked=!!picked;
+    if(picked){savePickupTime(s,timing);s.pickedAtCycleId=ensurePickupCycle(state,s).id;s.pickupConfirmedAt=s.pickedAt;}
+    else {clearPickupTime(s);s.pickupConfirmedAt=0;}
     if(s.pickupCompletion)s.pickupCompletion.manualOverride=picked?'picked':'pending';
     queueOperation(state,s,picked?'pick':'restore');
   }
@@ -717,6 +750,7 @@ var PickCodeCore = (function () {
     if(!input||input.version!==1||typeof input.autoPicked!=='boolean'||['','picked','pending'].indexOf(input.manualOverride)<0)return null;
     var e=input.evidence,evidence=null;
     if(e&&typeof e==='object'){evidence={kind:text(e.kind,60),description:text(e.description,600),eventTime:timestamp(e.eventTime),fingerprint:text(e.fingerprint,200),ruleId:text(e.ruleId,120),ruleVersion:text(e.ruleVersion,80)};mergeProviderEventFields(evidence,e);}
+    if(evidence&&['second','minute','unknown'].indexOf(e.timePrecision)>=0)evidence.timePrecision=e.timePrecision;
     return {version:1,autoPicked:input.autoPicked,manualOverride:input.manualOverride,completedAt:timestamp(input.completedAt),evidence:evidence};
   }
   function importCompletion(state,s,input,supported) {
@@ -732,10 +766,25 @@ var PickCodeCore = (function () {
     if(pending.length){
       var latest=pending[pending.length-1];
       next.manualOverride=latest.action==='pick'?'picked':latest.action==='restore'?'pending':'';
+      s.pickupManualAt=latest.occurredAt;s.pickupManualOperation=latest.deviceId+':'+latest.id;s.pickupManualAction=latest.action;s.pickupManualPickedAtSent=latest.wirePickedAt===true;
+      if(latest.action==='pick'&&latest.pickedAt!==undefined){savePickupTime(s,{at:timestamp(latest.pickedAt),source:'user_confirmed',precision:'second'});s.pickupConfirmedAt=timestamp(latest.pickedAt);s.pickedAtCycleId=ensurePickupCycle(state,s).id;}
+      else if(latest.action!=='pick'){clearPickupTime(s);s.pickupConfirmedAt=0;if(latest.action==='resumeAutoPickup')savePickupTime(s,{at:0,source:'unknown',precision:'unknown'});}
       // Keep the optimistic manual state until the server acknowledges and returns its decision.
     } else {
       s.picked=next.manualOverride==='picked'||(!next.manualOverride&&next.autoPicked);
       if(next.manualOverride)s.manualPicked=next.manualOverride==='picked';else delete s.manualPicked;
+      if(input.pickupManualAction!==undefined){
+        var sameOperation=s.pickupManualOperation&&s.pickupManualOperation===input.pickupManualOperation;
+        var preserveLocalTime=sameOperation&&s.pickedAt!==undefined&&s.pickupManualPickedAtSent!==true;
+        s.pickupManualAt=timestamp(input.pickupManualAt);s.pickupManualOperation=text(input.pickupManualOperation,400);s.pickupManualAction=['pick','restore','resumeAutoPickup'].indexOf(input.pickupManualAction)>=0?input.pickupManualAction:'';
+        if(!sameOperation)delete s.pickupManualPickedAtSent;
+        if(preserveLocalTime)s.pickupConfirmedAt=timestamp(s.pickedAt);
+        else if(input.pickupConfirmedAt!==undefined)s.pickupConfirmedAt=timestamp(input.pickupConfirmedAt);
+        else if(!sameOperation)delete s.pickupConfirmedAt;
+        if(next.manualOverride==='picked'&&s.pickupManualAction==='pick'){
+          if(!preserveLocalTime&&(!sameOperation||input.pickupConfirmedAt!==undefined)){clearPickupTime(s);savePickupTime(s,{at:timestamp(s.pickupConfirmedAt!==undefined?s.pickupConfirmedAt:s.pickupManualAt),source:'user_confirmed',precision:'second'});s.pickedAtCycleId=ensurePickupCycle(state,s).id;}
+        } else clearPickupTime(s);
+      } else if(next.manualOverride!=='picked')clearPickupTime(s);
     }
     s.pickupCompletion=next;return true;
   }
@@ -743,7 +792,7 @@ var PickCodeCore = (function () {
     var original=state.items.filter(function(i){return i.sourceIds.indexOf(source.id)>=0&&!i.mergedInto;})[0];
     if(manual&&original&&!original.isPicked){
       var anonymousPicked=original.members.filter(function(m){return !m.shipmentId&&m.picked;}).length;
-      if(anonymousPicked){original.unassignedPickedCount=Math.max(original.unassignedPickedCount||0,anonymousPicked);original.members.forEach(function(m){if(!m.shipmentId){m.picked=false;delete m.independentPicked;}});}
+      if(anonymousPicked){original.unassignedPickupTime=commonPickupTime(original.members.filter(function(m){return !m.shipmentId;}));original.unassignedPickedCount=Math.max(original.unassignedPickedCount||0,anonymousPicked);original.members.forEach(function(m){if(!m.shipmentId){m.picked=false;delete m.independentPicked;clearPickupTime(m);}});}
     }
     var target=groupForShipment(state,shipment.id);
     if(!target&&original){target=original;attachShipment(state,target,shipment);}
@@ -762,15 +811,16 @@ var PickCodeCore = (function () {
       addMembers(state,target,original.members.length);
       if(original.isPicked){
         var transferred=0;
-        if(!manual&&target.members.filter(function(m){return !!m.shipmentId;}).length>original.members.length)target.unassignedPickedCount=Math.max(target.unassignedPickedCount||0,original.members.length);
-        else target.members.forEach(function(m){if(manual?m.shipmentId===shipment.id:transferred<original.members.length){setMemberPicked(state,m,true);transferred++;}});
+        if(!manual&&target.members.filter(function(m){return !!m.shipmentId;}).length>original.members.length){target.unassignedPickedCount=Math.max(target.unassignedPickedCount||0,original.members.length);target.unassignedPickupTime=commonPickupTime(original.members);}
+        else target.members.forEach(function(m){if(manual?m.shipmentId===shipment.id:transferred<original.members.length){setMemberPicked(state,m,true,false,commonPickupTime(original.members));transferred++;}});
       }
       else {
         var anonymousPicked=original.members.filter(function(m){return !m.shipmentId&&m.picked;}).length;
         // A count-only SMS cannot tell which newly discovered waybill was collected.
         // Preserve the count and request explicit assignment before uploading any particular waybill.
         target.unassignedPickedCount=Math.max(target.unassignedPickedCount||0,anonymousPicked,original.unassignedPickedCount||0);
-        original.members.filter(function(m){return m.shipmentId&&m.picked;}).forEach(function(m){var same=target.members.filter(function(x){return x.shipmentId===m.shipmentId;})[0];if(same)setMemberPicked(state,same,true);});
+        if(anonymousPicked||original.unassignedPickedCount)target.unassignedPickupTime=original.unassignedPickupTime||commonPickupTime(original.members.filter(function(m){return !m.shipmentId;}));
+        original.members.filter(function(m){return m.shipmentId&&m.picked;}).forEach(function(m){var same=target.members.filter(function(x){return x.shipmentId===m.shipmentId;})[0];if(same)setMemberPicked(state,same,true,false,recordedPickup(m));});
       }
     }
     target.sourceIds=unique(target.sourceIds.concat(source.id));target.sourceId=target.sourceIds[0]||'';
@@ -918,7 +968,11 @@ var PickCodeCore = (function () {
     liveSources(state,i).forEach(function(source){var address=sourceStation(state,source),sourcePlace=publicStation(state,address);cabinetValues.push(address,rawSourceStation(state,source),sourcePlace.pickupCabinet);cabinetConflict=cabinetConflict||sourcePlace.pickupCabinetConflict;});
     members.forEach(function(member){var shipment=byId(state.shipments,member.shipmentId);if(shipment){var shipmentPlace=publicStation(state,shipment.station);cabinetValues.push(shipment.station,rawStation(shipment,'station'),shipmentPlace.pickupCabinet);cabinetConflict=cabinetConflict||shipmentPlace.pickupCabinetConflict;}});
     var cabinet=cabinetDisplay(cabinetValues);value.pickupCabinet=cabinetConflict?'':cabinet.pickupCabinet;value.pickupCabinetConflict=cabinetConflict||cabinet.pickupCabinetConflict;
-    value.members=members.map(function(m){var s=byId(state.shipments,m.shipmentId),o=s&&byId(state.orders,s.orderId);return {id:m.id,shipmentId:m.shipmentId,orderId:s?s.orderId:'',platformOrderId:o?o.platformOrderId||'':'',familyId:s?s.familyId||'':'',familyName:s?s.familyName||'':'',title:o?o.title:'待取包裹',platform:o?o.platform:'短信',waybillNo:s?s.waybillNo:'',picked:!!m.picked};});
+    value.members=members.map(function(m){var s=byId(state.shipments,m.shipmentId),o=s&&byId(state.orders,s.orderId),timing=recordedPickup(m.independentPicked!==undefined?m:s||m),member={id:m.id,shipmentId:m.shipmentId,orderId:s?s.orderId:'',platformOrderId:o?o.platformOrderId||'':'',familyId:s?s.familyId||'':'',familyName:s?s.familyName||'':'',title:o?o.title:'待取包裹',platform:o?o.platform:'短信',waybillNo:s?s.waybillNo:'',picked:!!m.picked,pickedAt:timing.at,pickedAtSource:timing.source,pickedAtPrecision:timing.precision};if(m.independentPicked!==undefined)member.independentPicked=!!m.independentPicked;return member;});
+    var timedMembers=value.members.filter(function(m){return m.picked&&m.pickedAt;});
+    value.pickedAt=timedMembers.length===members.length&&members.length?Math.max.apply(Math,timedMembers.map(function(m){return m.pickedAt;})):0;
+    var lastPicked=timedMembers.filter(function(m){return m.pickedAt===value.pickedAt;})[0];value.pickedAtSource=lastPicked?lastPicked.pickedAtSource:'unknown';value.pickedAtPrecision=lastPicked?lastPicked.pickedAtPrecision:'unknown';
+    value.arrivalAt=sources.length?Math.min.apply(Math,sources.map(function(source){return source.date;})):0;value.arrivalAtSource=value.arrivalAt?'sms_received':'unknown';value.arrivalAtPrecision='unknown';
     value.families=[];value.members.forEach(function(m){if(!value.families.some(function(f){return f.id===m.familyId;}))value.families.push({id:m.familyId,name:m.familyId?(m.familyName||'家人'):'待归属'});});
     value.totalCount=members.length;value.unassignedPickedCount=Math.min(i.unassignedPickedCount||0,members.filter(function(m){return !m.picked;}).length);
     value.needsPickupAssignment=value.unassignedPickedCount>0;
@@ -1027,12 +1081,14 @@ var PickCodeCore = (function () {
     var disposition=shipmentDisposition(s),returning=disposition&&['returning','returned'].indexOf(disposition.kind)>=0;
     var homeDelivery=!returning&&(disposition&&disposition.kind==='doorstep'||s.status==='signed'&&!pickup&&!atPickupPoint&&(!validCode(s.pickupCode)||atHome));
     var linkReason=matchLinkReason(state,s,null,false),station=publicStation(state,s.station);
-    var archived=shipmentArchived(state,s),autoReceived=!s.picked&&expiredReceived(state,s),received=!!s.picked||autoReceived;
+    var archived=shipmentArchived(state,s),autoReceived=!s.picked&&expiredReceived(state,s),received=!!s.picked||autoReceived,order=byId(state.orders,s.orderId),timing=recordedPickup(s);
     return {id:s.id,familyId:s.familyId||'',familyName:s.familyName||'',waybillNo:s.waybillNo,carrier:s.carrier,status:returning?disposition.kind:shipmentStatus(state,s),pickupCode:homeDelivery||returning?'':s.pickupCode,station:s.station,stationCorrection:publicCorrection(state,s),arrivalAt:s.arrivalAt||s.smsArrivalAt||0,picked:received,archived:archived,receiptState:autoReceived?'expired_signed':s.picked?'picked':'pending',receiptLabel:autoReceived?'超期自动确认收到':'',hidden:packageHidden(state,s),pickupDisposition:disposition,pickupCycle:clone(s.pickupCycle),pickupCycleHistory:clone(s.pickupCycleHistory||[]),
       stationCanonical:station.stationCanonical,stationCanonicalId:station.stationCanonicalId,stationSubLocation:station.stationSubLocation,stationDisplayName:station.stationDisplayName,pickupCabinet:pickup?pickup.pickupCabinet:station.pickupCabinet,pickupCabinetConflict:pickup?pickup.pickupCabinetConflict:station.pickupCabinetConflict,
       isHomeDelivery:homeDelivery,needsReceiptConfirmation:homeDelivery&&!received&&!archived&&!packageHidden(state,s),pickupCompletion:s.pickupCompletion?clone(s.pickupCompletion):undefined,
+      orderDate:order?(dateOnly(order.dateOverride)||order.orderDate||0):0,orderDateSource:order?(order.dateOverride?'manual':order.orderDateSource||'unknown'):'unknown',orderDatePrecision:order?(order.dateOverride?'day':order.orderDatePrecision||'unknown'):'unknown',
+      shippedAt:s.shippedAt||0,shippedAtSource:s.shippedAtSource||'unknown',shippedAtPrecision:s.shippedAtPrecision||'unknown',pickedAt:timing.at,pickedAtSource:timing.source,pickedAtPrecision:timing.precision,pickedAtCycleId:s.pickedAtCycleId||'',pickupManualAt:s.pickupManualAt||0,pickupManualAction:s.pickupManualAction||'',pickupManualOperation:s.pickupManualOperation||'',pickupConfirmedAt:s.pickupConfirmedAt,
       canPick:boundShipment(state,s)&&!returning&&!archived,displayPickupCode:pickup?(pickup.conflicts.length?'':pickup.code):'',pickupConflict:!!(pickup&&pickup.conflicts.length),pickupId:pickup?pickup.id:'',needsPickupAssignment:!!(pickup&&pickup.needsPickupAssignment),
-      canLinkPickup:!linkReason,pickupLinkReason:linkReason,arrivalAtSource:s.arrivalAtSource||'unknown',arrivalAtPrecision:s.arrivalAtPrecision||'unknown',stationSource:s.stationSource||'unknown',
+      canLinkPickup:!linkReason,pickupLinkReason:linkReason,arrivalAtSource:s.arrivalAt?s.arrivalAtSource||'unknown':'unknown',arrivalAtPrecision:s.arrivalAt?s.arrivalAtPrecision||'unknown':'unknown',stationSource:s.stationSource||'unknown',
       logisticsEvents:events,logisticsState:s.logisticsState||'',logisticsError:s.logisticsError?'本次物流查询未成功，已保留历史轨迹':'',logisticsCheckedAt:s.logisticsCheckedAt||0,logisticsUpdatedAt:s.logisticsUpdatedAt||0,logisticsTruncated:!!s.logisticsTruncated};
   }
   function publicPackages(state,codes) {
@@ -1047,7 +1103,7 @@ var PickCodeCore = (function () {
       var unpicked=active.filter(function(s){return !s.picked&&!expiredReceived(state,s);});
       var status=waiting?'pending':active.length&&!unpicked.length?'picked':unpicked.some(function(s){return shipmentStatus(state,s)==='arrived'||(s.status==='unknown'&&s.smsArrivalAt);})?'awaiting_code':unpicked.some(function(s){return shipmentStatus(state,s)==='transit';})?'transit':unpicked.some(function(s){return shipmentStatus(state,s)==='signed';})?'signed':unpicked.some(function(s){return shipmentStatus(state,s)==='returning';})?'returning':unpicked.length&&unpicked.every(function(s){return shipmentStatus(state,s)==='returned';})?'returned':o.source==='manual'?'manual':'unknown';
        var retention=orderRetention(o,Date.now());
-       return {id:o.id,source:o.source,familyId:o.familyId||'',familyName:o.familyName||'',platform:o.platform,platformOrderId:o.platformOrderId||'',title:o.title,amount:o.amount,waybillNo:o.waybillNo||'',orderDate:dateOnly(o.dateOverride)||o.orderDate,orderDateSource:o.dateOverride?'manual':o.orderDateSource||(o.source==='manual'?'manual':o.orderDate?'legacy':'unknown'),orderDateOrigin:o.orderDateOrigin||'',dateCheckedAt:o.dateCheckedAt||0,firstSeenAt:o.firstSeenAt||0,tradeStatus:o.tradeStatus||'',status:status,orderStatus:o.orderStatus||'',refundStatus:o.refundStatus||'',archived:retention.archived,retention:retention,archiveRestoredAnchor:o.archiveRestoredAnchor||'',archiveRestoredAt:o.archiveRestoredAt||0,hidden:!!(o.hidden||o.deleted),checked:!!o.checked,shipments:ships.map(function(s){return publicShipment(state,s);}),pickupIds:pickupIds,
+       return {id:o.id,source:o.source,familyId:o.familyId||'',familyName:o.familyName||'',platform:o.platform,platformOrderId:o.platformOrderId||'',title:o.title,amount:o.amount,waybillNo:o.waybillNo||'',orderDate:dateOnly(o.dateOverride)||o.orderDate,orderDateSource:o.dateOverride?'manual':o.orderDateSource||(o.source==='manual'?'manual':o.orderDate?'legacy':'unknown'),orderDatePrecision:o.dateOverride?'day':o.orderDatePrecision||'unknown',orderDateOrigin:o.orderDateOrigin||'',dateCheckedAt:o.dateCheckedAt||0,firstSeenAt:o.firstSeenAt||0,tradeStatus:o.tradeStatus||'',status:status,orderStatus:o.orderStatus||'',refundStatus:o.refundStatus||'',archived:retention.archived,retention:retention,archiveRestoredAnchor:o.archiveRestoredAnchor||'',archiveRestoredAt:o.archiveRestoredAt||0,hidden:!!(o.hidden||o.deleted),checked:!!o.checked,shipments:ships.map(function(s){return publicShipment(state,s);}),pickupIds:pickupIds,
         canRefresh:boundOrder(state,o)&&capability(state,'orderRefresh'),canEditDate:boundOrder(state,o)&&capability(state,'orderDateOverride'),dateOverride:o.dateOverride||null,platformOrderDate:o.orderDate||0,platformOrderDateSource:o.orderDateSource||'unknown',dateState:o.dateState||'',dateError:o.dateError?'平台未返回可用下单日期，可重试或手动修改':''};
     }).sort(function(a,b){return b.orderDate-a.orderDate;});
   }
@@ -1055,14 +1111,15 @@ var PickCodeCore = (function () {
     if(op.status==='cycle_closed')return false;
     var orderAction=op.action==='setOrderDate'||op.action==='restoreExpiredOrder',owners=orderAction?state.orders:state.shipments,remoteId=orderAction?op.orderId:op.shipmentId;
     return state.online.bound&&op.serviceKey===state.online.serviceKey&&op.deviceId===state.online.deviceId&&owners.some(function(o){return (o.remoteId===remoteId||!orderAction&&(o.remoteAliases||[]).indexOf(remoteId)>=0)&&o.serviceKey===op.serviceKey&&(orderAction?boundOrder(state,o):boundShipment(state,o));});
-  }).map(function(op){if(op.action==='setOrderDate')return {id:op.id,orderId:op.orderId,action:op.action,date:op.date,occurredAt:op.occurredAt};if(op.action==='restoreExpiredOrder')return {id:op.id,orderId:op.orderId,action:op.action,anchorDate:op.anchorDate,occurredAt:op.occurredAt};var value={id:op.id,shipmentId:op.shipmentId,action:op.action,occurredAt:op.occurredAt};if(op.pickupCycleId)value.pickupCycleId=op.pickupCycleId;return value;});}
+    }).map(function(op){if(op.action==='setOrderDate')return {id:op.id,orderId:op.orderId,action:op.action,date:op.date,occurredAt:op.occurredAt};if(op.action==='restoreExpiredOrder')return {id:op.id,orderId:op.orderId,action:op.action,anchorDate:op.anchorDate,occurredAt:op.occurredAt};var value={id:op.id,shipmentId:op.shipmentId,action:op.action,occurredAt:op.occurredAt};if(op.pickupCycleId)value.pickupCycleId=op.pickupCycleId;if(op.action==='pick'&&op.pickedAt!==undefined&&op.wirePickedAt===true)value.pickedAt=op.pickedAt;return value;});}
   function clearPickupCycle(state,shipment,evidence,completion) {
-    var previous=clone(ensurePickupCycle(state,shipment));previous.status='closed';previous.closedAt=evidence.time;previous.closeReason='logistics_reroute';previous.completion=clone(completion||shipment.pickupCompletion||{picked:!!shipment.picked,manualPicked:shipment.manualPicked});
+    var previous=clone(ensurePickupCycle(state,shipment));previous.status='closed';previous.closedAt=evidence.time;previous.closeReason='logistics_reroute';previous.completion=clone(completion||shipment.pickupCompletion||{picked:!!shipment.picked,manualPicked:shipment.manualPicked});previous.pickupTime=recordedPickup(shipment);
     shipment.pickupCycleHistory.push(previous);
     state.pickupBindings.filter(function(b){return b.shipmentId===shipment.id&&b.cycleId===previous.id&&(b.status==='confirmed'||b.status==='review_required');}).forEach(function(b){bindingStatus(b,'cycle_closed','logistics_reroute');});
     shipment.pickupCycle={id:newId(state,'cycle-'),startedAt:evidence.time,status:'active',evidenceKey:JSON.stringify([evidence.time,evidence.description])};
     state.operations.forEach(function(op){if(op.shipmentId===shipment.remoteId&&op.serviceKey===shipment.serviceKey&&['pick','restore','resumeAutoPickup'].indexOf(op.action)>=0&&(op.localCycleId===previous.id||!op.localCycleId&&op.occurredAt<evidence.time)){op.status='cycle_closed';op.closeReason='pickup_cycle_changed';}});
     delete shipment.manualPicked;shipment.picked=false;
+    clearPickupTime(shipment);delete shipment.pickupManualAt;delete shipment.pickupManualAction;delete shipment.pickupManualOperation;delete shipment.pickupConfirmedAt;delete shipment.pickupManualPickedAtSent;
     if(shipment.pickupCompletion)shipment.pickupCompletion={version:1,autoPicked:false,manualOverride:'',completedAt:0,evidence:null};
     var group=groupForShipment(state,shipment.id);shipment.smsArrivalAt=0;
     var correction=shipment.stationCorrection;
@@ -1095,6 +1152,7 @@ var PickCodeCore = (function () {
       if(ship===target)return;
       state.shipmentIdentityHistory.push({shipment:clone(ship),targetShipmentId:target.id,reason:'server_confirmed_alias',mergedAt:Date.now()});
       ['manualPicked','manualHidden','stationCorrection'].forEach(function(key){if(target[key]===undefined&&ship[key]!==undefined)target[key]=clone(ship[key]);});
+      if(target.pickedAt===undefined&&ship.pickedAt!==undefined){savePickupTime(target,recordedPickup(ship));target.pickedAtCycleId=ensurePickupCycle(state,target).id;['pickupManualAt','pickupManualAction','pickupManualOperation','pickupConfirmedAt','pickupManualPickedAtSent'].forEach(function(key){if(ship[key]!==undefined)target[key]=ship[key];});}
       if(target.manualPicked!==undefined)target.picked=target.manualPicked;
       if(target.manualHidden!==undefined)target.hidden=target.manualHidden;
       target.remoteAliases=unique((target.remoteAliases||[]).concat(ship.remoteId,ship.remoteCanonicalId||'',ship.remoteAliases||[]));
@@ -1136,6 +1194,7 @@ var PickCodeCore = (function () {
       o.platform=text(input.platform,40)||'其他';o.platformOrderId=text(input.platformOrderId,200);o.title=text(input.title,200)||'线上包裹';
       o.amount=typeof input.amount==='number'&&isFinite(input.amount)&&input.amount>=0?input.amount:null;
       var inputDate=timestamp(input.orderDate);
+      if(input.orderDatePrecision!==undefined||(snap.capabilities||[]).indexOf('pickup_confirmed_at_v1')>=0)o.orderDatePrecision=['second','minute','day'].indexOf(input.orderDatePrecision)>=0?input.orderDatePrecision:'unknown';
       var detailCorrection=input.orderDateSource==='platform'&&input.orderDateOrigin==='detail'&&(o.orderDateOrigin!=='detail'||timestamp(input.dateCheckedAt)>=(o.dateCheckedAt||0));
       if(o.orderDateSource!=='platform'||(inputDate&&detailCorrection)){
         o.orderDate=inputDate||o.orderDate||0;
@@ -1203,6 +1262,7 @@ var PickCodeCore = (function () {
       if(preserveCompletedPickup)s.completionPickupRetained=true;
       retainFamily(s,input);if(!s.familyId)retainFamily(s,order);
       s.waybillNo=text(input.waybillNo,60);s.carrier=text(input.carrier,60);s.status=['transit','arrived','signed','unknown'].indexOf(input.status)>=0?input.status:'unknown';
+      if(input.shippedAt!==undefined||(snap.capabilities||[]).indexOf('pickup_confirmed_at_v1')>=0){s.shippedAt=timestamp(input.shippedAt);s.shippedAtSource=input.shippedAtSource==='platform_event'?'platform_event':'unknown';s.shippedAtPrecision=['second','minute'].indexOf(input.shippedAtPrecision)>=0?input.shippedAtPrecision:'unknown';}
       s.station=text(input.station,200)||s.station||'';s.arrivalAt=s.arrivalAt||timestamp(input.arrivalAt);
       if(input.arrivalAtSource!==undefined&&(!preservePickup||timestamp(input.arrivalAt))){s.arrivalAt=timestamp(input.arrivalAt);s.arrivalAtSource=['platform_event','locker_arrival','locker_created','unknown'].indexOf(input.arrivalAtSource)>=0?input.arrivalAtSource:'unknown';}
       if(input.arrivalAtPrecision!==undefined&&(!preservePickup||timestamp(input.arrivalAt)))s.arrivalAtPrecision=['second','minute','unknown'].indexOf(input.arrivalAtPrecision)>=0?input.arrivalAtPrecision:'unknown';
@@ -1227,7 +1287,7 @@ var PickCodeCore = (function () {
     });
     (snap.deletedIds||[]).forEach(function(id){var o=byId(state.orders,prefix+id),s=byId(state.shipments,prefix+id);if(o)o.deleted=true;if(s)s.deleted=true;});
     (snap.hiddenIds||[]).forEach(function(id){var o=byId(state.orders,prefix+id),s=byId(state.shipments,prefix+id);if(o&&o.manualHidden===undefined)o.hidden=true;if(s&&s.manualHidden===undefined)s.hidden=true;});
-    state.online.accounts=publicAccounts(snap.accounts);state.online.families=publicFamilies(snap.families);state.online.familyIds=scope.familyIds;state.online.legacyAccountIds=scope.legacyAccountIds;state.online.hasFamilyScope=scope.hasFamilyScope;state.online.revision=snap.serverRevision;state.online.importVersion=importVersion;state.online.serverVersion=text(snap.serverVersion,40);state.online.capabilities=(Array.isArray(snap.capabilities)?snap.capabilities:[]).filter(function(c){return ['syncJobs','orderRefresh','orderDateOverride','station_aliases_v1','pickup_completion_v1','matching_feedback_v1','station_rule_receipts_v1','pickup_cycles_v1','order_retention_v1'].indexOf(c)>=0;});state.online.lastSuccessAt=timestamp(p.syncedAt)||Date.now();state.online.error='';state.online.errorCode='';
+    state.online.accounts=publicAccounts(snap.accounts);state.online.families=publicFamilies(snap.families);state.online.familyIds=scope.familyIds;state.online.legacyAccountIds=scope.legacyAccountIds;state.online.hasFamilyScope=scope.hasFamilyScope;state.online.revision=snap.serverRevision;state.online.importVersion=importVersion;state.online.serverVersion=text(snap.serverVersion,40);state.online.capabilities=(Array.isArray(snap.capabilities)?snap.capabilities:[]).filter(function(c){return ['syncJobs','orderRefresh','orderDateOverride','station_aliases_v1','pickup_completion_v1','pickup_confirmed_at_v1','matching_feedback_v1','station_rule_receipts_v1','pickup_cycles_v1','order_retention_v1'].indexOf(c)>=0;});state.online.lastSuccessAt=timestamp(p.syncedAt)||Date.now();state.online.error='';state.online.errorCode='';
     if(capability(state,'pickup_completion_v1')&&snap.pickupCompletion&&snap.pickupCompletion.version===1){
       state.online.pickupCompletion={version:1,enabled:snap.pickupCompletion.enabled===true,aiEnabled:snap.pickupCompletion.aiEnabled===true,aiState:text(snap.pickupCompletion.aiState,80),message:text(snap.pickupCompletion.message,300)};
     } else delete state.online.pickupCompletion;
@@ -1284,11 +1344,12 @@ var PickCodeCore = (function () {
       }else{
         var affected=item.members.filter(function(m){return links.indexOf(m.shipmentId)>=0||!m.shipmentId;}),count=Math.max(1,Math.min(50,Number(parsed.packageCount)||1));
         var picked=Math.min(count,affected.filter(function(m){return m.picked;}).length+(item.unassignedPickedCount||0));
+        var oldPicked=affected.filter(function(m){return m.picked;}).map(function(m){var ship=byId(state.shipments,m.shipmentId);return recordedPickup(m.independentPicked!==undefined?m:ship||m);});
         item.sourceIds=item.sourceIds.filter(function(id){return id!==source.id;});item.sourceId=item.sourceIds[0]||'';
         var restored=source.originalItemId&&byId(state.items,source.originalItemId);
         if(restored&&restored!==item){restored.mergedInto='';restored.deleted=false;restored.sourceIds=[source.id];restored.sourceId=source.id;restored.members=[];addMembers(state,restored,count);}
         else {fromParsed(state,source,parsed);restored=state.items[state.items.length-1];}
-        restored.members.forEach(function(m,index){m.shipmentId='';m.picked=index<picked;});restored.unassignedPickedCount=0;source.originalItemId=restored.id;
+        restored.members.forEach(function(m,index){m.shipmentId='';m.picked=index<picked;if(m.picked)savePickupTime(m,oldPicked[index]||item.unassignedPickupTime||{at:0,source:'unknown',precision:'unknown'});else clearPickupTime(m);});restored.unassignedPickedCount=0;delete restored.unassignedPickupTime;source.originalItemId=restored.id;
         if(item.protected){['remark','address','company','code','codeOverride','protected','tags'].forEach(function(k){if(item[k]!==undefined)restored[k]=clone(item[k]);});}
         item.members=item.members.filter(function(m){var ship=byId(state.shipments,m.shipmentId);return remove.indexOf(m.shipmentId)<0||claimed(m.shipmentId)||(ship&&validCode(ship.pickupCode));});
       }
@@ -1299,6 +1360,7 @@ var PickCodeCore = (function () {
     if(!source||source.ignored||source.deleted||sourceParsed(state,source).kind!=='pickup')fail('短信来源已变化');
     var ids=unique(Array.isArray(payload.shipmentIds)?payload.shipmentIds:[payload.shipmentId]),old=sourceLinks(state,source),parsed=sourceParsed(state,source),before=sourceItem(state,source);
     var priorCount=before?before.members.filter(function(m){return m.picked&&(!m.shipmentId||old.indexOf(m.shipmentId)>=0);}).length+(before.unassignedPickedCount||0):0;
+    var priorTime=before?commonPickupTime(before.members.filter(function(m){return !m.shipmentId||old.indexOf(m.shipmentId)>=0;})):{at:0,source:'unknown',precision:'unknown'};
     if(!ids.length||ids.length>Math.max(1,Math.min(50,Number(parsed.packageCount)||1)))fail('请选择不超过短信件数的具体包裹');
     if(old.length&&!payload.replace&&JSON.stringify(old.slice().sort())!==JSON.stringify(ids.slice().sort()))fail('请先解除原关联，或明确重新匹配');
     ids.forEach(function(id){var ship=byId(state.shipments,id);if(!ship)fail('来源或包裹已变化');var reason=matchLinkReason(state,ship,source,false);if(reason)fail(reason);var conflict=matchConflict(state,source,ship);if(conflict&&!payload.allowConflict)fail(conflict+'，请核对后确认');});
@@ -1311,7 +1373,7 @@ var PickCodeCore = (function () {
     group.members.forEach(function(member){if(ids.indexOf(member.shipmentId)>=0){delete member.independentPicked;member.picked=!!byId(state.shipments,member.shipmentId).picked;}});
     if(priorCount>=(Number(parsed.packageCount)||1)){
       var pickedAnonymous=remaining;
-      group.members.forEach(function(member){if(!member.shipmentId&&pickedAnonymous>0){member.picked=true;pickedAnonymous--;}else if(ids.indexOf(member.shipmentId)>=0&&!member.picked)setMemberPicked(state,member,true);});
+      group.members.forEach(function(member){if(!member.shipmentId&&pickedAnonymous>0){member.picked=true;savePickupTime(member,priorTime);pickedAnonymous--;}else if(ids.indexOf(member.shipmentId)>=0&&!member.picked)setMemberPicked(state,member,true,false,priorTime);});
     }
     queueManualMatch(state,source);
   }
@@ -1388,8 +1450,8 @@ var PickCodeCore = (function () {
       selectedShips.forEach(function(s){
         if(action==='resumeAutoPickup'){
           if(!s.pickupCompletion)fail('请先同步包裹的自动完成状态');
-          s.pickupCompletion.manualOverride='';delete s.manualPicked;queueOperation(state,s,'resumeAutoPickup');
-        } else setShipmentPicked(state,s,p.picked!==false);
+          s.pickupCompletion.manualOverride='';delete s.manualPicked;clearPickupTime(s);savePickupTime(s,{at:0,source:'unknown',precision:'unknown'});s.pickupConfirmedAt=0;queueOperation(state,s,'resumeAutoPickup');
+        } else setShipmentPicked(state,s,p.picked!==false,s.picked?recordedPickup(s):{at:now,source:'user_confirmed',precision:'second'});
       });
     } else if(action==='savePackage') {savePackage(state,p.order||{});
     } else if(action==='removePackage'||action==='restorePackage') {
@@ -1403,11 +1465,11 @@ var PickCodeCore = (function () {
       if(item.unassignedPickedCount)fail('请先确认此前已取包裹，或明确全部领取');
       var pickable=activeMembers(state,item);
       if(p.memberIds.some(function(id){return !byId(pickable,id);}))fail('包裹已变化，请重新选择');
-      pickable.forEach(function(m){if(p.memberIds.indexOf(m.id)>=0)setMemberPicked(state,m,p.picked!==false,groupNeedsMatchReview(state,item));});
+      pickable.forEach(function(m){if(p.memberIds.indexOf(m.id)>=0)setMemberPicked(state,m,p.picked!==false,groupNeedsMatchReview(state,item),m.picked?recordedPickup(m):{at:now,source:'user_confirmed',precision:'second'});});
     } else if(action==='assignPickedMembers') {
       item=itemFor(state,p.id);var pickedIds=unique(p.memberIds||[]),assignable=activeMembers(state,item).filter(function(m){return !m.picked;});
       if(!item.unassignedPickedCount||pickedIds.length!==item.unassignedPickedCount||pickedIds.some(function(id){return !byId(assignable,id);}))fail('请选择此前已取的对应包裹');
-      assignable.forEach(function(m){if(pickedIds.indexOf(m.id)>=0)setMemberPicked(state,m,true);});item.unassignedPickedCount=0;
+      assignable.forEach(function(m){if(pickedIds.indexOf(m.id)>=0)setMemberPicked(state,m,true,false,item.unassignedPickupTime||{at:0,source:'unknown',precision:'unknown'});});item.unassignedPickedCount=0;delete item.unassignedPickupTime;
     } else if(action==='linkSource') {
       linkPickupSource(state,sourceFor(state,p.sourceId),p);
     } else if(action==='unlinkSource') {
@@ -1455,7 +1517,7 @@ var PickCodeCore = (function () {
       if (patch.code !== undefined) { var nextCode=normalize(text(patch.code)).replace(/\s/g,''); if(!validCode(nextCode)) fail('请输入有效的取件码'); item.code=nextCode; item.protected=true; item.codeOverride=true; }
       ['company','address','remark'].forEach(function(k){if(patch[k]!==undefined){item[k]=text(patch[k],k==='remark'?500:200);item.protected=true;}});
       if (Array.isArray(patch.tags)) item.tags=patch.tags.slice(0,10).map(function(t){return text(t,30);});
-      if (patch.isPicked !== undefined) {item.unassignedPickedCount=0;item.isPicked=!!patch.isPicked;activeMembers(state,item).forEach(function(m){setMemberPicked(state,m,!!patch.isPicked,groupNeedsMatchReview(state,item));});}
+      if (patch.isPicked !== undefined) {item.unassignedPickedCount=0;delete item.unassignedPickupTime;item.isPicked=!!patch.isPicked;activeMembers(state,item).forEach(function(m){setMemberPicked(state,m,!!patch.isPicked,groupNeedsMatchReview(state,item),m.picked?recordedPickup(m):{at:now,source:'user_confirmed',precision:'second'});});}
     } else if (action === 'remove') {
       state.items.forEach(function(i){if((p.ids||[]).indexOf(i.id)>=0){i.deleted=true;i.sourceIds.forEach(function(id){var s=sourceFor(state,id);if(s)s.deleted=true;});i.members.forEach(function(m){var s=byId(state.shipments,m.shipmentId);if(s){s.hidden=true;s.manualHidden=true;queueOperation(state,s,'hide');}});}});
     } else if (action === 'ignore') {

@@ -253,7 +253,7 @@ test('Taobao date supplement updates known orders outside the list without impor
   const result = await createCollector({ now: () => NOW, fetchImpl: taobaoDateFetch([], { known: detail([{ name: '下单时间', value: '2026-10-25 08:00:00' }]) }) })(
     { platform: 'taobao' }, cookie, { knownOrders: [{ platformOrderId: 'known', shipments: [] }] });
   assert.deepEqual(result.orders, []);
-  assert.deepEqual(result.orderUpdates, [{ platformOrderId: 'known', dateCheckedAt: NOW, dateState: 'ok', dateError: '', orderDate: Date.parse('2026-10-25T08:00:00+08:00'), orderDateOrigin: 'detail' }]);
+  assert.deepEqual(result.orderUpdates, [{ platformOrderId: 'known', dateCheckedAt: NOW, dateState: 'ok', dateError: '', orderDate: Date.parse('2026-10-25T08:00:00+08:00'), orderDatePrecision: 'second', orderDateOrigin: 'detail' }]);
   assert.ok(!result.warnings.some(warning => warning.includes('订单筛选')));
 });
 

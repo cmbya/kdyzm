@@ -85,7 +85,7 @@ export function detectPickupCompletion(shipment, { rules = [], now = Date.now() 
     if (!rule) continue;
     const provider = structured ? { provider: 'pdd', providerStatus: event.providerStatus, providerStatusTag: event.providerStatusTag,
       providerSubStatus: event.providerSubStatus, providerStatusText: event.providerStatusText || '' } : {};
-    return { kind, description, eventTime: event.time, ...provider,
+    return { kind, description, eventTime: event.time, timePrecision: ['second', 'minute'].includes(event.timePrecision) ? event.timePrecision : 'unknown', ...provider,
       fingerprint: createHash('sha256').update(JSON.stringify([event.time, description, kind, ...(structured ? [provider] : [])])).digest('hex'), ruleId: rule.id, ruleVersion: rule.version };
   }
   return null;

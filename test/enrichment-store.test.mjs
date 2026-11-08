@@ -99,7 +99,8 @@ test('history budget includes the complete snapshot and stays under the Android 
   });
   const additional = { matchingFeedback: { items: Array.from({ length: 500 }, (_, i) => ({ id: `feedback-${i}`, revision: 1, status: 'review', error: '缺少可学习原文'.repeat(5), updatedAt: NOW })) } };
   const result = store.snapshot([account.id], undefined, Buffer.byteLength(JSON.stringify(additional), 'utf8'));
-  assert.ok(Buffer.byteLength(JSON.stringify({ ...result, ...additional }), 'utf8') <= 1900000);
+  const responseBytes = Buffer.byteLength(JSON.stringify({ ...result, ...additional }), 'utf8');
+  assert.ok(responseBytes <= 1900000, `snapshot response is ${responseBytes} bytes, limit 1900000`);
   assert.equal(result.orders.length, 1200);
   assert.ok(result.orders.every(o => o.retention.version === 1 && o.retention.anchorDate === '2026-10-30' && o.retention.archived === false));
   assert.ok(result.orders.every(o => !Object.hasOwn(o, 'archiveAnchorDate') && !Object.hasOwn(o, 'archiveRestoredAt')));

@@ -51,20 +51,32 @@ export class PickupCompletionStore {
   }
   migrate() {
     this.atomic(() => {
-      const latest = new Map();
-      for (const row of this.db.prepare('SELECT rowid,data FROM operations ORDER BY rowid').all()) {
+      const latest = new Map(), byId = new Map();
+      for (const row of this.db.prepare('SELECT rowid,device_id,id,data FROM operations ORDER BY rowid').all()) {
         const operation = JSON.parse(row.data);
-        if (!['pick', 'restore'].includes(operation.action) || operation.status === 'superseded') continue;
+        if (!['pick', 'restore', 'resumeAutoPickup'].includes(operation.action) || operation.status === 'superseded') continue;
+        const reference = `${row.device_id}:${row.id}`;
+        byId.set(reference, { ...operation, reference });
         // Legacy clients applied in receive order; preserve the actual last accepted decision.
-        latest.set(operation.shipmentId, operation);
+        latest.set(operation.shipmentId, { ...operation, reference });
       }
       let changed = false;
       for (const row of this.db.prepare('SELECT data FROM shipments').all()) {
         const shipment = JSON.parse(row.data);
-        if (shipment.pickupCompletion?.version === 1) continue;
+        if (shipment.pickupCompletion?.version === 1) {
+          if (Object.hasOwn(shipment, 'pickupManualAction') && Object.hasOwn(shipment, 'pickupConfirmedAt')) continue;
+          const operation = byId.get(shipment.pickupManualOperation);
+          // Only an exact persisted operation proves the time of a legacy manual confirmation.
+          shipment.pickupManualAction = operation && operation.occurredAt === shipment.pickupManualAt ? operation.action : '';
+          shipment.pickupConfirmedAt = shipment.pickupManualAction === 'pick' ? operation.pickedAt ?? operation.occurredAt : 0;
+          this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id); changed = true;
+          continue;
+        }
         const operation = latest.get(shipment.id), state = pickupCompletionState(shipment);
-        if (operation) state.manualOverride = operation.action === 'pick' ? 'picked' : 'pending';
-        Object.assign(shipment, { pickupCompletion: state, picked: effectivePicked(state), pickupManualAt: operation?.occurredAt || (shipment.picked ? shipment.manualAt || 0 : 0) });
+        if (operation) state.manualOverride = operation.action === 'pick' ? 'picked' : operation.action === 'restore' ? 'pending' : '';
+        Object.assign(shipment, { pickupCompletion: state, picked: effectivePicked(state), pickupManualAt: operation?.occurredAt || (shipment.picked ? shipment.manualAt || 0 : 0),
+          pickupManualOperation: operation?.reference || '', pickupManualAction: operation?.action || '',
+          pickupConfirmedAt: operation?.action === 'pick' ? operation.pickedAt ?? operation.occurredAt : 0 });
         this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id); changed = true;
       }
       if (changed) this.store.revision();

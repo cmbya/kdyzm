@@ -1,7 +1,7 @@
 <template>
   <view class="page-wrapper sf-page" @click="handlePageClick">
 
-    <view class="container" :inert="notificationsOpen || stationChooserOpen ? true : null">
+    <view class="container" :inert="notificationsOpen || stationChooserOpen || sourceOpen ? true : null">
       <view class="title-wrapper">
         <text class="title">取件列表</text>
         <button ref="notificationBell" class="notification-bell" role="button" tabindex="0" data-notification-control aria-haspopup="dialog" :aria-expanded="notificationsOpen" :aria-label="'通知中心，' + notificationCount + '项待处理'" @click.stop="openNotifications">
@@ -113,7 +113,7 @@
                       <view class="pickup-line" :class="{ 'long-code': item.code.length > 8 }">
                         <view class="code-text" role="button" tabindex="0" :aria-label="'查看取件码 '+item.code+' 的短信与关联详情'" @click.stop="showSource(item)" @keydown.enter.prevent.stop="!$event.repeat && showSource(item)" @keydown.space.prevent.stop="$event.preventDefault()" @keyup.space.prevent.stop="showSource(item)">{{ formatCode(item.code) }}</view>
                       </view>
-                      <view class="pickup-product">{{ pickupTitle(item) }}</view>
+                      <button class="pickup-product" :class="{ expanded: expandedTitles[item.id] }" role="button" tabindex="0" :aria-expanded="!!expandedTitles[item.id]" aria-label="展开或收起商品名称" @click.stop="expandedTitles[item.id] = !expandedTitles[item.id]">{{ pickupTitle(item) }}</button>
                       <view class="code-desc" :class="{ picked: item.isPicked }">
                         <text v-if="pickupArrivalText(item)">{{ pickupArrivalText(item) }} {{ item.isManual ? '添加' : '进站' }}</text>
                       </view>
@@ -176,6 +176,12 @@
                     </view>
                   </view>
                 </view>
+                <view v-if="pickupJourneys[item.id]?.length" class="pickup-journeys" @click.stop="showSource(item)">
+                  <view v-for="(entry, journeyIndex) in pickupJourneys[item.id]" :key="entry.id" class="pickup-journey">
+                    <text v-if="pickupJourneys[item.id].length > 1" class="journey-parcel-label">包裹 {{ journeyIndex + 1 }} · {{ entry.title }}</text>
+                    <ParcelJourney :journey="entry.journey" :mode="entry.journey.completed ? 'summary' : 'road'" />
+                  </view>
+                </view>
                 <view class="pickup-detail-block">
                   <view v-if="matchSummary(item).available" class="match-entry"><text v-if="matchSummary(item).needsReview" class="conflict-label">关联待核对</text><text v-else-if="matchSummary(item).candidateCount" class="match-status">待匹配 · {{ matchSummary(item).candidateCount }}个候选</text><button class="match-entry-button" @click.stop="showSource(item,true)">匹配订单</button></view>
                   <view v-if="item.tags && item.tags.length" class="code-tags"><view v-for="tag in item.tags" :key="tag" class="code-tag">{{ tag }}</view></view>
@@ -189,7 +195,7 @@
       </template>
     </view>
 
-    <uni-popup ref="sourcePopup" type="bottom">
+    <uni-popup ref="sourcePopup" @change="sourceOpen = $event.show" type="bottom" :safe-area="false" :animation="!reducedMotion">
       <PickupDetail :key="detailRevision" :item="sourceItem" :packages="snapshot.packages || []" :match-on-open="matchingOnOpen" @close="$refs.sourcePopup.close()" @changed="applySnapshot" @ignore="openIgnore" />
     </uni-popup>
     <StationChooser ref="stationChooser" :rules="snapshot.stationRules || []" :recent="snapshot.stationChoices || []" @changed="applySnapshot" @open-change="stationChooserOpen = $event" />
@@ -242,6 +248,8 @@
 <script>
 import yizhanIcon from '@/static/yizhan.png';
 import PickupDetail from '@/components/PickupDetail.vue';
+import ParcelJourney from '@/components/ParcelJourney.vue';
+import { parcelJourney } from '@/services/parcel-journey.js';
 import StationChooser from '@/components/StationChooser.vue';
 import { getSnapshot, getSyncStatus, mutate, refreshAll, refreshOnline as refreshOnlineOrders, syncOnline } from '@/services/assistant.js';
 import { pendingCount, visibleAddresses, reconcileExpandedDates } from '@/services/pickup-groups.js';
@@ -255,9 +263,9 @@ const notificationHistoryKey = '__pickcodeNotificationSheet';
 // The approved preview's source SVG avoids the cropped Figma export viewport.
 const reviewNoticeIcon = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#cf8b22" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 10-10 10L2 12Z"/><path d="M12 7v6m0 3h.01"/></svg>');
 export default {
-  components: { PickupDetail, StationChooser },
+  components: { ParcelJourney, PickupDetail, StationChooser },
   data() {
-    return { newCode: '', addingCode: false, packageCodes: [], snapshot: emptySnapshot(), dateShowActions: {}, expandedDates: {}, expandedStations: {}, pickupGrouping: 'station', sourceItem: null, detailRevision: 0, matchingOnOpen: false, yizhanIcon,
+    return { sourceOpen: false, expandedTitles: {}, newCode: '', addingCode: false, packageCodes: [], snapshot: emptySnapshot(), dateShowActions: {}, expandedDates: {}, expandedStations: {}, pickupGrouping: 'station', sourceItem: null, detailRevision: 0, matchingOnOpen: false, yizhanIcon,
       hydrated: false, backgroundSyncing: false, scanning: false, syncing: false, confirmingReceiptId: '', refreshProgressText: '更新中', syncMessage: '', syncErrors: { sms: '', online: '' }, pendingPickupId: '', ignoring: null, ignoreReason: '', savingIgnore: false, loadError: '',
       notificationsOpen: false, stationChooserOpen: false, notificationCategory: 'all', expandedReminderId: '', reviewNoticeIcon, notificationDismissals: readNotificationDismissals(),
       reducedMotion: typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches };
@@ -299,6 +307,13 @@ export default {
         return !shipment.hidden && shipment.canPick === true && completion?.version === 1 && completion.autoPicked === true && !completion.manualOverride && Number(completion.completedAt) > 0;
       }).map(shipment => ({ orderId: order.id, shipmentId: shipment.id, order, shipment }))).sort((a, b) => Number(b.shipment.pickupCompletion.completedAt) - Number(a.shipment.pickupCompletion.completedAt)).slice(0, 3);
     },
+    pickupJourneys() {
+      const byShipment = new Map();
+      for (const order of this.snapshot.packages || []) for (const shipment of order.shipments || []) if (!shipment.hidden) byShipment.set(shipment.id, { id: shipment.id, title: Array.from(order.title || '包裹').slice(0, 15).join(''), journey: parcelJourney(shipment, order) });
+      const result = Object.create(null);
+      for (const item of this.packageCodes) result[item.id] = (item.members || []).filter(member => member.shipmentId && byShipment.has(member.shipmentId)).map(member => item.needsMatchReview || typeof member.independentPicked === 'boolean' ? { id: member.id, title: '关联待核对', journey: parcelJourney(member) } : byShipment.get(member.shipmentId));
+      return result;
+    },
     groupedCodes() {
       return groupCodesByStation(this.packageCodes);
     },
@@ -312,7 +327,7 @@ export default {
   onShow() { this.applySyncStatus(getSyncStatus()); const pending = uni.getStorageSync('pendingPickupId'); if (pending) { this.pendingPickupId = pending; uni.removeStorageSync('pendingPickupId'); } this.loadData(); },
   onUnload() { uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.removeEventListener('pickcode-open-pickup',this.openPickupIntent); },
   onHide() { this.closeNotifications(false); this.$refs.stationChooser?.close(); },
-  onBackPress() { if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if (this.notificationsOpen) { this.closeNotifications(); return true; } },
+  onBackPress() { if(this.sourceOpen){this.$refs.sourcePopup.close();return true;} if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if (this.notificationsOpen) { this.closeNotifications(); return true; } },
   mounted() {
     this.$el?.addEventListener?.('keydown', this.notificationKeyboard);
     this.$el?.addEventListener?.('keyup', this.notificationKeyboard);
@@ -464,7 +479,7 @@ export default {
     pickupTitle(item) {
       const title = (item?.members || []).filter(member => member.title && member.platform !== '短信').map(member => member.title.trim()).join(' / ');
       const characters = Array.from(title);
-      return characters.length > 10 ? characters.slice(0, 10).join('') + '…' : title;
+      return !this.expandedTitles[item.id] && characters.length > 15 ? characters.slice(0, 15).join('') + '…' : title;
     },
     receiptLogistics(shipment) { const latest = shipment.logisticsEvents?.[0]; return latest?.message || latest?.description || (shipment.waybillNo ? '运单 ' + shipment.waybillNo : ''); },
     canConfirmReceipt(entry) { return !this.syncing && !this.scanning && !this.confirmingReceiptId && !!entry.shipment.id && entry.shipment.canPick !== false; },
@@ -715,4 +730,7 @@ button[disabled] { opacity:.55; }
 @media(min-width:420px) { .container { padding-inline:20px; }.code-item { --cabinet-width:72px; --action-width:80px; } }
 @media(prefers-reduced-motion:reduce) { .notifications-popup :deep(*) { animation-duration:0s !important; transition-duration:0s !important; } }
 @media(forced-colors:active) { .picked-btn, .code-input, .match-entry-button, .family-badge { border:1px solid ButtonText; } }
+.pickup-product{margin:0;padding:0;border:0;border-radius:0;background:transparent;text-align:left;}.pickup-product::after{border:0;}.pickup-product.expanded{white-space:normal;overflow-wrap:anywhere;}
+.pickup-journeys{grid-column:1 / -1;min-width:0;border-top:1px solid #c5d5e7;margin-top:8px;padding-top:12px;}.pickup-journey+.pickup-journey{margin-top:15px;border-top:1px solid #c5d5e7;padding-top:12px;}.journey-parcel-label{display:block;font-size:12px;color:var(--sf-muted);margin-bottom:8px;}
+.container{max-width:680px;margin-inline:auto;box-sizing:border-box;}
 </style>

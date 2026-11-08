@@ -1,14 +1,14 @@
 <template>
   <view class="logistics" @click.stop>
-    <view v-if="latest && !expanded" class="latest">
+    <view v-if="latest && !expanded && !expandedOnly" class="latest">
       <text class="description">最新物流：{{ latest.description || latest.location }}</text>
       <text class="muted">{{ eventTime(latest) }}{{ latest.location && latest.description ? ' · '+latest.location : '' }}</text>
     </view>
     <text v-if="notice" class="notice" :class="{ warning: shipment.logisticsState === 'error' || shipment.logisticsError }">{{ notice }}</text>
     <text v-if="updatedTime" class="muted">轨迹更新 {{ updatedTime }}</text>
     <text v-if="checkedTime && checkedTime !== updatedTime" class="muted">最近查询 {{ checkedTime }}</text>
-    <button v-if="events.length" class="toggle" :aria-expanded="expanded ? 'true' : 'false'" @click.stop="expanded = !expanded">{{ expanded ? '收起物流轨迹' : '查看物流轨迹' }} · {{ events.length }} 条 {{ expanded ? '⌃' : '⌄' }}</button>
-    <view v-if="expanded" class="events">
+    <button v-if="events.length && !expandedOnly" class="toggle" :aria-expanded="expanded ? 'true' : 'false'" @click.stop="expanded = !expanded">{{ expanded ? '收起物流轨迹' : '查看物流轨迹' }} · {{ events.length }} 条 {{ expanded ? '⌃' : '⌄' }}</button>
+    <view v-if="expanded || expandedOnly" class="events">
       <view v-for="(event, index) in events" :key="index" class="event" :class="{ current: index === 0 }">
         <text class="muted">{{ eventTime(event) }}</text>
         <text class="description">{{ event.description || event.location }}</text>
@@ -21,7 +21,7 @@
 </template>
 <script>
 export default {
-  props:{shipment:{type:Object,default:()=>({})}},
+  props:{shipment:{type:Object,default:()=>({})},expandedOnly:Boolean},
   data:()=>({expanded:false}),
   watch:{'shipment.id'(){this.expanded=false;}},
   computed:{

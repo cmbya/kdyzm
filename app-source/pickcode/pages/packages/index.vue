@@ -45,24 +45,26 @@
         <view ref="recordList" class="record-list" tabindex="-1" aria-label="包裹列表">
           <view v-if="!filteredGroups.length" class="empty-state"><image class="empty-icon" src="/static/images/parcel-outline.svg" mode="aspectFit" /><text class="empty-title">{{ packages.length ? '没有符合条件的记录' : '还没有包裹记录' }}</text><text class="empty-copy">{{ emptyNotice() }}</text><button role="button" tabindex="0" v-if="packages.length" @click="openFilters">调整筛选</button><button role="button" tabindex="0" v-else @click="showAddPackage">添加快递</button></view>
           <view v-for="group in filteredGroups" :key="group.date" class="day-section">
-            <view class="day-head"><text>{{ formatDate(group.date) }}</text><button role="button" tabindex="0" :aria-label="'隐藏' + formatDate(group.date) + '当前筛选的订单'" @click="confirmDeleteDateGroup(group)">管理</button></view>
+            <view class="day-head"><text>{{ formatDate(group.date) }}</text><text v-if="selectedProgress === 'done' && !showExpired" class="date-basis">按取件时间</text><button role="button" tabindex="0" :aria-label="'隐藏' + formatDate(group.date) + '当前筛选的订单'" @click="confirmDeleteDateGroup(group)">管理</button></view>
             <view v-for="list in group.list" :key="list.id" class="order-card" :class="{ completed: list.collected, 'hidden-order': list.hidden }" :style="{ 'view-transition-name': transitionName(list.id) }" :aria-label="familyLabel(list) + '的' + list.title + '，' + cardStatus(list)">
               <button role="button" tabindex="0" class="order-open" :aria-label="'查看' + familyLabel(list) + '的' + list.title + '详情'" @click="openDetails(list)">
                 <view class="order-top"><view class="order-identity"><text class="order-platform">{{ platformLabel(list) }}</text><view class="family-ticket" :style="familyStyle(list.familyId)" :title="familyLabel(list)"><text class="family-ticket-name">{{ familyLabel(list) }}</text></view></view><text class="status-label" :class="cardProgress(list)"><text class="status-dot"></text>{{ cardStatus(list) }}</text></view>
-                <view class="order-main">
-                  <view class="goods-glyph" aria-hidden="true"><image class="goods-icon" src="/static/images/parcel-outline.svg" mode="aspectFit" /></view>
-                  <view class="goods-info"><text class="goods-name" :title="list.title">{{ list.title || '未命名订单' }}</text><text class="order-sub"><template v-if="list.amount != null">{{ money(list.amount) }}</template></text></view>
-                  <uni-icons type="right" size="17" color="#536073" />
+                <view class="order-main" :class="{ 'history-main': list.collected }">
+                  <view v-if="!list.collected" class="goods-glyph" aria-hidden="true"><image class="goods-icon" src="/static/images/parcel-outline.svg" mode="aspectFit" /></view>
+                  <view class="goods-info"><text class="goods-name" :title="list.title">{{ shortTitle(list.title || '未命名订单') }}</text><text v-if="!list.collected" class="order-sub"><template v-if="list.amount != null">{{ money(list.amount) }}</template></text></view>
+                  <uni-icons v-if="!list.collected" type="right" size="17" color="#536073" />
                 </view>
-                <view class="order-status"><text v-if="completionSummary(list) && !isExpiredOrder(list)" class="completion-chip">{{ completionSummary(list) }}</text><text class="order-count">{{ recordCountLabel(list) }}</text></view>
-                <text v-if="summaryLogistics(list)" class="order-summary">{{ summaryLogistics(list) }}</text>
+                <view v-if="!list.collected" class="order-status"><text v-if="completionSummary(list) && !isExpiredOrder(list)" class="completion-chip">{{ completionSummary(list) }}</text><text class="order-count">{{ recordCountLabel(list) }}</text></view>
+                <text v-if="!list.collected && summaryLogistics(list)" class="order-summary">{{ summaryLogistics(list) }}</text>
               </button>
+              <view v-if="list.collected" class="order-journeys" @click="openDetails(list)"><view v-for="(entry, journeyIndex) in journeysByOrder[list.id]" :key="entry.id" class="order-journey"><text v-if="journeysByOrder[list.id].length > 1" class="journey-parcel-label">包裹 {{ journeyIndex + 1 }}</text><ParcelJourney :journey="entry.journey" mode="summary" /></view></view>
               <view v-if="!isExpiredOrder(list) && summaryShipment(list) && displayPickupCode(summaryShipment(list)) && !summaryShipment(list).picked" class="pickup-row">
                 <view class="pickup-copy"><view class="pickup-line"><text v-if="pickupCabinet(summaryShipment(list))" class="cabinet-badge">{{ pickupCabinet(summaryShipment(list)) }}</text><button role="button" tabindex="0" class="pickup-code" :class="{ 'long-code': displayPickupCode(summaryShipment(list)).length > 8 }" @click="copyValue(displayPickupCode(summaryShipment(list)), '取件码')">{{ displayPickupCode(summaryShipment(list)) }}</button></view><text class="station">{{ stationDisplayName(summaryShipment(list), '站点未知') }}</text></view>
                 <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-if="canPickShipment(list, summaryShipment(list))" class="small-primary" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" :aria-label="'领取' + list.title" @click="requestPickup(list, summaryShipment(list))">取件</button>
                 <button role="button" :tabindex="(!!syncingOrderId || list.hidden) ? -1 : 0" v-else-if="summaryShipment(list).needsPickupAssignment" class="small-primary" :disabled="!!syncingOrderId || list.hidden" :aria-disabled="!!syncingOrderId || list.hidden" @click="claimShipment(list, summaryShipment(list))">确认归属</button>
               </view>
               <view v-else-if="!isExpiredOrder(list) && summaryShipment(list)?.needsReceiptConfirmation && !summaryShipment(list).picked" class="receipt-row"><text>物流送达后，请确认已收到</text><button role="button" :tabindex="(!!syncingOrderId || !canPickShipment(list, summaryShipment(list))) ? -1 : 0" class="small-primary receipt-confirm" :disabled="!!syncingOrderId || !canPickShipment(list, summaryShipment(list))" :aria-disabled="!!syncingOrderId || !canPickShipment(list, summaryShipment(list))" @click.stop="confirmReceipt(list, summaryShipment(list))">确认收到</button></view>
+              <view v-if="!list.collected && !isExpiredOrder(list)" class="order-journeys" @click="openDetails(list)"><view v-for="(entry, journeyIndex) in journeysByOrder[list.id]" :key="entry.id" class="order-journey"><text v-if="journeysByOrder[list.id].length > 1" class="journey-parcel-label">包裹 {{ journeyIndex + 1 }}</text><ParcelJourney :journey="entry.journey" :mode="entry.journey.completed ? 'summary' : 'road'" /></view></view>
             </view>
           </view>
         </view>
@@ -82,12 +84,13 @@
     </uni-popup>
 
     <uni-popup ref="detailPopup" type="bottom" :safe-area="false" :animation="!reducedMotion" @change="popupChanged('detailPopup', $event)">
-      <view v-if="selectedOrder && !dateEditing" class="sheet detail-sheet" role="dialog" aria-modal="true" aria-label="包裹详情" :inert="stationChooserOpen ? true : null">
-        <view class="sheet-handle"></view><view class="sheet-inner">
-          <view class="sheet-header"><text>包裹详情</text><button role="button" tabindex="0" class="round-btn" aria-label="关闭详情" @click="closePopup('detailPopup')"><uni-icons type="closeempty" size="18" color="#647186" /></button></view>
-          <view class="detail-product"><text class="detail-title">{{ selectedOrder.title }}</text><view class="detail-sub"><text>{{ recordSubtitle(selectedOrder) }}</text><text :style="familyStyle(selectedOrder.familyId)" class="detail-family">{{ familyLabel(selectedOrder) }}</text></view></view>
-          <view v-if="selectedOrder.collected && !selectedOrder.shipments.some(shipment => shipment.receiptState === 'expired_signed')" class="detail-stamp"><PickupStamp compact /></view>
-          <text class="detail-status">{{ statusText(selectedOrder) }}</text>
+      <view v-if="selectedOrder && !dateEditing" class="sheet detail-sheet" role="dialog" aria-modal="true" aria-label="订单详情" :inert="stationChooserOpen ? true : null">
+        <view class="sheet-handle"></view>
+        <view class="sheet-header detail-header"><text>订单详情</text><button role="button" tabindex="0" class="round-btn" aria-label="关闭详情" @click="closePopup('detailPopup')"><uni-icons type="closeempty" size="21" color="#647186" /></button></view>
+        <view class="sheet-inner detail-body">
+          <view v-if="selectedOrder.shipments.length > 1" class="shipment-picker" role="group" aria-label="选择包裹"><button v-for="(shipment, index) in selectedOrder.shipments" :key="shipment.id" role="button" tabindex="0" :aria-pressed="shipment.id === detailShipment.id" @click="detailShipmentId = shipment.id">包裹 {{ index + 1 }} · {{ shipment.picked ? '已取' : '未取' }}</button></view>
+          <OrderOverview :order="selectedOrder" :shipment="detailShipment" :pickup="detailPickup" :sources="detailSources" :status="detailShipment.id ? (detailShipment.picked ? (isReceiptShipment(detailShipment) ? '已收货' : '已取件') : detailShipment.needsPickupAssignment ? '待确认归属' : displayPickupCode(detailShipment) ? '待取件' : shipmentText(detailShipment)) : statusText(selectedOrder)">
+            <template #basic>
           <view v-if="isExpiredOrder(selectedOrder)" class="archive-meta"><text class="field-label">过期订单</text><text class="muted-inline">{{ archiveReceiptText(selectedOrder) }}</text><text class="muted-inline">{{ archiveSourceText(selectedOrder) }}</text><button role="button" :tabindex="syncingOrderId ? -1 : 0" class="secondary-button" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="restoreExpiredOrder(selectedOrder)">恢复到当前订单</button></view>
           <text class="date-row">{{ orderDateText(selectedOrder) }}</text>
           <view v-if="selectedOrder.platformOrderId" class="order-number"><text>订单 {{ selectedOrder.platformOrderId }}</text><button role="button" tabindex="0" class="text-button" @click="copyValue(selectedOrder.platformOrderId, '订单号')">复制</button></view>
@@ -111,10 +114,13 @@
             <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-else-if="!isExpiredOrder(selectedOrder) && shipment.picked && shipment.canPick !== false && !selectedOrder.hidden && !shipment.hidden" class="secondary-button" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="claimShipment(selectedOrder, shipment)">撤销</button>
             <text v-if="shipment.pickupConflict" class="pickup-warning">取件码有冲突，请先确认归属</text>
             <text v-if="shipment.arrivalAt" class="arrival-time">到站 {{ new Date(shipment.arrivalAt).toLocaleString('zh-CN', { hour12: false }) }}</text>
-            <LogisticsTimeline :shipment="shipment" />
           </view>
           <text v-if="!selectedOrder.shipments?.length && selectedOrder.source !== 'manual'" class="muted-inline">暂无运单号，物流信息待同步。</text>
           <text v-if="refreshProgressText || error || notice" class="muted-inline" role="status">{{ refreshProgressText || error || notice }}</text>
+
+            </template>
+          </OrderOverview>
+          <view v-if="detailMore" class="detail-more" ref="detailMorePanel">
           <view class="order-tools">
             <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-if="selectedOrder.canRefresh" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="refreshOrderDate(selectedOrder)">{{ syncingOrderId === selectedOrder.id ? '更新中' : '更新订单' }}</button>
             <button role="button" tabindex="0" v-if="selectedOrder.source === 'online'" @click="goToApp(selectedOrder.platform)">打开购物 App</button>
@@ -124,6 +130,15 @@
             <button role="button" tabindex="0" v-if="!isExpiredOrder(selectedOrder) && selectedOrder.source === 'manual' && (!selectedOrder.waybillNo || selectedOrder.checked)" @click="toggleCheck(selectedOrder)">{{ selectedOrder.checked ? '取消旧手工签收' : '标记旧手工签收' }}</button>
             <button role="button" tabindex="0" class="danger" @click="deletePackage(selectedOrder)">{{ selectedOrder.hidden ? '恢复显示' : '隐藏订单' }}</button>
           </view>
+
+          </view>
+        </view>
+        <view class="detail-footer">
+          <button role="button" tabindex="0" class="detail-more-button" :aria-expanded="detailMore" @click="toggleDetailMore">••• 更多</button>
+          <button role="button" tabindex="0" v-if="canPickShipment(selectedOrder, detailShipment)" class="primary-button" :disabled="!!syncingOrderId" @click="detailShipment.needsReceiptConfirmation ? confirmReceipt(selectedOrder, detailShipment) : requestPickup(selectedOrder, detailShipment)">{{ detailShipment.needsReceiptConfirmation ? '确认收到' : '确认取件' }}</button>
+          <button role="button" tabindex="0" v-else-if="!isExpiredOrder(selectedOrder) && detailShipment.needsPickupAssignment && detailShipment.pickupId && !selectedOrder.hidden && !detailShipment.hidden" class="primary-button" :disabled="!!syncingOrderId" @click="claimShipment(selectedOrder, detailShipment)">确认取件归属</button>
+          <button role="button" tabindex="0" v-else-if="!isExpiredOrder(selectedOrder) && detailShipment.picked && detailShipment.canPick !== false && !selectedOrder.hidden && !detailShipment.hidden" class="secondary-button" :disabled="!!syncingOrderId" @click="claimShipment(selectedOrder, detailShipment)">撤销已取</button>
+          <button role="button" tabindex="0" v-else class="primary-button" @click="closePopup('detailPopup')">完成</button>
         </view>
       </view>
       <view v-else-if="selectedOrder && dateEditing" class="sheet date-sheet" role="dialog" aria-modal="true" aria-label="修改下单日期"><view class="sheet-handle"></view><view class="sheet-inner"><text class="dialog-title">修改下单日期</text><input v-model="dateDraft" type="text" maxlength="10" placeholder="YYYY-MM-DD" aria-label="下单日期 YYYY-MM-DD" /><view class="dialog-actions"><button role="button" tabindex="0" @click="dateEditing = false">取消</button><button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" class="primary-button" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="saveDate">保存</button></view></view></view>
@@ -135,15 +150,18 @@
 <script>
 import { getSnapshot, getSyncStatus, mutate, openShoppingApp, refreshOrder, refreshOnline } from '@/services/assistant.js';
 import LogisticsTimeline from '@/components/LogisticsTimeline.vue';
+import ParcelJourney from '@/components/ParcelJourney.vue';
+import OrderOverview from '@/components/OrderOverview.vue';
+import { parcelJourney, packageCollectedDateKey, comparePackagesByCollectedAt } from '@/services/parcel-journey.js';
 import PickupStamp from '@/components/PickupStamp.vue';
 import StationChooser from '@/components/StationChooser.vue';
 import { packageDateKey, shouldArchivePackage, isPackageCollected, packagePlatform, shipmentProgress, packageProgressMatches, summarizePackages } from '@/core/package-presentation.js';
 import { stationDisplayName, pickupCabinet } from '@/services/station-presentation.js';
 
 export default {
-  components: { LogisticsTimeline, PickupStamp, StationChooser },
+  components: { ParcelJourney, OrderOverview, LogisticsTimeline, PickupStamp, StationChooser },
   data() { return {
-    packages: [], families: [], stationRules: [], stationChoices: [], stationChooserOpen: false, tableData: [], archivedData: [], selectedFamily: 'all', selectedPlatform: 'all', selectedProgress: 'all',
+    codes: [], detailShipmentId: '', detailMore: false, packages: [], families: [], stationRules: [], stationChoices: [], stationChooserOpen: false, tableData: [], archivedData: [], selectedFamily: 'all', selectedPlatform: 'all', selectedProgress: 'all',
     showHidden: false, showHistory: false, showExpired: false, hydrated: false, online: {}, refreshing: false, backgroundSyncing: false, error: '', notice: '', refreshProgressText: '',
     detailId: '', dateEditing: false, activePopup: '', filterDraft: { family: 'all', history: false, hidden: false }, dateDraft: '', dateTarget: null, syncingOrderId: '', reducedMotion: false,
     mainPlatforms: [{ key: 'taobao', label: '淘宝', mark: '淘' }, { key: 'jd', label: '京东', mark: 'JD' }, { key: 'pdd', label: '拼多多', mark: '拼' }],
@@ -158,7 +176,11 @@ export default {
     totals() { return summarizePackages(this.scopedPackages); },
     progressTotals() { return summarizePackages(this.platformPackages); },
     resultTotals() { return summarizePackages(this.platformPackages, this.selectedProgress); },
-    filteredGroups() { return this.dateGroups(this.platformPackages.filter(p => this.showExpired || this.hiddenRecoveryMode || packageProgressMatches(p, this.selectedProgress))); },
+    filteredGroups() { return this.dateGroups(this.platformPackages.filter(p => this.showExpired || this.hiddenRecoveryMode || packageProgressMatches(p, this.selectedProgress)), this.selectedProgress === 'done' && !this.showExpired); },
+    journeysByOrder() { const result = Object.create(null); for (const order of this.packages) result[order.id] = (order.shipments?.length ? order.shipments.filter(s => !s.hidden) : [{}]).map(s => ({ id: s.id || order.id, journey: parcelJourney(s, order) })); return result; },
+    detailShipment() { return this.selectedOrder?.shipments?.find(s => s.id === this.detailShipmentId) || this.summaryShipment(this.selectedOrder || {}) || {}; },
+    detailPickup() { return this.codes.find(code => (code.members || []).some(member => member.shipmentId === this.detailShipment.id)) || null; },
+    detailSources() { return this.detailPickup?.sources || []; },
     selectedOrder() { return [...this.tableData, ...this.archivedData].flatMap(g => g.list).find(p => p.id === this.detailId && (this.selectedFamily === 'all' || (p.familyId || '') === this.selectedFamily)) || null; },
     familyOptions() {
       const options = new Map([['all', { id: 'all', name: '全部角色' }]]);
@@ -194,6 +216,8 @@ export default {
   onUnload() { uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); this._motionQuery?.removeEventListener?.('change', this._motionChanged); this._transition?.skipTransition(); },
   methods: {
     stationDisplayName, pickupCabinet,
+    shortTitle(value) { const chars = Array.from(value); return chars.length > 15 ? chars.slice(0, 15).join('') + '…' : value; },
+    toggleDetailMore() { this.detailMore = !this.detailMore; if (this.detailMore) this.$nextTick(() => { const el = this.$refs.detailMorePanel?.$el || this.$refs.detailMorePanel; el?.scrollIntoView?.({ block: 'nearest', behavior: this.reducedMotion ? 'instant' : 'smooth' }); }); },
     changeShipmentStation(shipment, event) { this.$refs.stationChooser.open({ shipmentId: shipment.id }, shipment, () => [...(this.$el?.querySelectorAll?.('[data-shipment-station]') || [])].find(element => element.getAttribute('data-shipment-station') === String(shipment.id)) || event?.currentTarget); },
     revealSavedManualPackage() {
       if (!uni.getStorageSync('pickcode.manual-package-saved')) return;
@@ -223,7 +247,7 @@ export default {
       event.preventDefault(); event.target.click();
     },
     dateKey: packageDateKey,
-    formatDate(date) { if (date === 'unknown') return '下单日期待确认'; const parts = String(date).split('-').map(Number); return parts.length === 3 && parts.every(Number.isFinite) ? parts[0] + '年' + parts[1] + '月' + parts[2] + '日' : '下单日期待确认'; },
+    formatDate(date) { if (date === 'unknown') return this.selectedProgress === 'done' && !this.showExpired ? '取件时间待获取' : '下单日期待确认'; const parts = String(date).split('-').map(Number); return parts.length === 3 && parts.every(Number.isFinite) ? parts[0] + '年' + parts[1] + '月' + parts[2] + '日' : '下单日期待确认'; },
     money(amount) { return amount == null ? '—' : '¥' + Number(amount).toFixed(2); },
     familyLabel(item) { return item.familyId ? (item.familyName || '家人') : '待归属'; },
     familyStyle(id) {
@@ -275,11 +299,11 @@ export default {
         this._transition = list.startViewTransition(apply); this._transition.ready.catch(() => {});
       } else { apply(); }
     },
-    dateGroups(items) {
+    dateGroups(items, collected = false) {
       const groups = new Map();
-      for (const item of items) { const date = this.dateKey(item); if (!groups.has(date)) groups.set(date, []); groups.get(date).push(item); }
+      for (const item of items) { const date = collected ? packageCollectedDateKey(item) : this.dateKey(item); if (!groups.has(date)) groups.set(date, []); groups.get(date).push(item); }
       return [...groups].sort(([a], [b]) => a === b ? 0 : a === 'unknown' ? 1 : b === 'unknown' ? -1 : b.localeCompare(a)).map(([date, list]) => ({
-        date, list: [...list].sort((a, b) => Number(b.orderDate || 0) - Number(a.orderDate || 0))
+        date, list: [...list].sort(collected ? comparePackagesByCollectedAt : (a, b) => Number(b.orderDate || 0) - Number(a.orderDate || 0))
       }));
     },
     regroup(now = new Date()) {
@@ -292,7 +316,7 @@ export default {
       }
       this.tableData = this.dateGroups(current); this.archivedData = this.dateGroups(archived);
     },
-    applySnapshot(snapshot) { this._snapshotRevision = (this._snapshotRevision || 0) + 1; this.packages = snapshot.packages || []; this.families = snapshot.families || snapshot.online?.families || []; this.stationRules = snapshot.stationRules || []; this.stationChoices = snapshot.stationChoices || []; this.regroup(); this.online = snapshot.online || {}; this.error = this.online.error || ''; this.notice = this.online.notice || ''; this.hydrated = true; if (this.activePopup === 'detailPopup' && !this.selectedOrder) this.closePopup('detailPopup'); const marker = this._pendingCompletionNavigation; const target = marker && this.packages.find(order => order.id === marker.orderId); if (target) { this._pendingCompletionNavigation = null; this.detailId = target.id; this.$nextTick?.(() => { if (this.$refs?.detailPopup?.open) this.openDetails(target); }); } },
+    applySnapshot(snapshot) { this._snapshotRevision = (this._snapshotRevision || 0) + 1; this.packages = snapshot.packages || []; this.codes = snapshot.codes || []; this.families = snapshot.families || snapshot.online?.families || []; this.stationRules = snapshot.stationRules || []; this.stationChoices = snapshot.stationChoices || []; this.regroup(); this.online = snapshot.online || {}; this.error = this.online.error || ''; this.notice = this.online.notice || ''; this.hydrated = true; if (this.activePopup === 'detailPopup' && !this.selectedOrder) this.closePopup('detailPopup'); const marker = this._pendingCompletionNavigation; const target = marker && this.packages.find(order => order.id === marker.orderId); if (target) { this._pendingCompletionNavigation = null; this.detailId = target.id; this.$nextTick?.(() => { if (this.$refs?.detailPopup?.open) this.openDetails(target); }); } },
     applySyncStatus(status) { this.backgroundSyncing = status.syncing; },
     async loadData() {
       const revision = this._snapshotRevision || 0, request = this._loadRequest = (this._loadRequest || 0) + 1;
@@ -302,7 +326,7 @@ export default {
     async retrySync() { if (this.refreshing || this.backgroundSyncing) return; this.refreshing = true; try { if (!this.hydrated) this.applySnapshot(await getSnapshot()); if (!this.online.bound) { await this.loadData(); return; } const result = await refreshOnline(progress => { this.refreshProgressText = progress.label; }); this.applySnapshot(result.snapshot); this.error = result.onlineError || ''; this.notice = [result.onlineNotice, result.pending ? result.pendingNotice || '后台仍在处理中，稍后刷新查看' : ''].filter(Boolean).join('；'); } catch (e) { this.error = e.message || '更新失败，已有记录已保留'; } finally { this.refreshing = false; this.refreshProgressText = ''; } },
     openFilters() { this.filterDraft = { family: this.selectedFamily, history: this.showHistory, hidden: this.showHidden }; this.openPopup('filterPopup'); },
     applyFilters() { this.animateList(() => { this.selectedFamily = this.filterDraft.family; this.showHistory = this.filterDraft.history; this.showExpired = false; this.showHidden = this.filterDraft.hidden; this.regroup(); }); this.closePopup('filterPopup'); },
-    openDetails(item) { this.detailId = item.id; this.dateEditing = false; this.openPopup('detailPopup'); },
+    openDetails(item) { this.detailId = item.id; this.detailShipmentId = ''; this.detailMore = false; this.dateEditing = false; this.openPopup('detailPopup'); },
     openPopup(name) { this._popupTrigger = typeof document !== 'undefined' ? document.activeElement : null; this.activePopup = name; this.$refs[name].open(); },
     closePopup(name) { this.$refs[name]?.close(); },
     popupChanged(name, event) {
@@ -433,8 +457,14 @@ button::after{border:0;}button[disabled]{opacity:.48;cursor:default;}button:acti
 @media(max-width:370px){.page-title{font-size:28px;line-height:34px;}.dashboard{padding:12px;}.platform-card{font-size:12px;gap:3px;}.order-open{padding:12px;}.order-top{gap:6px;}.order-identity{gap:6px;}.family-ticket{max-width:83px;}.status-label{font-size:11px;}.sheet-inner{padding-left:16px;padding-right:16px;}.pickup-code{font-size:23px;}.pickup-code.long-code{font-size:18px;}.goods-name{font-size:14px;}.status-filter button{gap:4px;}.status-name{font-size:12px;}}
 @media(min-width:420px){.records-container{padding-left:20px;padding-right:20px;}}
 @media(forced-colors:active){.round-btn,.scope-row,.dashboard,.order-card,.empty-state,.sheet,.shipment-panel,.choice-grid button,.platform-card.selected,.status-filter .selected{border:1px solid CanvasText;}.primary-button,.small-primary{border:1px solid ButtonText;}.status-label{border:1px solid CanvasText;}}
+.date-basis{margin-left:auto;font-size:12px;font-weight:400;color:var(--sf-muted);}.day-head:has(.date-basis) button{font-size:11px;}.completed .order-identity{flex-direction:row-reverse;justify-content:flex-end;}.completed .order-top{margin-bottom:10px;}.completed .goods-name{max-width:none;}.completed .order-open{padding-bottom:16px;}.completed .status-label .status-dot{width:auto;height:auto;background:none;}.completed .status-dot::after{content:'✓';}.order-journeys{margin:0 13px 12px;padding-top:10px;border-top:1px solid #c5d5e7;min-width:0;}.order-journey+.order-journey{margin-top:15px;padding-top:12px;border-top:1px solid #c5d5e7;}.journey-parcel-label{display:block;color:var(--sf-muted);font-size:12px;margin-bottom:8px;}
+.detail-sheet{display:flex;flex-direction:column;overflow:hidden;max-height:94vh;max-height:94dvh;}.detail-sheet>.sheet-handle{flex:none;margin-bottom:8px;}.detail-header{flex:none;margin:0 18px 18px;font-size:23px;}.detail-body{min-height:0;overflow-y:auto;padding-bottom:10px;overscroll-behavior:contain;}.detail-footer{flex:none;display:flex;gap:9px;padding:12px 16px max(16px,env(safe-area-inset-bottom));border-top:1px solid #fff;background:var(--sf-sheet);}.detail-footer .primary-button,.detail-footer .secondary-button{flex:1;min-width:0;margin:0;font-size:17px;min-height:46px;}.detail-more-button{flex:none;min-width:85px;min-height:46px;border:1px solid #c8d9eb;border-radius:14px;background:#f7fbffb3;color:#506b84;font-size:15px;font-weight:600;}.detail-more .order-tools{margin:15px 0 6px;}.shipment-picker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:15px;}.shipment-picker button{padding:6px 10px;border:1px solid #cbd8e6;border-radius:10px;color:var(--sf-muted);font-size:12px;min-height:36px;}.shipment-picker button[aria-pressed=true]{color:var(--sf-blue);background:#e5eefb;}.history-main .goods-info{width:100%;}
+.detail-sheet{background:linear-gradient(145deg,#f1f6fb,#e7eef7);}.detail-footer{background:#eaf1f8;}.completed .order-journeys{border-top:0;padding-top:0;}
+.detail-header{margin-bottom:8px;}
 </style>
 <style>
 .record-list::view-transition-group(*){animation-duration:240ms;}
 @media(prefers-reduced-motion:reduce){.record-list::view-transition-group(*),.record-list::view-transition-old(*),.record-list::view-transition-new(*){animation:none!important;}}
+.detail-sheet{background:linear-gradient(145deg,#f1f6fb,#e7eef7);}.detail-footer{background:#eaf1f8;}.completed .order-journeys{border-top:0;padding-top:0;}
+.detail-header{margin-bottom:8px;}
 </style>

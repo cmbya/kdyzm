@@ -14,23 +14,28 @@
 // payment/shipping/receipt labels and unlabeled dates never qualify as the order date.
 
 import './logistics-rules.js';
+import { retainMilestoneEvents } from './shipment-lifecycle.mjs';
 const logistics = globalThis.PickCodeLogistics;
 const text = value => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 export const shortText = (value, limit) => text(value).slice(0, limit);
 
 export function taobaoDetailDate(data, timestamp) {
+  return taobaoDetailDateEvidence(data, timestamp).orderDate;
+}
+
+export function taobaoDetailDateEvidence(data, timestamp) {
   const cells = data?.data;
-  if (!cells || typeof cells !== 'object') return 0;
+  if (!cells || typeof cells !== 'object') return { orderDate: 0, orderDatePrecision: 'unknown' };
   for (const cell of Object.values(cells)) {
     for (const label of Array.isArray(cell?.fields?.labels) ? cell.fields.labels : []) {
       if (!/^(?:创建时间|下单时间)[:：]?$/.test(text(label?.name))) continue;
       const value = text(label.value);
       if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$/.test(value)) continue;
       const date = timestamp(value);
-      if (date) return date;
+      if (date) return { orderDate: date, orderDatePrecision: orderTimePrecision(value) };
     }
   }
-  return 0;
+  return { orderDate: 0, orderDatePrecision: 'unknown' };
 }
 
 export function logisticsTimestamp(value, timestamp) {
@@ -50,6 +55,11 @@ export function logisticsTimePrecision(value) {
   return 'unknown';
 }
 
+export function orderTimePrecision(value) {
+  const result = logisticsTimePrecision(value);
+  return result !== 'unknown' ? result : /^\d{4}[-年/]\d{2}[-月/]\d{2}日?$/.test(text(value)) ? 'day' : 'unknown';
+}
+
 export function providerEventFields(event) {
   if (event?.provider !== 'pdd') return {};
   const fields = { provider: 'pdd' };
@@ -66,7 +76,7 @@ export function mergeProviderEventFields(target, source) {
   Object.assign(target, fields);
 }
 
-export function normalizeLogisticsEvents(events, timestamp) {
+export function normalizeLogisticsEvents(events, timestamp, rules, now) {
   const seen = new Map(), output = [];
   for (const event of events.slice(0, 2000)) {
     const normalized = {
@@ -84,24 +94,24 @@ export function normalizeLogisticsEvents(events, timestamp) {
   }
   // Stable sorting keeps unknown timestamps in their original relative order.
   output.sort((a, b) => b.time - a.time);
-  return { events: output.slice(0, 100), truncated: events.length > 2000 || output.length > 100 };
+  return { events: retainMilestoneEvents(output, rules, now), truncated: events.length > 2000 || output.length > 100 };
 }
 
-export function taobaoStageEvents(stages, timestamp, stageText) {
+export function taobaoStageEvents(stages, timestamp, stageText, rules, now) {
   const result = normalizeLogisticsEvents(stages.slice(0, 2001).filter(stage => stage && !/^送至/.test(text(stage.title))).map(stage => ({
     time: stage.time || stage.date || stage.occurTime || stage.subtitle,
     timeText: stage.time || stage.date || stage.occurTime || stage.subtitle,
     description: [text(stage.title), stageText(stage)].filter(Boolean).join('：'),
-  })), timestamp);
+  })), timestamp, rules, now);
   result.truncated ||= stages.length > 2000;
   return result;
 }
 
-export function taobaoTransitEvents(data, timestamp) {
-  return normalizeLogisticsEvents(data.address.slice(0, 2001).map(step => ({ time: step.time, description: step.place })), timestamp);
+export function taobaoTransitEvents(data, timestamp, rules, now) {
+  return normalizeLogisticsEvents(data.address.slice(0, 2001).map(step => ({ time: step.time, description: step.place })), timestamp, rules, now);
 }
 
-export function pddShippingEvents(shipping, timestamp) {
+export function pddShippingEvents(shipping, timestamp, rules, now) {
   return normalizeLogisticsEvents(shipping.traces.slice(0, 2001).map(trace => ({
     time: trace.timestamp || trace.time_stamp || trace.timeStamp || trace.time,
     timeText: trace.display_time || trace.displayTime || trace.time || trace.timestamp || trace.time_stamp || trace.timeStamp,
@@ -111,7 +121,7 @@ export function pddShippingEvents(shipping, timestamp) {
     providerStatusTag: trace.status_tag ?? trace.statusTag,
     providerSubStatus: trace.sub_status ?? trace.subStatus,
     providerStatusText: trace.trace_status_tip ?? trace.traceStatusTip,
-  })), timestamp);
+  })), timestamp, rules, now);
 }
 
 export const homeDeliveryCompleted = logistics.homeDeliveryCompleted;

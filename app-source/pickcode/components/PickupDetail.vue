@@ -1,16 +1,18 @@
 <template>
-  <view class="detail-sheet sf-surface" v-if="item" @click.stop>
-    <view class="heading"><text>{{ matchingSourceId ? '选择对应包裹' : '取件详情' }}</text><text class="link" role="button" tabindex="0" aria-label="关闭取件详情" @click="$emit('close')" @keydown.enter.prevent="!$event.repeat && $emit('close')" @keydown.space.prevent="$event.preventDefault()" @keyup.space.prevent="$emit('close')">关闭</text></view>
+  <view class="detail-sheet" v-if="item" role="dialog" aria-modal="true" aria-label="订单详情" @click.stop @keydown="detailKeydown"><view class="sheet-handle"></view>
+    <view class="heading"><text>{{ matchingSourceId ? '选择对应包裹' : '订单详情' }}</text><button class="link" role="button" tabindex="0" aria-label="关闭取件详情" @click="$emit('close')" @keydown.enter.prevent="!$event.repeat && $emit('close')" @keydown.space.prevent="$event.preventDefault()" @keyup.space.prevent="$emit('close')"><uni-icons type="closeempty" size="21" color="#647186" /></button></view>
     <scroll-view scroll-y class="detail-scroll">
-      <view class="code-heading sf-surface" :class="{ 'long-code': item.code.length > 8 }"><text v-if="pickupCabinet(item)" class="cabinet-badge">{{ pickupCabinet(item) }}</text><text class="code">{{ item.code }}</text><text class="link" role="button" tabindex="0" aria-label="复制取件码" @click="copy" @keydown.enter.prevent="!$event.repeat && copy()" @keydown.space.prevent="$event.preventDefault()" @keyup.space.prevent="copy">复制</text></view>
-      <text class="muted">{{ stationDisplayName(item, '未填写取件地址') }} · 共 {{ total }} 件，待取 {{ pending }} 件</text>
+      <template v-if="!matchingSourceId">
+        <view v-if="members.length > 1" class="shipment-picker" role="group" aria-label="选择查看的包裹"><button v-for="(member, index) in members" :key="member.id" role="button" tabindex="0" :aria-pressed="currentMember?.id === member.id" @click="detailMemberId = member.id">包裹 {{ index + 1 }} · {{ member.picked ? '已取' : '未取' }}</button></view>
+        <OrderOverview :order="currentOrder" :shipment="currentShipment" :pickup="item" :sources="sources" :status="item.needsPickupAssignment ? '待确认归属' : currentShipment.picked ? '已取件' : '待取件'" />
+      </template>
       <text v-if="item.pickupCabinetConflict" class="review-note">柜号信息不一致，请核对原始短信与关联来源。</text>
-      <view class="section" v-if="members.length && !matchingSourceId">
+      <view class="section" v-if="members.length && !matchingSourceId && (members.length > 1 || showManagement)">
         <text class="section-title">{{ item.needsPickupAssignment ? '确认此前领取的包裹' : '关联包裹 · 选择本次已取' }}</text>
         <text v-if="item.needsPickupAssignment" class="muted">此前已取 {{ item.unassignedPickedCount }} 件，请确认对应包裹。</text>
         <view v-for="member in members" :key="member.id" class="member" @click="select(member)">
           <checkbox :checked="selected.includes(member.id)" :disabled="member.picked || busy" color="#1673ff" />
-          <view class="member-body"><text class="family-badge" :class="{ unassigned: !member.familyId }">{{ familyLabel(member) }}</text><text class="member-title">{{ member.title || '包裹' }} {{ member.platform ? '· '+platformName(member.platform) : '' }}</text><text v-if="member.platformOrderId" class="muted">订单 {{ member.platformOrderId }}</text><text class="muted">{{ member.waybillNo ? '运单 '+member.waybillNo : '短信包裹 '+(members.indexOf(member)+1) }}</text><LogisticsTimeline v-if="shipmentById[member.shipmentId]" :shipment="shipmentById[member.shipmentId]" /></view>
+          <view class="member-body"><text class="family-badge" :class="{ unassigned: !member.familyId }">{{ familyLabel(member) }}</text><text class="member-title">{{ member.title || '包裹' }} {{ member.platform ? '· '+platformName(member.platform) : '' }}</text><text v-if="member.platformOrderId" class="muted">订单 {{ member.platformOrderId }}</text><text class="muted">{{ member.waybillNo ? '运单 '+member.waybillNo : '短信包裹 '+(members.indexOf(member)+1) }}</text></view>
           <text class="link">{{ member.picked ? '已取' : '待取' }}</text>
         </view>
         <text class="muted">仅记录领取，不会确认电商收货。</text>
@@ -21,7 +23,7 @@
         <button class="secondary" :disabled="!chosenCode || busy" @click="act('resolveCode', {id:item.id, code:chosenCode})">确认使用所选取件码</button>
         <button class="plain" @click="chosenCode = ''; $emit('close')">暂不处理</button>
       </view>
-      <view class="section" v-if="sources.length">
+      <view class="section management-section" v-if="sources.length && (showManagement || matchingSourceId)">
         <text class="section-title">原始短信与关联来源</text>
         <view class="source sf-surface" v-for="source in sources" :key="source.sourceId">
           <text class="muted">{{ source.sender || source.kind || '短信' }} · {{ time(source.date) }}{{ source.ignored ? ' · 已忽略' : '' }}</text>
@@ -61,19 +63,20 @@
           </view>
         </view>
       </view>
-      <text v-else class="muted section">此记录没有关联的原始短信。</text>
+      <text v-else-if="!sources.length && showManagement" class="muted section">此记录没有关联的原始短信。</text>
     </scroll-view>
-    <view class="footer">
+    <view class="footer" :class="{ 'simple-footer': !matchingSourceId && members.length <= 1 && !item.needsPickupAssignment }">
       <template v-if="matchingSourceId">
         <text v-if="selectionError" class="muted">{{ selectionError }}</text>
-        <button class="primary" :disabled="busy || !!selectionError || !matchHasChanges" @click="confirmMatching">{{ busy ? '关联中…' : '确认关联所选 '+matchSelected.length+' 件' }}</button>
+        <button role="button" tabindex="0" class="primary" :disabled="busy || !!selectionError || !matchHasChanges" @click="confirmMatching">{{ busy ? '关联中…' : '确认关联所选 '+matchSelected.length+' 件' }}</button>
         <button class="plain" :disabled="busy" @click="closeMatching">返回取件详情</button>
       </template>
       <template v-else>
+      <button class="more-control" role="button" tabindex="0" :aria-expanded="showManagement" @click="toggleManagement">••• 更多</button>
       <button v-if="item.needsPickupAssignment" class="primary" :disabled="selected.length !== item.unassignedPickedCount || busy" @click="act('assignPickedMembers',{id:item.id,memberIds:selected})">确认此前已取 {{ item.unassignedPickedCount }} 件</button>
       <button v-else-if="members.length > 1" class="primary" :disabled="!selected.length || busy" @click="pick(selected, true)">标记所选 {{ selected.length }} 件已取</button>
-      <button v-if="pending" :class="members.length > 1 || item.needsPickupAssignment ? 'secondary' : 'primary'" :disabled="busy" @click="item.needsPickupAssignment ? act('update',{id:item.id,patch:{isPicked:true}}) : pick(members.filter(m=>!m.picked).map(m=>m.id),true)">{{ members.length > 1 ? '全部领取（'+pending+'件）' : '标记已取' }}</button>
-      <button v-if="pending < total && !item.needsPickupAssignment" class="secondary" :disabled="busy" @click="pick(members.filter(m=>m.picked).map(m=>m.id),false)">撤销已取{{ members.length > 1 ? '（全部已取成员）' : '' }}</button>
+      <button role="button" tabindex="0" v-if="pending" :class="members.length > 1 || item.needsPickupAssignment ? 'secondary' : 'primary'" :disabled="busy" @click="item.needsPickupAssignment ? act('update',{id:item.id,patch:{isPicked:true}}) : pick(members.filter(m=>!m.picked).map(m=>m.id),true)">{{ members.length > 1 ? '全部领取（'+pending+'件）' : '确认取件' }}</button>
+      <button role="button" tabindex="0" v-if="pending < total && !item.needsPickupAssignment" class="secondary" :disabled="busy" @click="pick(members.filter(m=>m.picked).map(m=>m.id),false)">撤销已取{{ members.length > 1 ? '（全部已取成员）' : '' }}</button>
       </template>
       <text v-if="item.needsMatchReview && !matchingSourceId" class="review-note">不确定关联仅记录本取件码，匹配订单可稍后处理。</text>
       <text v-if="error" class="danger error">{{ error }}</text>
@@ -82,16 +85,20 @@
 </template>
 <script>
 import { mutate } from '@/services/assistant.js';
-import LogisticsTimeline from '@/components/LogisticsTimeline.vue';
+import OrderOverview from '@/components/OrderOverview.vue';
 import { stationDisplayName, pickupCabinet } from '@/services/station-presentation.js';
 import { pickupSources, canMatchSource, linkedShipmentIds, sourcePackageCount, pickupShipmentRows, matchingRows, matchSelectionError, matchLinkPayload, timeDifference, matchReason } from '@/services/pickup-matching-view.js';
 export default {
-  components:{LogisticsTimeline},
+  components:{OrderOverview},
   props: { item: Object, packages: {type:Array,default:()=>[]}, matchOnOpen:Boolean }, emits:['close','changed','ignore'],
-  data:()=>({selected:[],chosenCode:'',busy:false,error:'',matchingSourceId:'',matchSelected:[],matchQuery:'',matchFamily:'',matchPlatform:'',showOtherPackages:false}),
-  watch:{'item.id'(){this.selected=[];this.chosenCode='';this.error='';this.closeMatching();}},
-  mounted(){if(this.matchOnOpen){const source=this.sources.find(s=>canMatchSource(s)&&(this.item.needsMatchReview||s.matchNeedsReview||linkedShipmentIds(s).length<sourcePackageCount(s)));if(source)this.openMatching(source);}},
+  data:()=>({detailMemberId:'',showManagement:false,selected:[],chosenCode:'',busy:false,error:'',matchingSourceId:'',matchSelected:[],matchQuery:'',matchFamily:'',matchPlatform:'',showOtherPackages:false}),
+  watch:{'item.id'(){this.detailMemberId='';this.showManagement=false;this.selected=[];this.chosenCode='';this.error='';this.closeMatching();}},
+  mounted(){this.$nextTick?.(()=>this.$el?.querySelector?.('[aria-label="关闭取件详情"]')?.focus?.());if(this.matchOnOpen){const source=this.sources.find(s=>canMatchSource(s)&&(this.item.needsMatchReview||s.matchNeedsReview||linkedShipmentIds(s).length<sourcePackageCount(s)));if(source)this.openMatching(source);}},
   computed:{
+    currentMember(){return this.members.find(member=>member.id===this.detailMemberId)||this.members.find(member=>!member.picked)||this.members[0]||null;},
+    independentJourney(){return this.item.needsMatchReview || typeof this.currentMember?.independentPicked === 'boolean';},
+    currentShipment(){return (!this.independentJourney && this.shipmentById[this.currentMember?.shipmentId])||{...this.currentMember,picked:this.currentMember?.picked??this.item.isPicked,displayPickupCode:this.item.code};},
+    currentOrder(){return (!this.independentJourney && this.packages.find(order=>(order.shipments||[]).some(shipment=>shipment.id===this.currentMember?.shipmentId)))||{title:this.independentJourney?'关联待核对的包裹':this.currentMember?.title||'未关联订单'};},
     members(){return this.item.members || [];}, total(){return this.item.totalCount || this.members.length || 1;}, pending(){return this.item.pendingCount ?? (this.item.isPicked ? 0 : this.total);},
     sources(){return pickupSources(this.item);},
     conflicts(){if(!this.item.conflicts?.length)return []; const values=this.item.conflicts.slice();if(!values.some(c=>c.code===this.item.code))values.unshift({code:this.item.code,sourceType:'当前记录',date:this.item.date});return values.filter((c,i)=>values.findIndex(v=>v.code===c.code)===i);},
@@ -110,6 +117,8 @@ export default {
     matchHasChanges(){const previous=linkedShipmentIds(this.matchingSource);return !!this.matchingSource?.matchNeedsReview||!!this.item?.needsMatchReview||previous.length!==this.matchSelected.length||previous.some(id=>!this.matchSelected.includes(id));}
   },
   methods:{
+    detailKeydown(event){if(event.defaultPrevented)return;if(event.key==='Tab'){const controls=[...(this.$el?.querySelectorAll?.('[tabindex="0"],input')||[])].filter(el=>!el.hasAttribute('disabled')&&el.getClientRects().length);const first=controls[0],last=controls.at(-1);if(first&&((event.shiftKey&&event.target===first)||(!event.shiftKey&&event.target===last))){event.preventDefault();(event.shiftKey?last:first).focus();}return;}if(['Enter',' '].includes(event.key)&&event.target?.tagName==='UNI-BUTTON'){event.preventDefault();if(!event.repeat)event.target.click();}if(event.key==='Escape'){event.preventDefault();this.$emit('close');}},
+    toggleManagement(){this.showManagement=!this.showManagement;if(this.showManagement)this.$nextTick(()=>this.$el?.querySelector('.management-section')?.scrollIntoView({block:'nearest'}));},
     stationDisplayName, pickupCabinet,
     canMatch:canMatchSource,linkedIds:linkedShipmentIds,deltaText:timeDifference,reasonText:matchReason,
     familyLabel(item){return item.familyId?(item.familyName||'家人'):'待归属';},
@@ -211,4 +220,5 @@ button[disabled] { opacity:.55; }
 .error { display:block; margin-top:12px; }
 button:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--sf-blue); outline-offset:3px; }
 @media(forced-colors:active) { button, .cabinet-badge, .match-choice { border:1px solid ButtonText; } }
+.detail-sheet{max-width:520px;max-height:94vh;max-height:94dvh;padding:0 0 max(14px,env(safe-area-inset-bottom));border:1px solid #fff;background:var(--sf-sheet);box-shadow:none;}.sheet-handle{flex:none;width:34px;height:4px;margin:10px auto 8px;border-radius:6px;background:#aab6c6;}.heading{margin:0 18px 18px;font-size:23px;}.heading>.link{border-radius:50%;border:1px solid white;background:#ffffff65;}.detail-scroll{box-sizing:border-box;height:72vh;height:72dvh;padding:0 18px;}.footer{padding:12px 16px 0;border-top:1px solid #fff;background:var(--sf-sheet);}.footer.simple-footer{display:grid;grid-template-columns:85px minmax(0,1fr);gap:9px;}.footer.simple-footer>button{margin:0;min-width:0;}.footer.simple-footer>.review-note,.footer.simple-footer>.error{grid-column:1 / -1;}.footer .primary{font-size:17px;font-weight:650;}.more-control{border:1px solid #c8d9eb;background:#f7fbffb3;color:#506b84;font-size:15px;font-weight:600;}.shipment-picker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:15px;}.shipment-picker button{margin:0;min-height:36px;padding:6px 10px;border:1px solid #cbd8e6;border-radius:10px;background:transparent;color:var(--sf-muted);font-size:12px;}.shipment-picker button[aria-pressed=true]{color:var(--sf-blue);background:#e5eefb;}button:focus-visible{outline:3px solid var(--sf-blue);outline-offset:3px;}.detail-sheet{height:94vh;height:94dvh;background:linear-gradient(145deg,#f1f6fb,#e7eef7);}.detail-scroll{height:0;flex:1;}.heading{margin-bottom:8px;}.heading>.link{margin:0;padding:0;}.footer{background:#eaf1f8;}
 </style>

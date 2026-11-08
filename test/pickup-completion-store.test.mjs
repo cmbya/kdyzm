@@ -62,7 +62,9 @@ test('cross-device stale writes, hide and same-millisecond legacy operations pre
   assert.equal(read().picked, false); assert.equal(read().hidden, true);
   op('unhide', NOW - 50, second); op('pick', NOW, second); op('restore', NOW, second);
   assert.equal(read().picked, false); assert.equal(read().pickupCompletion.manualOverride, 'pending');
-  assert.equal(Object.hasOwn(store.snapshot(['a']).shipments[0], 'pickupManualAt'), false);
+  assert.equal(store.snapshot(['a']).shipments[0].pickupManualAt, NOW);
+  assert.equal(store.snapshot(['a']).shipments[0].pickupManualAction, 'restore');
+  assert.equal(store.snapshot(['a']).shipments[0].pickupConfirmedAt, 0);
 });
 
 test('disabling pauses new auto completions, retains existing evidence, and enabling backfills visible pending', t => {

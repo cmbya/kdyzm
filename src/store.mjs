@@ -8,15 +8,16 @@ import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, pr
 import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
+import { retainMilestoneEvents, shippingEvidence } from './shipment-lifecycle.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
 const validTime = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000 ? value : 0;
 const shortText = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : '';
 const waybillKey = value => String(value || '').normalize('NFKC').replace(/\s+/gu, '').toUpperCase();
-function logisticsData(input, old = {}, reuseEvents = false) {
+function logisticsData(input, old = {}, reuseEvents = false, rules, now) {
   const checkedAt = validTime(input.logisticsCheckedAt);
-  if (checkedAt && checkedAt < (old.logisticsCheckedAt || 0)) return logisticsData({}, old);
+  if (checkedAt && checkedAt < (old.logisticsCheckedAt || 0)) return logisticsData({}, old, false, rules, now);
   const supplied = Array.isArray(input.logisticsEvents) ? input.logisticsEvents : [];
   const seen = new Map();
   const events = reuseEvents ? old.logisticsEvents || [] : [...supplied, ...(old.logisticsEvents || [])].filter(e => e && typeof e === 'object').map(e => ({
@@ -29,7 +30,7 @@ function logisticsData(input, old = {}, reuseEvents = false) {
     seen.set(key, e); return true;
   }).sort((a, b) => b.time - a.time);
   const state = ['ok', 'empty', 'error', 'unavailable'].includes(input.logisticsState) ? input.logisticsState : old.logisticsState || '';
-  return { logisticsEvents: events.slice(0, 100), logisticsState: state,
+  return { logisticsEvents: retainMilestoneEvents(events, rules, now), logisticsState: state,
     logisticsError: input.logisticsState ? shortText(input.logisticsError, 200) || ({ error: '物流查询未完成，已保留原轨迹', unavailable: '平台未返回该运单轨迹', empty: '平台本次未返回物流轨迹' }[state] || '') : old.logisticsError || '',
     logisticsCheckedAt: Math.max(checkedAt, old.logisticsCheckedAt || 0),
     logisticsDetailCheckedAt: Math.max(validTime(input.logisticsDetailCheckedAt), old.logisticsDetailCheckedAt || 0),
@@ -61,7 +62,7 @@ function pickupData(input = {}, old = {}, events = [], rules, now = Date.now()) 
   }
   else if (reset || (!explicitArrival && stationConflict)) result = evidence;
   else if (rules && input.logisticsState === 'ok' && input.logisticsEvents?.length && !explicitArrival
-    && Object.hasOwn(input, 'arrivalAt') && old.arrivalAtSource === 'platform_event') {
+    && Object.hasOwn(input, 'arrivalAt') && old.arrivalAtSource === 'platform_event' && !input.logisticsTruncated && !old.logisticsTruncated) {
     // A successful refreshed track supersedes previous template evidence. Structured locker evidence remains valid.
     result = evidence;
   }
@@ -103,7 +104,9 @@ const pickupCycleData = (shipmentId, input, old, events, now) => {
   const evidenceKey = `${validTime(reset.time)}:${shortText(reset.description, 300)}`;
   if (current.evidenceKey === evidenceKey) return { pickupCycle: current, pickupCycleHistory: history, cycleChanged: false };
   const previous = { ...current, status: 'closed', pickupCompletion: old?.pickupCompletion || null, picked: !!old?.picked,
-    pickupManualAt: validTime(old?.pickupManualAt), pickupManualOperation: shortText(old?.pickupManualOperation, 200) };
+    pickupManualAt: validTime(old?.pickupManualAt), pickupManualOperation: shortText(old?.pickupManualOperation, 200), pickupManualAction: old?.pickupManualAction || '', pickupConfirmedAt: validTime(old?.pickupConfirmedAt),
+    shippedAt: validTime(old?.shippedAt), shippedAtSource: old?.shippedAtSource || 'unknown', shippedAtPrecision: old?.shippedAtPrecision || 'unknown',
+    arrivalAt: validTime(old?.arrivalAt), arrivalAtSource: old?.arrivalAtSource || 'unknown', arrivalAtPrecision: old?.arrivalAtPrecision || 'unknown' };
   const next = { id: stableId(shipmentId, 'pickup-cycle', evidenceKey), startedAt: validTime(reset.time), evidenceKey, status: 'active' };
   const seen = new Set(history.map(item => item.id));
   return { pickupCycle: next, pickupCycleHistory: seen.has(previous.id) ? history : [...history, previous].slice(-20), cycleChanged: true };
@@ -511,7 +514,7 @@ export class Store {
   importResult(accountId, result, { partial = false, reconcile = true } = {}) {
     const rules = result.logisticsRules ?? this.getLogisticsRules?.();
     const completionRules = this.pickupCompletion.rules(), completionConfig = this.pickupCompletion.config();
-    const parserKey = hash(JSON.stringify([rules, completionRules, completionConfig]));
+    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v1', rules, completionRules, completionConfig]));
     const changedShipmentIds = [];
     const account = this.account(accountId);
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
@@ -532,10 +535,13 @@ export class Store {
         const checkedAt = validTime(input.dateCheckedAt) <= this.now() + 300000 ? validTime(input.dateCheckedAt) : 0;
         const incomingDetail = input.orderDateOrigin === 'detail';
         const replaceDate = !!inputDate && (!verifiedDate || (incomingDetail && (old?.orderDateOrigin !== 'detail' || checkedAt >= (old?.dateCheckedAt || 0))));
+        const datePrecision = value => ['second', 'minute', 'day'].includes(value) ? value : 'unknown';
+        const refreshPrecision = replaceDate || inputDate && inputDate === old?.orderDate && datePrecision(old?.orderDatePrecision) === 'unknown';
         const order = { ...old, id, accountId, platform: account.platform, platformOrderId,
           familyId: old ? old.familyId || '' : account.familyId, familyName: old ? old.familyName || '' : account.familyName,
           title: String(input.title || old?.title || ''), amount: input.amount == null ? old?.amount ?? null : input.amount,
           orderDate: replaceDate ? inputDate : old?.orderDate || 0,
+          orderDatePrecision: refreshPrecision ? datePrecision(input.orderDatePrecision) : datePrecision(old?.orderDatePrecision),
           orderDateSource: replaceDate || verifiedDate ? 'platform' : old?.orderDate ? 'legacy' : 'unknown',
           orderDateOrigin: replaceDate ? incomingDetail ? 'detail' : 'list' : old?.orderDateOrigin || (verifiedDate ? 'list' : ''),
           dateCheckedAt: Math.max(old?.dateCheckedAt || 0, checkedAt),
@@ -609,7 +615,7 @@ export class Store {
         // Identical evidence needs only a query timestamp; preserve manual decisions and avoid rerunning parsers/AI.
         if (old?.logisticsEvidenceHash === logisticsEvidenceHash
           && !(input.logisticsEvents || []).some(event => validTime(event.time) > (old.logisticsCheckedAt || 0))) {
-          const updated = { ...old, ...logisticsData(input, old, true) };
+          const updated = { ...old, ...logisticsData(input, old, true, rules, this.now()) };
           if (JSON.stringify(updated) !== JSON.stringify(old)) this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), id);
           continue;
         }
@@ -619,19 +625,20 @@ export class Store {
         const staleLogistics = !!old && ((inputCheckedAt > 0 && oldCheckedAt > 0 && inputCheckedAt < oldCheckedAt)
           || (inputCheckedAt === 0 && hasPersistedLogistics && !trustedEvent));
         const status = ['transit', 'arrived', 'signed', 'unknown'].includes(input.status) ? input.status : 'unknown';
-        const logistics = staleLogistics ? logisticsData({}, old) : logisticsData(input, old);
+        const logistics = staleLogistics ? logisticsData({}, old, false, rules, this.now()) : logisticsData(input, old, false, rules, this.now());
         const pickup = staleLogistics ? pickupData({}, old || {}, old?.logisticsEvents || [], rules, this.now()) : pickupData(input, old || {}, logistics.logisticsEvents, rules, this.now());
         const cycleState = staleLogistics ? pickupCycleData(id, input, old || {}, old?.logisticsEvents || [], this.now())
           : pickupCycleData(id, input, old || {}, logistics.logisticsEvents, this.now());
         const { cycleChanged, ...cycle } = cycleState;
+        const shipping = shippingEvidence(logistics.logisticsEvents, cycleChanged ? {} : old || {}, this.now(), cycle.pickupCycle);
         let shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
           familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: old?.waybillNo || String(input.waybillNo), carrier: carrier ? input.carrier : old?.carrier || input.carrier || '', status: staleLogistics ? old.status : status,
           pickupCode: staleLogistics ? old.pickupCode || '' : input.pickupCode || (!pickup.arrivalAt && (old?.arrivalAt || logistics.logisticsEvents.some(event => pickupCycleReset(event.description) && (!event.time || event.time <= this.now()))) ? '' : old?.pickupCode) || '', ...pickup,
           updatedAt: input.updatedAt || this.now(), picked: cycleChanged ? false : old?.picked || false, hidden: old?.hidden || false,
           deleted: old?.deleted || false, manualAt: old?.manualAt || 0,
           pickupCompletion: cycleChanged ? pickupCompletionState({}) : pickupCompletionState(old), pickupManualAt: cycleChanged ? 0 : old?.pickupManualAt || 0,
-          pickupManualOperation: cycleChanged ? '' : old?.pickupManualOperation || '',
-          ...cycle,
+          pickupManualOperation: cycleChanged ? '' : old?.pickupManualOperation || '', pickupManualAction: cycleChanged ? '' : old?.pickupManualAction || '', pickupConfirmedAt: cycleChanged ? 0 : validTime(old?.pickupConfirmedAt),
+          ...cycle, ...shipping,
           ...logistics };
         if (staleLogistics) shipment.updatedAt = old.updatedAt || shipment.updatedAt;
         shipment = this.pickupCompletion.project(shipment, { rules: completionRules, config: completionConfig });
@@ -646,7 +653,7 @@ export class Store {
         const rows = this.db.prepare('SELECT data FROM shipments WHERE account_id=?').all(accountId).map(parse);
         for (const old of rows.filter(s => s.orderId === orderId && (!failure.waybillNo || s.waybillNo === failure.waybillNo))) {
           if (failure.logisticsCheckedAt && failure.logisticsCheckedAt < (old.logisticsCheckedAt || 0)) continue;
-          const updated = { ...old, ...logisticsData({ logisticsState: failure.state, logisticsError: failure.logisticsError, logisticsCheckedAt: failure.logisticsCheckedAt || this.now(), logisticsDetailCheckedAt: failure.logisticsDetailCheckedAt }, old), updatedAt: this.now() };
+          const updated = { ...old, ...logisticsData({ logisticsState: failure.state, logisticsError: failure.logisticsError, logisticsCheckedAt: failure.logisticsCheckedAt || this.now(), logisticsDetailCheckedAt: failure.logisticsDetailCheckedAt }, old, false, rules, this.now()), updatedAt: this.now() };
           this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
         }
       }
@@ -677,21 +684,33 @@ export class Store {
     const accounts = this.accounts(device.accountIds).filter(account => !narrowed || narrowed.has(account.id));
     const orders = this.db.prepare('SELECT data FROM orders ORDER BY id').all().map(parse).filter(visible)
       .map(o => {
-        const { archiveAnchorDate, archiveAnchorSource, archivedAt, archiveRestoredAnchor, archiveRestoredAt, ...publicOrder } = o;
+        const { archiveAnchorDate, archiveAnchorSource, archivedAt, archiveRestoredAnchor, archiveRestoredAt, orderDatePrecision, ...publicOrder } = o;
         return { ...publicOrder, familyId: o.familyId || '', familyName: o.familyName || '', orderDateSource: o.orderDateSource || (o.orderDate ? 'legacy' : 'unknown'), firstSeenAt: o.firstSeenAt || 0,
           dateOverride: o.dateOverride ?? null, dateOverrideAt: o.dateOverrideAt || 0, dateState: o.dateState || 'unknown', dateError: o.dateError || '', archived: !!o.archived,
-          retention: orderRetention(o, this.now()) };
+          ...(['second', 'minute', 'day'].includes(orderDatePrecision) ? { orderDatePrecision } : {}), retention: orderRetention(o, this.now()) };
       });
     const orderById = new Map(orders.map(order => [order.id, order]));
     const shipments = this.db.prepare('SELECT data FROM shipments ORDER BY id').all().map(parse).filter(visible)
       .filter(shipment => this.shipmentAlias(shipment.id).id === shipment.id).map(s => {
       // Configured services publish evidence persisted by imports or explicit rule changes.
       const pickup = pickupData({}, s, this.getLogisticsRules ? [] : s.logisticsEvents || [], undefined, this.now());
-      const { pickupManualAt, pickupManualOperation, pickupCycleHistory, logisticsEvidenceHash, ...publicShipment } = s;
+      const { pickupCycleHistory, logisticsEvidenceHash, shippedAt, shippedAtSource, shippedAtPrecision, pickupManualAt, pickupManualOperation, pickupManualAction, pickupConfirmedAt, ...publicShipment } = s;
+      // Imports persist both proven timestamps and explicit unknowns; only legacy rows need parsing here.
+      let shipping = {};
+      if (!['shippedAt', 'shippedAtSource', 'shippedAtPrecision'].every(field => Object.hasOwn(s, field))) {
+        shipping = shippingEvidence(s.logisticsEvents || [], s, this.now());
+      } else if (validTime(shippedAt) && shippedAt <= this.now() && shippedAtSource === 'platform_event'
+        && (!s.pickupCycle?.evidenceKey || s.pickupCycle.evidenceKey === 'initial' || shippedAt > validTime(s.pickupCycle.startedAt))) {
+        shipping = { shippedAt, shippedAtSource, shippedAtPrecision: ['second', 'minute'].includes(shippedAtPrecision) ? shippedAtPrecision : 'unknown' };
+      }
+      const manual = pickupManualAt || pickupManualOperation || pickupManualAction ? {
+        pickupManualAt: validTime(pickupManualAt), pickupManualOperation: shortText(pickupManualOperation, 200),
+        pickupManualAction: ['pick', 'restore', 'resumeAutoPickup'].includes(pickupManualAction) ? pickupManualAction : '', pickupConfirmedAt: validTime(pickupConfirmedAt) } : {};
       const compactCycle = s.pickupCycle ? { id: s.pickupCycle.id, startedAt: s.pickupCycle.startedAt, evidenceKey: s.pickupCycle.evidenceKey, status: s.pickupCycle.status } : undefined;
       const archived = !!orderById.get(s.orderId)?.archived;
       const receipt = retainedSignedShipment(s, archived, this.now());
       return { ...publicShipment, ...(archived ? { archived: true } : {}), ...(receipt || {}), ...(compactCycle ? { pickupCycle: compactCycle } : {}), ...(pickupCycleHistory?.length ? { pickupCycleHistory } : {}), ...pickup, pickupCompletion: pickupCompletionState(s), pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
+        ...(shipping.shippedAt ? shipping : {}), ...manual,
         familyId: s.familyId || '', familyName: s.familyName || '' };
     });
     const visibleShipmentIds = new Set(shipments.map(shipment => shipment.id));
@@ -808,10 +827,14 @@ export class Store {
           }
           appliedIds.push(operation.id); continue;
         }
-        onlyKeys(input, ['id', 'shipmentId', 'action', 'occurredAt', 'pickupCycleId']);
+        onlyKeys(input, ['id', 'shipmentId', 'action', 'occurredAt', 'pickupCycleId', 'pickedAt']);
         const operation = { id: text(input.id, '操作ID', 128), shipmentId: text(input.shipmentId, '运单ID', 128), action: input.action, occurredAt: input.occurredAt };
         if (Object.hasOwn(input, 'pickupCycleId')) operation.pickupCycleId = text(input.pickupCycleId, '领取周期ID', 128);
         if (!['pick', 'restore', 'resumeAutoPickup', 'hide', 'unhide'].includes(operation.action) || !Number.isSafeInteger(operation.occurredAt) || operation.occurredAt < 0 || operation.occurredAt > this.now() + 5 * 60000) fail(400, 'INVALID_OPERATION', '不支持的操作或时间');
+        if (Object.hasOwn(input, 'pickedAt')) {
+          if (operation.action !== 'pick' || !Number.isSafeInteger(input.pickedAt) || input.pickedAt < 0 || input.pickedAt > operation.occurredAt) fail(400, 'INVALID_OPERATION', '取件确认时间无效');
+          operation.pickedAt = input.pickedAt;
+        }
         const digest = hash(JSON.stringify(operation));
         const old = this.db.prepare('SELECT payload_hash FROM operations WHERE device_id=? AND id=?').get(device.id, operation.id);
         if (old && old.payload_hash !== digest) fail(409, 'OPERATION_CONFLICT', '相同操作ID不能用于不同内容');
@@ -833,7 +856,9 @@ export class Store {
           if (pickupAction) {
             const state = pickupCompletionState(shipment);
             state.manualOverride = operation.action === 'pick' ? 'picked' : operation.action === 'restore' ? 'pending' : '';
-            Object.assign(shipment, { pickupCompletion: state, picked: effectivePicked(state), pickupManualAt: operation.occurredAt, pickupManualOperation: `${device.id}:${operation.id}` });
+            let confirmedAt = operation.action === 'pick' ? operation.pickedAt ?? operation.occurredAt : 0;
+            if (shipment.pickupCycleHistory?.length && confirmedAt < validTime(shipment.pickupCycle?.startedAt)) confirmedAt = 0;
+            Object.assign(shipment, { pickupCompletion: state, picked: effectivePicked(state), pickupManualAt: operation.occurredAt, pickupManualOperation: `${device.id}:${operation.id}`, pickupManualAction: operation.action, pickupConfirmedAt: confirmedAt });
             if (operation.action === 'resumeAutoPickup') Object.assign(shipment, this.pickupCompletion.project(shipment));
           } else shipment.hidden = operation.action === 'hide';
           shipment.manualAt = this.now();
