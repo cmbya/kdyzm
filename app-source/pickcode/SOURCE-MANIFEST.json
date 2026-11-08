@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.36",
+  "version": "3.1.37",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "f471b0db193539fff7876dea53eced0ab915d177387a57f179faa41bdb69b8c7"
+      "sha256": "7bcac1e8af2249dc31179e12e20aae3a4b574cb850ea81ea5981752b5d085bd0"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -111,8 +111,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/AssistantStore.java",
-      "size": 5288,
-      "sha256": "826d9d5f036f25e6cd9f3e670c6c8445db7184cba17a6b13cbcbdf42c3440e9e"
+      "size": 9258,
+      "sha256": "a937d5ee8f8aef76d96be4103a50ec1ee7c43265f5af3fbb09bae1a2ef5cc75f"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/BackendRoutes.java",
@@ -141,8 +141,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/MainActivity.java",
-      "size": 33631,
-      "sha256": "59dc253dd70891443d0b3fb6ceb009c2428d3046cff9ad68a7dbdbfefc813a2e"
+      "size": 36852,
+      "sha256": "a1b590c9a1eafd891171a316372a36b5c99d8f055143e9673d24f1ca4fe290de"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineClient.java",
@@ -156,8 +156,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
-      "size": 74144,
-      "sha256": "c89aa6f1efa9cac36a37e44e529a9273288a1e82095371a0e42f8abe3066b275"
+      "size": 75997,
+      "sha256": "b4ce2eccb83f496962cc4821a02c23c0e0e760c6281df2a2701db94810af13ca"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
@@ -176,8 +176,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/PickCodeApplication.java",
-      "size": 676,
-      "sha256": "9e8a6ec39dcd07a80e5f34bdc37ddfc4b5bfecdc172407db54073162e3575213"
+      "size": 683,
+      "sha256": "5e9e8e1b651c9d5b4a1e708038abc23c1896907af1673c2360ccb3adb80e29af"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/ScanScheduler.java",
@@ -516,8 +516,8 @@
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 153858,
-      "sha256": "2045db2881a1f24d2146edefbb4eee1caf5dd1a037d96b628e51851dc070b93a"
+      "size": 155910,
+      "sha256": "5ab74d7a47f7fb68d570c1b032b1f81733884371359c55921d70f7e5927368b9"
     },
     {
       "path": "index.html",
@@ -537,17 +537,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "a1632fd293fe37e84646efa2dab44e89e0b0690b2e2dbbdba6d4676477f440aa"
+      "sha256": "f465a73b4244fc168cf2e986fce5842bd8dd94aeb704799165a54c40432088a3"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "5ceaf3b8cf676ce4d1429d1693df869537ca555a996e5bc3144ab82a8b70ca81"
+      "sha256": "e2e01c86986a2b44817d297aca1478950f0e66a867f5560cf361671ae38a8f12"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "0f441da5d3555c22f816eec35219b27979eda0804382c76c99997cec1052170c"
+      "sha256": "fa63da84c4208065b2bc31a1fe82f4fbe48e543a4a000008dbc12440a4c815cb"
     },
     {
       "path": "pages.json",
@@ -576,8 +576,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 36690,
-      "sha256": "ff20156f0f88ec49ac3643e4fb9c01541bf0e5740e3c29f0cec8594098bbe004"
+      "size": 37416,
+      "sha256": "6019c2a69fcf4c1fd7c80cc771fbf2b526c678698ae39131bf44bc39d0a3821e"
     },
     {
       "path": "pages/my/faq.vue",
@@ -591,8 +591,8 @@
     },
     {
       "path": "pages/my/index.vue",
-      "size": 7659,
-      "sha256": "56c10d3db2e6612a41530551268bc3cebc8c57d7372f9fccba25affb77995224"
+      "size": 8344,
+      "sha256": "431f75e26709c26aaf197f74365e26588aaaf8280de360a7680b6b0494810a92"
     },
     {
       "path": "pages/my/logistics-rules.vue",
@@ -611,8 +611,8 @@
     },
     {
       "path": "pages/my/online-accounts.vue",
-      "size": 14781,
-      "sha256": "c9aaa6e9a534508ddcbd3aa0f5e80ab5d234e6cfb78011148feacf99dd60e4bd"
+      "size": 14884,
+      "sha256": "856b88963d5146af7cfa49e3193f332599458aec9e1ee408a49a19f0fed7bb4e"
     },
     {
       "path": "pages/packages/edit.vue",
@@ -696,8 +696,8 @@
     },
     {
       "path": "services/assistant.js",
-      "size": 31419,
-      "sha256": "794ee3359d4e8b785e6cc599015ce10b50e5c49abb96dee30715eae163f3d923"
+      "size": 34747,
+      "sha256": "6e2c368b4cdf60a680393d6b087ba6feae47be861922f8bca5b6321a29f8e5ff"
     },
     {
       "path": "services/item-patch.js",
@@ -2509,7 +2509,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "46ad915a7b633d9f68c6ce7a4fab7bc3c12fe7f59805e41c3a1a4e672968e647"
+      "sha256": "c02b4322cfb91601a933120cb1d5eaf7237b616fcc6d9ae4acf2b44b50150922"
     },
     {
       "path": ".gitignore",

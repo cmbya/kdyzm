@@ -28,6 +28,7 @@ import androidx.webkit.WebViewAssetLoader;
 import org.json.JSONObject;
 import java.io.ByteArrayInputStream;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
@@ -54,6 +55,11 @@ public final class MainActivity extends Activity {
     private boolean pendingPackages;
     private int pendingWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
     private boolean resumed, widgetCopyInFlight, pageReady, onlineSyncInFlight, localSnapshotShown, foregroundStarted;
+    private boolean displayRefreshInFlight;
+    private final Object passiveRequests = new Object();
+    private PassiveSync passiveSync;
+    private int passiveBatches;
+    private static final class PassiveSync { final ArrayList<String> replies = new ArrayList<>(); }
     private long lastOnlineAttempt;
     private final ExecutorService network = Executors.newSingleThreadExecutor();
     private final ExecutorService onlineNetwork = Executors.newSingleThreadExecutor();
@@ -65,11 +71,7 @@ public final class MainActivity extends Activity {
                 onlineSyncInFlight = true;
                 lastOnlineAttempt = android.os.SystemClock.elapsedRealtime();
                 notifySyncStatus();
-                onlineNetwork.execute(() -> {
-                    try { OnlineSyncManager.get(MainActivity.this).sync(false); }
-                    catch (Exception ignored) { /* Saved state remains available if storage cannot be read. */ }
-                    finally { runOnUiThread(() -> { onlineSyncInFlight = false; notifySyncStatus(); notifyRefresh(); }); }
-                });
+                syncPassive(null);
             }
             foreground.postDelayed(this, 60_000);
         }
@@ -178,7 +180,26 @@ public final class MainActivity extends Activity {
                 if ("openSystemSettings".equals(action)) { runOnUiThread(() -> openSettings(requestId, data)); return; }
                 if ("pinWidget".equals(action)) { runOnUiThread(() -> pinWidget(requestId, data)); return; }
                 if ("openShoppingApp".equals(action)) { runOnUiThread(() -> openShoppingApp(requestId, data)); return; }
-                (ONLINE_ACTIONS.contains(action) ? onlineNetwork : "generateTemplate".equals(action) || "aiChannels".equals(action) || "configureAiOptimization".equals(action) || "approveAiProposal".equals(action) ? network : PickCodeApplication.IO).execute(() -> {
+                if (("snapshot".equals(action) || "overview".equals(action) || "onlineStatus".equals(action))
+                        && AssistantStore.get(MainActivity.this).hasDisplaySnapshot()) {
+                    try { reply(requestId, execute(action, data), null); }
+                    catch (Exception failure) { reply(requestId, null, safeError(action, failure)); }
+                    if (data.optBoolean("refresh", true)) runOnUiThread(MainActivity.this::refreshDisplayedData);
+                    return;
+                }
+                if ("syncOnline".equals(action) && !data.optBoolean("force")) { syncPassive(requestId); return; }
+                if (ONLINE_ACTIONS.contains(action)) {
+                    synchronized (passiveRequests) {
+                        // A binding or explicit action is a queue boundary; later reads must not join an older session.
+                        passiveSync = null;
+                        onlineNetwork.execute(() -> {
+                            try { reply(requestId, execute(action, data), null); }
+                            catch (Exception failure) { reply(requestId, null, safeError(action, failure)); }
+                        });
+                    }
+                    return;
+                }
+                ("generateTemplate".equals(action) || "aiChannels".equals(action) || "configureAiOptimization".equals(action) || "approveAiProposal".equals(action) ? network : PickCodeApplication.IO).execute(() -> {
                     try { reply(requestId, execute(action, data), null); }
                     catch (Exception failure) { reply(requestId, null, safeError(action, failure)); }
                 });
@@ -186,7 +207,47 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void syncPassive(String requestId) {
+        synchronized (passiveRequests) {
+            if (passiveSync != null) {
+                if (requestId != null) passiveSync.replies.add(requestId);
+                return;
+            }
+            PassiveSync batch = new PassiveSync();
+            if (requestId != null) batch.replies.add(requestId);
+            passiveSync = batch;
+            passiveBatches++;
+            runOnUiThread(() -> { onlineSyncInFlight = true; notifySyncStatus(); });
+            onlineNetwork.execute(() -> {
+                JSONObject result = null; String error = null;
+                try { result = OnlineSyncManager.get(this).sync(false); }
+                catch (Exception failure) { error = safeError("syncOnline", failure); }
+                synchronized (passiveRequests) {
+                    for (String id : batch.replies) reply(id, result, error);
+                    if (passiveSync == batch) passiveSync = null;
+                    boolean syncing = --passiveBatches > 0;
+                    runOnUiThread(() -> { onlineSyncInFlight = syncing; notifySyncStatus(); notifyRefresh(); });
+                }
+            });
+        }
+    }
+
+    private void refreshDisplayedData() {
+        if (!resumed || !localSnapshotShown || displayRefreshInFlight || isDestroyed()
+                || !AssistantStore.get(this).displayNeedsRefresh()) return;
+        displayRefreshInFlight = true;
+        PickCodeApplication.IO.execute(() -> {
+            boolean refreshed = false;
+            try { AssistantStore.get(this).snapshot(); refreshed = true; }
+            catch (Exception ignored) { /* A failed refresh keeps the last committed display. */ }
+            boolean changed = refreshed;
+            runOnUiThread(() -> { displayRefreshInFlight = false; if (changed) notifyRefresh(); });
+        });
+    }
+
     private JSONObject execute(String action, JSONObject payload) throws Exception {
+        if ("snapshot".equals(action)) return AssistantStore.get(this).displaySnapshot();
+        if ("overview".equals(action)) return AssistantStore.get(this).overview();
         if ("status".equals(action)) return status();
         if ("onlineStatus".equals(action)) return OnlineSyncManager.get(this).status();
         if ("aiChannels".equals(action)) {
@@ -388,6 +449,7 @@ public final class MainActivity extends Activity {
         notifySyncStatus();
         long elapsed = android.os.SystemClock.elapsedRealtime() - lastOnlineAttempt;
         foreground.postDelayed(onlinePoll, lastOnlineAttempt == 0 ? 0 : Math.max(0, 60_000 - elapsed));
+        displayRefreshInFlight = true;
         PickCodeApplication.IO.execute(() -> {
             try {
                 JSONObject snapshot = AssistantStore.get(this).snapshot();
@@ -397,11 +459,11 @@ public final class MainActivity extends Activity {
                 if (snapshot.getJSONObject("settings").optBoolean("autoScan") && SmsScanner.allowed(this)
                         && ScanWindow.due(snapshot.optLong("lastScanAt"), System.currentTimeMillis())) {
                     SmsScanner.scan(this);
-                } else AssistantStore.get(this).refreshSnapshot();
+                }
             } catch (Exception ignored) { /* Failed scans never advance lastScanAt. Manual scan can retry. */ }
             finally {
                 // Widget mutations may happen while this activity is paused, even when no scan is due.
-                runOnUiThread(this::notifyRefresh);
+                runOnUiThread(() -> { displayRefreshInFlight = false; notifyRefresh(); });
             }
         });
     }

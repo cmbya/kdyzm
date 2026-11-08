@@ -18,13 +18,13 @@
 <script>
 import packageInfo from '../../package.json' with { type: 'json' };
 import AppUpdate from '@/components/AppUpdate.vue';
-import { getSnapshot, getAppUpdateStatus } from '@/services/assistant.js';
+import { getCachedSnapshot, getOverview, getAppUpdateStatus } from '@/services/assistant.js';
 
 export default {
   components: { AppUpdate },
   data() {
     return {
-      hydrated: false, online: {}, stats: {
+      hydrated: false, visible: false, loadInFlight: null, online: {}, stats: {
         total: 0,
         picked: 0
       },
@@ -32,14 +32,17 @@ export default {
     };
   },
   onLoad() {
-    uni.$on('assistant-changed', this.loadStats);
+    uni.$on('assistant-changed', this.changed);
   },
   onShow() {
+    this.visible = true;
     this.loadStats();
     this.loadCurrentVersion();
   },
+  onHide() { this.visible = false; },
   onUnload() {
-    uni.$off('assistant-changed', this.loadStats);
+    this.visible = false;
+    uni.$off('assistant-changed', this.changed);
   },
   methods: {
     navigateTo(url) {
@@ -58,16 +61,29 @@ export default {
         // The footer keeps the bundled version when native status is unavailable.
       }
     },
-    async loadStats() {
-      try {
-        const snapshot = await getSnapshot();
-        this.hydrated = true;
-        this.online=snapshot.online || {};
-        this.stats.total = snapshot.codes.reduce((n,item)=>n+(item.totalCount||1),0);
-        this.stats.picked = snapshot.codes.reduce((n,item)=>n+(item.totalCount||1)-(item.pendingCount ?? (item.isPicked?0:1)),0);
-      } catch (e) {
-        uni.showToast({ title: '统计加载失败，请重新打开页面', icon: 'none' });
-      }
+    applySnapshot(snapshot) {
+      this.applyOverview({ online: snapshot.online, stats: {
+        total: snapshot.codes.reduce((n,item)=>n+(item.totalCount||1),0),
+        picked: snapshot.codes.reduce((n,item)=>n+(item.totalCount||1)-(item.pendingCount ?? (item.isPicked?0:1)),0),
+      } });
+    },
+    applyOverview(overview) {
+      this.hydrated = true;
+      this.online = overview.online || {};
+      this.stats = overview.stats;
+    },
+    changed(snapshot) {
+      if (Array.isArray(snapshot?.codes)) this.applySnapshot(snapshot);
+      else if (this.visible) this.loadStats();
+    },
+    loadStats() {
+      const cached = getCachedSnapshot();
+      if (cached && !this.hydrated) this.applySnapshot(cached);
+      if (this.loadInFlight) return this.loadInFlight;
+      this.loadInFlight = getOverview().then(this.applyOverview).catch(() => {
+        if (this.visible) uni.showToast({ title: '统计加载失败，请重新打开页面', icon: 'none' });
+      }).finally(() => { this.loadInFlight = null; });
+      return this.loadInFlight;
     },
   },
 };

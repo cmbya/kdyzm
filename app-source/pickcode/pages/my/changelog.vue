@@ -2,6 +2,13 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.37 · 私人版</text><text class="version-date">2026-11-09</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">显示</text><text class="content">打开“我的”和线上账号时先显示本地已有数据，再连接后台更新；连接中或失败时保留已有内容</text></view>
+          <view class="update-item"><text class="tag optimize">速度</text><text class="content">轻量读取统计和账号，复用本地快照，减少同步重复计算并合并重叠的自动同步请求</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.36 · 私人版</text><text class="version-date">2026-11-08</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">同步</text><text class="content">配合后台 3.1.32 连续处理全部待查物流，逐项更新结果并显示查询进度，中断后自动接续</text></view>

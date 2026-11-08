@@ -7,6 +7,10 @@ const storageKey = 'pickcode.private.state.v1';
 let initialization;
 let initialized = false;
 let snapshotInFlight;
+let cachedSnapshot;
+let snapshotEpoch = 0;
+let bindingEpoch = 0;
+const onlineSyncs = new Map();
 let snapshotFramePending = false;
 let nativeSyncing = false;
 let activeSyncs = 0;
@@ -247,14 +251,33 @@ async function previewOnline(action, payload) {
 }
 
 function nativeBridge() { return typeof window !== 'undefined' && window.PickCodeNative; }
+function rememberSnapshot(snapshot) {
+  if (Array.isArray(snapshot?.codes) && Array.isArray(snapshot?.packages) && snapshot !== cachedSnapshot) {
+    cachedSnapshot = snapshot;
+    snapshotEpoch++;
+  }
+  return snapshot;
+}
+export function getCachedSnapshot() { return cachedSnapshot; }
+function overviewOf(snapshot) {
+  return { online: snapshot.online || {}, stats: {
+    total: snapshot.codes.reduce((n, item) => n + (item.totalCount || 1), 0),
+    picked: snapshot.codes.reduce((n, item) => n + (item.totalCount || 1) - (item.pendingCount ?? (item.isPicked ? 0 : 1)), 0),
+  } };
+}
+function afterDisplayFrame(callback) {
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(callback));
+  } else callback();
+}
 function snapshotForDisplay(snapshot) {
   if (nativeBridge() && typeof window.requestAnimationFrame === 'function' && !snapshotFramePending) {
     snapshotFramePending = true;
     // Promise/Vue updates settle before the first frame; automatic work starts after that frame is painted.
-    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    afterDisplayFrame(() => {
       snapshotFramePending = false;
       request('snapshotVisible').catch(() => {});
-    }));
+    });
   }
   return snapshot;
 }
@@ -284,7 +307,7 @@ if (typeof window !== 'undefined') {
     else operation.reject(new Error(reply.error || '操作失败，请重试'));
   });
   window.addEventListener('pickcode-resume', () => {
-    getSnapshot().then(changed).catch(() => { /* Visible pages show retryable load errors. */ });
+    getSnapshot(false).then(changed).catch(() => { /* Visible pages show retryable load errors. */ });
   });
   window.addEventListener('pickcode-sync-status', event => {
     nativeSyncing = event.detail?.syncing === true;
@@ -293,6 +316,29 @@ if (typeof window !== 'undefined') {
 }
 
 function request(action, payload = {}) {
+  const reading = ['snapshot', 'overview', 'onlineStatus'].includes(action);
+  if (['bindOnline', 'unbindOnline'].includes(action)) { bindingEpoch++; onlineSyncs.clear(); }
+  const epoch = snapshotEpoch, binding = bindingEpoch;
+  return requestTransport(action, payload).then(result => {
+    const full = Array.isArray(result?.codes) && Array.isArray(result?.packages);
+    const versioned = Number.isSafeInteger(result?.localRevision) && result.localRevision >= 0
+      && Number.isSafeInteger(cachedSnapshot?.localRevision) && cachedSnapshot.localRevision >= 0;
+    if (versioned && result.localRevision < cachedSnapshot.localRevision) {
+      if (full) return cachedSnapshot;
+      if (action === 'overview') return overviewOf(cachedSnapshot);
+    }
+    // Reads can finish after a mutation; mutations themselves follow commit/completion order.
+    if (cachedSnapshot && (reading && !versioned && epoch !== snapshotEpoch || binding !== bindingEpoch)) {
+      if (action === 'overview') return overviewOf(cachedSnapshot);
+      if (action === 'onlineStatus') return cachedSnapshot.online;
+      if (full && (reading || ['syncOnline', 'refreshOrder', 'bindOnline', 'unbindOnline'].includes(action))) return cachedSnapshot;
+      // A local write may commit before a new binding but reply after it; read both committed results.
+      if (full) return request('snapshot');
+    }
+    return rememberSnapshot(result);
+  });
+}
+function requestTransport(action, payload = {}) {
   const bridge = nativeBridge();
   if (bridge) return new Promise((resolve, reject) => {
     const id = `request-${requestSession}-${++serial}`;
@@ -302,6 +348,7 @@ function request(action, payload = {}) {
     catch (_) { clearTimeout(timer); pending.delete(id); reject(new Error('原生服务暂不可用')); }
   });
   if (action === 'onlineStatus') return previewOnline(action, payload);
+  if (action === 'overview') return Promise.resolve(overviewOf(localDispatch('snapshot')));
   if (action === 'aiChannels') return previewOnline(action, payload);
   if (action === 'aiOptimizationStatus') return Promise.resolve({ enabled: false, channelId: '', pending: [], supported: false });
   if (['bindOnline','syncOnline','unbindOnline','refreshOrder','stationProposal'].includes(action)) {
@@ -321,8 +368,8 @@ function request(action, payload = {}) {
   } catch (error) { return Promise.reject(error); }
 }
 
-async function initialize() {
-  let snapshot = await request('snapshot');
+async function initialize(refreshDisplay = true) {
+  let snapshot = await request('snapshot', { refresh: refreshDisplay });
   const readLegacy = key => {
     const value = uni.getStorageSync(key);
     if (!value) return [];
@@ -337,14 +384,14 @@ async function initialize() {
   initialized = true;
   return snapshotForDisplay(snapshot);
 }
-function ready() {
-  if (!initialization) initialization = initialize().catch(error => { initialization = undefined; throw error; });
+function ready(refreshDisplay = true) {
+  if (!initialization) initialization = initialize(refreshDisplay).catch(error => { initialization = undefined; throw error; });
   return initialization;
 }
-function changed(snapshot) { uni.$emit('assistant-changed', snapshot); return snapshot; }
-export function getSnapshot() {
-  if (!initialized) return ready();
-  if (!snapshotInFlight) snapshotInFlight = request('snapshot').then(snapshotForDisplay).finally(() => { snapshotInFlight = undefined; });
+function changed(snapshot) { rememberSnapshot(snapshot); uni.$emit('assistant-changed', snapshot); return snapshot; }
+export function getSnapshot(refreshDisplay = true) {
+  if (!initialized) return ready(refreshDisplay);
+  if (!snapshotInFlight) snapshotInFlight = request('snapshot', { refresh: refreshDisplay }).then(snapshotForDisplay).finally(() => { snapshotInFlight = undefined; });
   return snapshotInFlight;
 }
 export async function mutate(action, payload = {}) {
@@ -361,10 +408,29 @@ export function checkAppUpdate() { return request('checkAppUpdate'); }
 export function downloadAppUpdate() { return request('downloadAppUpdate'); }
 export function cancelAppUpdate() { return request('cancelAppUpdate'); }
 export function installAppUpdate() { return request('installAppUpdate'); }
-export async function getOnlineStatus() { await ready(); return request('onlineStatus'); }
+export async function getOnlineStatus() {
+  const firstRead = !initialized;
+  await ready();
+  return firstRead ? cachedSnapshot.online : request('onlineStatus');
+}
+export async function getOverview() {
+  const firstRead = !initialized;
+  await ready();
+  return firstRead ? overviewOf(cachedSnapshot) : request('overview');
+}
 export async function proposeStation(payload) { await ready(); return request('stationProposal', payload); }
 export async function bindOnline(baseUrl, code) { await ready(); return changed(await request('bindOnline', { baseUrl, code })); }
-export async function syncOnline(force = false) { await ready(); return trackSync(async () => changed(await request('syncOnline', { force }))); }
+export function syncOnline(force = false) {
+  force = !!force;
+  if (onlineSyncs.has(force)) return onlineSyncs.get(force);
+  const operation = (async () => {
+    await ready();
+    if (!force && typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') await new Promise(afterDisplayFrame);
+    return trackSync(async () => changed(await request('syncOnline', { force })));
+  })().finally(() => { if (onlineSyncs.get(force) === operation) onlineSyncs.delete(force); });
+  onlineSyncs.set(force, operation);
+  return operation;
+}
 let refreshInFlight;
 let onlineRefreshInFlight;
 const orderRefreshes = new Map();

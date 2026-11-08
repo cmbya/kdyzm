@@ -3,6 +3,7 @@ var PickCodeCore = (function () {
   'use strict';
   var logistics = typeof PickCodeLogistics !== 'undefined' ? PickCodeLogistics : globalThis.PickCodeLogistics;
   var stationRecognitionCache={};
+  var snapshotIndex=null;
   function text(value, max) { return typeof value === 'string' ? value.slice(0, max || 4096) : ''; }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function fail(message) { throw new Error(message); }
@@ -109,7 +110,16 @@ var PickCodeCore = (function () {
     return rule;
   }
   function initial() { return { version: 1, sequence: 0, items: [], sources: [], rules: builtins(), settings: { autoScan: false, widgetPrivacy: false, stationEnhancement: false }, lastScanAt: 0, summary: { added: 0, reminders: 0, ignored: 0 }, migrated: false }; }
-  function byId(list, id) { return list.filter(function (x) { return x.id === id; })[0]; }
+  function byId(list, id) {
+    var index=snapshotIndex&&(list===snapshotIndex.state.orders?snapshotIndex.orders:list===snapshotIndex.state.shipments?snapshotIndex.shipments:null);
+    return index&&typeof id==='string'?index[id]:list.filter(function (x) { return x.id === id; })[0];
+  }
+  function snapshotLookups(state) {
+    function ids(list){var result=Object.create(null);list.forEach(function(x){if(typeof x.id==='string'&&!result[x.id])result[x.id]=x;});return result;}
+    var index={state:state,orders:ids(state.orders),shipments:ids(state.shipments),groups:Object.create(null),codes:Object.create(null)};
+    state.items.forEach(function(item){if(!item.mergedInto)item.members.forEach(function(member){if(!member.closedCycleId&&typeof member.shipmentId==='string'&&!index.groups[member.shipmentId])index.groups[member.shipmentId]=item;});});
+    return index;
+  }
   function unique(list) { return list.filter(function (x, i) { return x && list.indexOf(x) === i; }); }
   function locationNumbers(value) {
     var digits={'零':0,'〇':0,'一':1,'二':2,'两':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9};
@@ -650,7 +660,10 @@ var PickCodeCore = (function () {
   }
   function packageHidden(state,s) { var o=byId(state.orders,s.orderId); return !!(s.hidden||s.deleted||(o&&(o.hidden||o.deleted))); }
   function activeMembers(state,i) { return i.members.filter(function(m){var s=byId(state.shipments,m.shipmentId);return !m.closedCycleId&&(!s||!packageHidden(state,s)&&!shipmentArchived(state,s));}); }
-  function groupForShipment(state,id) { return state.items.filter(function(i){return !i.mergedInto&&i.members.some(function(m){return !m.closedCycleId&&m.shipmentId===id;});})[0]; }
+  function groupForShipment(state,id) {
+    if(snapshotIndex&&snapshotIndex.state===state&&typeof id==='string')return snapshotIndex.groups[id];
+    return state.items.filter(function(i){return !i.mergedInto&&i.members.some(function(m){return !m.closedCycleId&&m.shipmentId===id;});})[0];
+  }
   function liveSources(state,i) { return i.sourceIds.map(function(id){return sourceFor(state,id);}).filter(function(s){return s&&!s.deleted&&!s.ignored;}); }
   function recordCode(i,code,type,date,sourceId) {
     if(!validCode(code))return;
@@ -891,6 +904,8 @@ var PickCodeCore = (function () {
     });
   }
   function publicCode(state,i) {
+    var cached=snapshotIndex&&snapshotIndex.state===state&&snapshotIndex.codes[i.id];
+    if(cached&&cached.item===i)return cached.value;
     var value=clone(i),members=activeMembers(state,i),sources=i.sourceIds.map(function(id){return sourceFor(state,id);}).filter(Boolean);
     value.stationCorrection=publicCorrection(state,i);delete value.automaticStation;
     var place=publicStation(state,i.address);value.stationCanonical=place.stationCanonical;value.stationCanonicalId=place.stationCanonicalId;value.stationSubLocation=place.stationSubLocation;value.stationDisplayName=place.stationDisplayName;
@@ -916,6 +931,7 @@ var PickCodeCore = (function () {
     var codes=unique(history.map(function(h){return h.code;}));
     value.conflicts=codes.length>1&&(!i.resolvedCodes||codes.some(function(c){return i.resolvedCodes.indexOf(c)<0;}))?codes.map(function(code){return history.filter(function(h){return h.code===code;}).sort(function(a,b){return b.date-a.date;})[0];}):[];
     delete value.history;delete value.mergedInto;delete value.protected;delete value.resolvedCodes;
+    if(snapshotIndex&&snapshotIndex.state===state)snapshotIndex.codes[i.id]={item:i,value:value};
     return value;
   }
   function mergeProviderEventFields(target,source) {
@@ -1020,11 +1036,14 @@ var PickCodeCore = (function () {
       logisticsEvents:events,logisticsState:s.logisticsState||'',logisticsError:s.logisticsError?'本次物流查询未成功，已保留历史轨迹':'',logisticsCheckedAt:s.logisticsCheckedAt||0,logisticsUpdatedAt:s.logisticsUpdatedAt||0,logisticsTruncated:!!s.logisticsTruncated};
   }
   function publicPackages(state,codes) {
+    var shipsByOrder=Object.create(null),pickupsByOrder=Object.create(null),waitingByOrder=Object.create(null);
+    state.shipments.forEach(function(s){if(typeof s.orderId==='string')(shipsByOrder[s.orderId]||(shipsByOrder[s.orderId]=[])).push(s);});
+    codes.forEach(function(i){var seen=Object.create(null);i.members.forEach(function(m){var key=m.orderId;if(typeof key!=='string')return;if(!seen[key]){(pickupsByOrder[key]||(pickupsByOrder[key]=[])).push(i.id);seen[key]=true;}if(!m.picked)waitingByOrder[key]=true;});});
     return state.orders.map(function(o){
-      var ships=state.shipments.filter(function(s){return s.orderId===o.id;});
+      var indexed=typeof o.id==='string',ships=indexed?shipsByOrder[o.id]||[]:state.shipments.filter(function(s){return s.orderId===o.id;});
       var active=ships.filter(function(s){return !packageHidden(state,s);});
-      var pickupIds=codes.filter(function(i){return i.members.some(function(m){return m.orderId===o.id;});}).map(function(i){return i.id;});
-      var waiting=codes.some(function(i){return i.members.some(function(m){return m.orderId===o.id&&!m.picked;});});
+      var pickupIds=indexed?pickupsByOrder[o.id]||[]:codes.filter(function(i){return i.members.some(function(m){return m.orderId===o.id;});}).map(function(i){return i.id;});
+      var waiting=indexed?!!waitingByOrder[o.id]:codes.some(function(i){return i.members.some(function(m){return m.orderId===o.id&&!m.picked;});});
       var unpicked=active.filter(function(s){return !s.picked&&!expiredReceived(state,s);});
       var status=waiting?'pending':active.length&&!unpicked.length?'picked':unpicked.some(function(s){return shipmentStatus(state,s)==='arrived'||(s.status==='unknown'&&s.smsArrivalAt);})?'awaiting_code':unpicked.some(function(s){return shipmentStatus(state,s)==='transit';})?'transit':unpicked.some(function(s){return shipmentStatus(state,s)==='signed';})?'signed':unpicked.some(function(s){return shipmentStatus(state,s)==='returning';})?'returning':unpicked.length&&unpicked.every(function(s){return shipmentStatus(state,s)==='returned';})?'returned':o.source==='manual'?'manual':'unknown';
        var retention=orderRetention(o,Date.now());
@@ -1231,6 +1250,9 @@ var PickCodeCore = (function () {
      if(waybillNo)o.waybillNo=waybillNo;else if(!o.waybillNo)o.waybillNo='';
   }
   function publicSnapshot(state) {
+    // Projection is read-only; discard indexes before the next command can mutate state.
+    var previousIndex=snapshotIndex;snapshotIndex=snapshotLookups(state);
+    try {
     var ignored = {}, reminders = [], ignoredList = [];
     state.sources.forEach(function (s) {
       if (s.ignored) { ignored[s.id] = true; ignoredList.push({ sourceId: s.id, body: s.body, date: s.date, sender: s.sender, reason: s.reason }); }
@@ -1239,6 +1261,7 @@ var PickCodeCore = (function () {
     var codes=state.items.filter(function(i){return groupVisible(state,i);}).map(function(i){return publicCode(state,i);}).sort(function(a,b){return b.date-a.date;});
     var operations=currentOperations(state),online=clone(state.online);online.pendingCount=operations.length;online.serverRevision=state.online.revision;delete online.serviceKey;delete online.revision;delete online.hasFamilyScope;
     return { codes: codes, packages:publicPackages(state,codes), families:clone(online.families),familyIds:clone(online.familyIds),packagesMigrated:!!state.packagesMigrated, online:online,operations:operations,stationRulesVersion:state.stationRulesVersion,stationRules:clone(state.stationRules),stationChoices:stationChoices(state),matchingFeedback:matchingFeedbackSummary(state),stationEnhancement:{enabled:state.settings.stationEnhancement,pendingCount:state.stationEnhancement.pending.filter(function(candidate){return candidateActive(state,candidate);}).length,lastUploadAt:state.stationEnhancement.lastUploadAt||0,lastError:state.stationEnhancement.lastError||''},reminders: reminders.sort(function (a,b) { return b.date-a.date; }), ignored: ignoredList.sort(function (a,b) { return b.date-a.date; }), rules: state.rules, logisticsRules:clone(state.logisticsRules), settings: state.settings, lastScanAt: state.lastScanAt, summary: state.summary, migrated: state.migrated };
+    } finally { snapshotIndex=previousIndex; }
   }
   function newId(state, prefix) { state.sequence++; return prefix + state.sequence; }
   function sourceFor(state, id) { return state.sources.filter(function (s) { return s.id === id; })[0]; }

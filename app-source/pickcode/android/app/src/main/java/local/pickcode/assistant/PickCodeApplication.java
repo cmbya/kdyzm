@@ -11,7 +11,7 @@ public final class PickCodeApplication extends Application {
         super.onCreate();
         IO.execute(() -> {
             try {
-                AssistantStore.get(this).snapshot();
+                AssistantStore.get(this).displaySnapshot();
             } catch (Exception ignored) { /* The activity presents storage failures to the user. */ }
         });
     }

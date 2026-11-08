@@ -15,6 +15,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 
 /** Serializes device sessions, not the SQLite store; every network request occurs outside store transactions. */
 public final class OnlineSyncManager {
@@ -34,7 +36,10 @@ public final class OnlineSyncManager {
     // A 304 keeps this coverage; omitted jobs and a restarted process still use the legacy status endpoint.
     private final Set<String> snapshotJobIds = new HashSet<>();
     private long connectionCheckedAt;
-    private long sessionGeneration;
+    private volatile long sessionGeneration;
+    private final Object syncRequests = new Object();
+    private FutureTask<String> passiveSync;
+    private long passiveSyncGeneration;
     private boolean stationUploadRunning;
     private boolean matchingFeedbackUploadRunning;
     private OnlineSyncManager(Context context) {
@@ -225,7 +230,7 @@ public final class OnlineSyncManager {
         return new OnlineClient(preferred, token, BuildConfig.DEBUG, fallback, () -> routes.failed(preferred), 10_000, 15_000);
     }
     public JSONObject status() throws Exception {
-        JSONObject online = store.snapshot().optJSONObject("online");
+        JSONObject online = store.overview().optJSONObject("online");
         if (online == null) online = new JSONObject();
         // This is an allowlist: neither Keystore ciphertext nor server credentials enter the bridge.
         return copyFamilyScope(new JSONObject().put("bound", secrets.configured()).put("baseUrl", metadata.getString("baseUrl", ""))
@@ -258,11 +263,35 @@ public final class OnlineSyncManager {
             store.dispatch("syncMeta", copyFamilyScope(new JSONObject().put("bound", true).put("baseUrl", baseUrl).put("deviceId", deviceId)
                     .put("accounts", safeAccounts(response.getJSONArray("accounts"))).put("families", safeFamilies(response.optJSONArray("families"))).put("jobs", new JSONArray()).put("lastSuccessAt", 0).put("errorCode", "").put("error", ""), response));
             OnlineSyncScheduler.configure(context, true);
-            return sync(false);
+            return synchronize(false, null);
         } catch (Exception failure) { return recordFailure(failure); }
     }
-    public synchronized JSONObject sync(boolean force) throws Exception {
-        return synchronize(force, null);
+    public JSONObject sync(boolean force) throws Exception {
+        if (force) { synchronized (this) { return synchronize(true, null); } }
+        FutureTask<String> request;
+        synchronized (syncRequests) {
+            long generation = sessionGeneration;
+            if (passiveSync == null || passiveSync.isDone() || passiveSyncGeneration != generation) {
+                passiveSyncGeneration = generation;
+                passiveSync = new FutureTask<>(() -> {
+                    synchronized (this) {
+                        // A request queued before re-binding must not act on the replacement session.
+                        return (generation == sessionGeneration ? synchronize(false, null) : store.snapshot()).toString();
+                    }
+                });
+            }
+            request = passiveSync;
+        }
+        request.run();
+        try { return new JSONObject(request.get()); }
+        catch (ExecutionException failure) {
+            Throwable cause = failure.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            if (cause instanceof Error) throw (Error) cause;
+            throw failure;
+        } finally {
+            synchronized (syncRequests) { if (request.isDone() && passiveSync == request) passiveSync = null; }
+        }
     }
     synchronized JSONObject syncStationEnhancement(String session) throws Exception {
         JSONObject snapshot = store.snapshot();
@@ -301,8 +330,10 @@ public final class OnlineSyncManager {
             catch (Exception unavailable) { throw new OnlineClient.Failure("credentials_unavailable", "设备凭证无法解密，请重新绑定；本地历史已保留"); }
             OnlineClient client = routedClient(token);
             // Recover a binding saved just before a process stop, without resetting an existing cursor.
-            store.dispatch("syncMeta", new JSONObject().put("bound", true).put("baseUrl", metadata.getString("baseUrl", ""))
-                    .put("deviceId", metadata.getString("deviceId", "")));
+            JSONObject binding = store.snapshot().getJSONObject("online");
+            String baseUrl = metadata.getString("baseUrl", ""), deviceId = metadata.getString("deviceId", "");
+            if (!binding.optBoolean("bound") || !baseUrl.equals(binding.optString("baseUrl")) || !deviceId.equals(binding.optString("deviceId")))
+                store.dispatch("syncMeta", new JSONObject().put("bound", true).put("baseUrl", baseUrl).put("deviceId", deviceId));
             boolean start = force || localOrderId != null;
             // Refresh authorization before reading queued operations or jobs; revoked family work must not block other families.
             JSONObject latest = pullSnapshot(client, metadata.getInt("importVersion", 0) < IMPORT_VERSION || start);
@@ -339,7 +370,8 @@ public final class OnlineSyncManager {
                 // One status request per pending task; collection itself is never waited on in this thread.
                 jobs = pollJobs(client, jobs, snapshotJobIds);
             }
-            store.dispatch("syncMeta", new JSONObject().put("jobs", jobs));
+            // Save new task progress before the next request so a failed pull can resume it.
+            if (start || poll) store.dispatch("syncMeta", new JSONObject().put("jobs", jobs));
             if (start || poll || queued != null && queued.length() > 0) latest = pullSnapshot(client, false);
             acknowledgeStationRules(client);
             long now = System.currentTimeMillis();
