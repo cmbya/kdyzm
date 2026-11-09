@@ -76,28 +76,24 @@ for (const [index, stage] of stages.entries()) {
     assert.ok(view.points.slice(index + 1).every(point => point.state === 'pending'));
     assert.deepEqual(view, original);
   });
-  test(`${stage.label}小车按${stage.days}天推进且不改变节点、状态和实际时长`, () => {
+  test(`${stage.label}小车只按真实阶段定位，经过时间不改变节点`, () => {
     const view = parcelJourney(stage.shipment, stage.order), original = structuredClone(view);
     const start = view.points[index].at, span = stage.days * 86400000;
     assert.equal(view.currentIndex, index);
-    assert.equal(parcelJourneyProgress(view, start), index);
-    assert.equal(parcelJourneyProgress(view, start + span / 2), index + 0.5);
-    assert.equal(parcelJourneyProgress(view, start + span), index + 1);
-    assert.equal(parcelJourneyProgress(view, start + span * 10), index + 1);
-    assert.equal(parcelJourneyProgress(view, start - 1), index);
-    for (const now of [NaN, Infinity, null, '2026-11-09']) assert.equal(parcelJourneyProgress(view, now), index);
+    for (const now of [start, start + span / 2, start + span, start + span * 10, start - 1, NaN, Infinity, null])
+      assert.equal(parcelJourneyProgress(view, now), [0, 1.5, 2][index]);
     assert.deepEqual(view, original);
   });
-  test(`${stage.label}小车缺失、不可信、日期精度或全局逆序时停在当前节点`, () => {
+  test(`${stage.label}时间证据不足时仍按真实状态定位，不生成日期`, () => {
     const make = patch => parcelJourney(index === 0 ? stage.shipment : { ...stage.shipment, ...patch }, index === 0 ? { ...stage.order, ...patch } : stage.order);
     const now = at('11-20T12:00:00');
-    for (const value of [null, 0, NaN, '2026-11-04']) assert.equal(parcelJourneyProgress(make({ [stage.time]: value }), now), index);
-    for (const source of ['unknown', 'legacy', 'sms_received', 'sms_sent', 'locker_created', 'unverified']) assert.equal(parcelJourneyProgress(make({ [stage.source]: source }), now), index);
-    for (const precision of ['day', 'unknown', undefined]) assert.equal(parcelJourneyProgress(make({ [stage.precision]: precision }), now), index);
+    for (const value of [null, 0, NaN, '2026-11-04']) assert.equal(parcelJourneyProgress(make({ [stage.time]: value }), now), [0, 1.5, 2][index]);
+    for (const source of ['unknown', 'legacy', 'sms_received', 'sms_sent', 'locker_created', 'unverified']) assert.equal(parcelJourneyProgress(make({ [stage.source]: source }), now), [0, 1.5, 2][index]);
+    for (const precision of ['day', 'unknown', undefined]) assert.equal(parcelJourneyProgress(make({ [stage.precision]: precision }), now), [0, 1.5, 2][index]);
     const reversed = parcelJourney(stage.shipment, stage.order);
     const current = reversed.points[index].at;
     reversed.points[index === 0 ? 1 : index - 1].at = current + (index === 0 ? -1 : 1);
-    assert.equal(parcelJourneyProgress(reversed, now), index);
+    assert.equal(parcelJourneyProgress(reversed, now), [0, 1.5, 2][index]);
   });
 }
 test('动态耗时保留日精度、短信代理与逆序的未知边界', () => {
@@ -145,20 +141,20 @@ test('已实际经过的节点点亮但缺失历史日期仍待获取，退回�
     assert.ok(parcelJourneySegments(returned).every(row => row.text === '—' && row.ongoing === false));
   }
 });
-test('小车未知与退回隐藏，完成固定终点，默认时钟只计算展示进度', () => {
+test('小车未知与退回隐藏，完成固定终点，到货等待期间停靠站台', () => {
   const now = at('11-09T12:00:00'), original = Date.now;
   Date.now = () => now;
   try {
     const view = parcelJourney({ status: 'arrived', arrivalAt: now - 12 * 3600000, arrivalAtSource: 'locker_arrival', arrivalAtPrecision: 'minute' });
-    assert.equal(parcelJourneyProgress(view), 2.5);
-    assert.equal(parcelJourneyProgress(parcelJourney({}, { orderDate: now - 86400000, orderDateSource: 'manual', orderDatePrecision: 'second' })), 0.5);
+    assert.equal(parcelJourneyProgress(view), 2);
+    assert.equal(parcelJourneyProgress(parcelJourney({}, { orderDate: now - 86400000, orderDateSource: 'manual', orderDatePrecision: 'second' })), 0);
     for (const value of [undefined, null, {}, { currentIndex: '1' }, { currentIndex: 0.5 }, { currentIndex: 4 }, { currentIndex: -2 }]) assert.equal(parcelJourneyProgress(value), -1);
     assert.equal(parcelJourneyProgress(parcelJourney()), -1);
     for (const status of ['returning', 'returned']) assert.equal(parcelJourneyProgress(parcelJourney({ ...shipment, status }, order)), -1);
     assert.equal(parcelJourneyProgress(parcelJourney({ picked: true })), 3);
     assert.equal(parcelJourneyProgress({ completed: true, currentIndex: -1 }), 3);
     assert.equal(parcelJourneyProgress(parcelJourney({ ...shipment, ...confirmed(now), arrivalAt: now + 1 }, order)), 3);
-    for (const index of [0, 1, 2, 3]) assert.equal(parcelJourneyProgress({ currentIndex: index }), index);
+    for (const index of [0, 1, 2, 3]) assert.equal(parcelJourneyProgress({ currentIndex: index }), [0, 1.5, 2, 3][index]);
   } finally { Date.now = original; }
 });
 test('快递公司只来自当前运单，不把未知占位或电商平台当品牌', () => {
