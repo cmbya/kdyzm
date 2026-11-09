@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.39 · 私人版</text><text class="version-date">2026-11-09</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">进度</text><text class="content">小车按待发货2天、运输3天、待取1天的已过时间显示阶段参考进度，动效更明显，车顶显示快递名称</text></view>
+          <view class="update-item"><text class="tag optimize">详情</text><text class="content">取件码缩小并完整单行显示，基本信息精简为订单号、平台、订单状态和快递名称；更换站点移到柜号下方</text></view>
+          <view class="update-item"><text class="tag optimize">排版</text><text class="content">修正更多及相关操作按钮的文字居中，保留真实状态、时间证据与原有管理操作</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.38 · 私人版</text><text class="version-date">2026-11-09</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">卡片</text><text class="content">取件卡片增加公路汽车动效，包裹记录展示下单、发货、到站和取件四个时间及阶段耗时</text></view>

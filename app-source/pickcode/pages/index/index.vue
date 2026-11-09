@@ -196,7 +196,7 @@
     </view>
 
     <uni-popup ref="sourcePopup" @change="sourceOpen = $event.show" type="bottom" :safe-area="false" :animation="!reducedMotion">
-      <PickupDetail :key="detailRevision" :item="sourceItem" :packages="snapshot.packages || []" :match-on-open="matchingOnOpen" @close="$refs.sourcePopup.close()" @changed="applySnapshot" @ignore="openIgnore" />
+      <PickupDetail :inert="stationChooserOpen ? true : null" :key="detailRevision" :item="sourceItem" :packages="snapshot.packages || []" :match-on-open="matchingOnOpen" @close="$refs.sourcePopup.close()" @changed="applySnapshot" @ignore="openIgnore" @station-change="changeStation" />
     </uni-popup>
     <StationChooser ref="stationChooser" :rules="snapshot.stationRules || []" :recent="snapshot.stationChoices || []" @changed="applySnapshot" @open-change="stationChooserOpen = $event" />
     <uni-popup ref="notificationsPopup" class="notifications-popup" type="bottom" :animation="!reducedMotion" :safe-area="false" mask-background-color="rgba(10,34,70,.22)" @change="notificationPopupChange">
@@ -327,7 +327,7 @@ export default {
   onShow() { this.applySyncStatus(getSyncStatus()); const pending = uni.getStorageSync('pendingPickupId'); if (pending) { this.pendingPickupId = pending; uni.removeStorageSync('pendingPickupId'); } this.loadData(); },
   onUnload() { uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.removeEventListener('pickcode-open-pickup',this.openPickupIntent); },
   onHide() { this.closeNotifications(false); this.$refs.stationChooser?.close(); },
-  onBackPress() { if(this.sourceOpen){this.$refs.sourcePopup.close();return true;} if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if (this.notificationsOpen) { this.closeNotifications(); return true; } },
+  onBackPress() { if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if(this.sourceOpen){this.$refs.sourcePopup.close();return true;} if (this.notificationsOpen) { this.closeNotifications(); return true; } },
   mounted() {
     this.$el?.addEventListener?.('keydown', this.notificationKeyboard);
     this.$el?.addEventListener?.('keyup', this.notificationKeyboard);
@@ -571,7 +571,7 @@ export default {
     matchSummary(item) { return pickupMatchSummary(item); },
     showSource(item, matching = false) { this.handlePageClick(); this.sourceItem = item; this.matchingOnOpen = matching; this.detailRevision++; this.$refs.sourcePopup.open(); },
     formatCode(code) { return /^\d{8}$/.test(code) ? code.slice(0,4)+' '+code.slice(4) : code; },
-    changeStation(item) { this.handlePageClick(); this.$refs.stationChooser.open({ pickupId: item.id }, item, () => [...(this.$el?.querySelectorAll?.('[data-pickup-menu]') || [])].find(element => element.getAttribute('data-pickup-menu') === item.id) || this._pickupMenuTrigger); },
+    changeStation(item, event) { this.handlePageClick(); this.$refs.stationChooser.open({ pickupId: item.id }, item, () => (this.sourceOpen ? [...(this.$el?.querySelectorAll?.('[data-pickup-station]') || [])].find(element => element.getAttribute('data-pickup-station') === String(item.id)) : null) || event?.currentTarget || [...(this.$el?.querySelectorAll?.('[data-pickup-menu]') || [])].find(element => element.getAttribute('data-pickup-menu') === String(item.id)) || this._pickupMenuTrigger); },
     toggleMoreActions(item, event) {
       const open = !item.showActions; this.handlePageClick(); item.showActions = open;
       if (open) { this._pickupMenuTrigger = [...(this.$el?.querySelectorAll?.('[data-pickup-menu]') || [])].find(element => element.getAttribute('data-pickup-menu') === String(item.id)) || event?.currentTarget; this.$nextTick(() => this._pickupMenuTrigger?.parentElement?.querySelector('[role="menuitem"]')?.focus?.()); }

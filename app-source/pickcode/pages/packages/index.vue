@@ -90,37 +90,26 @@
         <view class="sheet-inner detail-body">
           <view v-if="selectedOrder.shipments.length > 1" class="shipment-picker" role="group" aria-label="选择包裹"><button v-for="(shipment, index) in selectedOrder.shipments" :key="shipment.id" role="button" tabindex="0" :aria-pressed="shipment.id === detailShipment.id" @click="detailShipmentId = shipment.id">包裹 {{ index + 1 }} · {{ shipment.picked ? '已取' : '未取' }}</button></view>
           <OrderOverview :order="selectedOrder" :shipment="detailShipment" :pickup="detailPickup" :sources="detailSources" :status="detailShipment.id ? (detailShipment.picked ? (isReceiptShipment(detailShipment) ? '已收货' : '已取件') : detailShipment.needsPickupAssignment ? '待确认归属' : displayPickupCode(detailShipment) ? '待取件' : shipmentText(detailShipment)) : statusText(selectedOrder)">
-            <template #basic>
+            <template #station-action>
+              <button v-if="detailShipment.id" type="button" role="button" tabindex="0" class="station-action-button" :data-shipment-station="detailShipment.id" :disabled="!!syncingOrderId" @click="changeShipmentStation(detailShipment, $event)">更换站点</button>
+            </template>
+          </OrderOverview>
+          <text v-if="refreshProgressText || error || notice" class="muted-inline" role="status">{{ refreshProgressText || error || notice }}</text>
+          <view v-if="detailMore" class="detail-more" ref="detailMorePanel">
           <view v-if="isExpiredOrder(selectedOrder)" class="archive-meta"><text class="field-label">过期订单</text><text class="muted-inline">{{ archiveReceiptText(selectedOrder) }}</text><text class="muted-inline">{{ archiveSourceText(selectedOrder) }}</text><button role="button" :tabindex="syncingOrderId ? -1 : 0" class="secondary-button" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="restoreExpiredOrder(selectedOrder)">恢复到当前订单</button></view>
-          <text class="date-row">{{ orderDateText(selectedOrder) }}</text>
-          <view v-if="selectedOrder.platformOrderId" class="order-number"><text>订单 {{ selectedOrder.platformOrderId }}</text><button role="button" tabindex="0" class="text-button" @click="copyValue(selectedOrder.platformOrderId, '订单号')">复制</button></view>
-          <button v-if="selectedOrder.source === 'manual' && selectedOrder.waybillNo" role="button" tabindex="0" class="tracking-number" @click="copyValue(selectedOrder.waybillNo, '快递单号')">{{ selectedOrder.waybillNo }} · 复制</button>
-          <view class="order-metadata"><text v-if="selectedOrder.orderStatus">订单状态：{{ selectedOrder.orderStatus }}</text><text v-if="selectedOrder.tradeStatus">交易状态：{{ selectedOrder.tradeStatus }}</text><text v-if="selectedOrder.refundStatus">退款状态：{{ selectedOrder.refundStatus }}</text></view>
-          <view v-for="shipment in selectedOrder.shipments" :key="shipment.id" class="shipment-panel">
-            <view class="shipment-head"><text>{{ shipment.carrier || '快递' }}</text><text>{{ shipmentText(shipment) }}{{ shipment.hidden ? ' · 已隐藏' : '' }}</text></view>
-            <button role="button" tabindex="0" v-if="shipment.waybillNo" class="tracking-number" @click="copyValue(shipment.waybillNo, '快递单号')">{{ shipment.waybillNo }} · 复制</button><text v-else class="muted-inline">暂无运单号</text>
-            <view v-if="displayPickupCode(shipment)" class="shipment-code"><view class="shipment-code-head"><text class="field-label">取件码</text><text v-if="pickupCabinet(shipment)" class="cabinet-badge">{{ pickupCabinet(shipment) }}</text></view><button role="button" tabindex="0" class="copyable" :aria-label="'复制取件码' + displayPickupCode(shipment)" @click="copyValue(displayPickupCode(shipment), '取件码')">{{ displayPickupCode(shipment) }}</button></view><text v-else class="muted-inline">暂无取件码</text>
-            <text v-if="stationDisplayName(shipment, '')" class="shipment-station">{{ stationDisplayName(shipment, '') }}</text>
-            <view class="shipment-station-tools"><text v-if="shipment.stationCorrection" class="muted-inline">人工指定 · 原识别：{{ shipment.stationCorrection.originalStation || '未识别站点' }}</text><button type="button" role="button" tabindex="0" class="text-button" :data-shipment-station="shipment.id" :disabled="!!syncingOrderId" @click="changeShipmentStation(shipment, $event)">更换站点</button></view>
+          <view v-if="detailShipment.id" class="shipment-management">
+            <template v-for="shipment in [detailShipment]" :key="shipment.id">
+              <button v-if="shipment.waybillNo" role="button" tabindex="0" class="tracking-number" @click="copyValue(shipment.waybillNo, '快递单号')">运单 {{ shipment.waybillNo }} · 复制</button>
             <view v-if="hasPickupCompletion(shipment)" class="completion-meta" :class="{ revoked: isCompletionRevoked(shipment) }">
               <view class="completion-meta-heading"><text class="completion-label">{{ completionStatusText(shipment) }}</text><text v-if="completionTimeText(shipment)" class="completion-time">{{ completionTimeText(shipment) }}</text></view>
               <text v-if="completionEvidenceText(shipment)" class="completion-evidence">依据：{{ completionEvidenceText(shipment) }}</text>
             </view>
             <button role="button" :tabindex="(!!syncingOrderId || !canResumeAutoCompletion(selectedOrder, shipment)) ? -1 : 0" v-if="!isExpiredOrder(selectedOrder) && isCompletionRevoked(shipment) && !selectedOrder.hidden && !shipment.hidden" class="secondary-button completion-action" :disabled="!!syncingOrderId || !canResumeAutoCompletion(selectedOrder, shipment)" :aria-disabled="!!syncingOrderId || !canResumeAutoCompletion(selectedOrder, shipment)" @click="resumeAutoCompletion(selectedOrder, shipment)">恢复自动判断</button>
-            <button role="button" :tabindex="(!!syncingOrderId || !canPickShipment(selectedOrder, shipment)) ? -1 : 0" v-if="!isExpiredOrder(selectedOrder) && shipment.needsReceiptConfirmation && !shipment.picked && !shipment.hidden" class="primary-button receipt-confirm" :disabled="!!syncingOrderId || !canPickShipment(selectedOrder, shipment)" :aria-disabled="!!syncingOrderId || !canPickShipment(selectedOrder, shipment)" @click.stop="confirmReceipt(selectedOrder, shipment)">确认收到</button>
-            <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-else-if="canPickShipment(selectedOrder, shipment)" class="primary-button" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="requestPickup(selectedOrder, shipment)">取件</button>
-            <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-else-if="!isExpiredOrder(selectedOrder) && shipment.needsPickupAssignment && shipment.pickupId && !selectedOrder.hidden && !shipment.hidden" class="secondary-button" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="claimShipment(selectedOrder, shipment)">确认此前已取</button>
-            <button role="button" :tabindex="(!!syncingOrderId || !canUndoAutoCompletion(selectedOrder, shipment)) ? -1 : 0" v-else-if="!isExpiredOrder(selectedOrder) && isAutoCompleted(shipment) && !selectedOrder.hidden && !shipment.hidden" class="secondary-button completion-action" :disabled="!!syncingOrderId || !canUndoAutoCompletion(selectedOrder, shipment)" :aria-disabled="!!syncingOrderId || !canUndoAutoCompletion(selectedOrder, shipment)" @click="claimShipment(selectedOrder, shipment)">{{ isCompletionRevoked(shipment) ? '已撤销自动完成' : '撤销自动完成' }}</button>
-            <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-else-if="!isExpiredOrder(selectedOrder) && shipment.picked && shipment.canPick !== false && !selectedOrder.hidden && !shipment.hidden" class="secondary-button" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="claimShipment(selectedOrder, shipment)">撤销</button>
-            <text v-if="shipment.pickupConflict" class="pickup-warning">取件码有冲突，请先确认归属</text>
-            <text v-if="shipment.arrivalAt" class="arrival-time">到站 {{ new Date(shipment.arrivalAt).toLocaleString('zh-CN', { hour12: false }) }}</text>
-          </view>
-          <text v-if="!selectedOrder.shipments?.length && selectedOrder.source !== 'manual'" class="muted-inline">暂无运单号，物流信息待同步。</text>
-          <text v-if="refreshProgressText || error || notice" class="muted-inline" role="status">{{ refreshProgressText || error || notice }}</text>
 
+            <button role="button" :tabindex="(!!syncingOrderId || !canUndoAutoCompletion(selectedOrder, shipment)) ? -1 : 0" v-if="!isExpiredOrder(selectedOrder) && isAutoCompleted(shipment) && !selectedOrder.hidden && !shipment.hidden" class="secondary-button completion-action" :disabled="!!syncingOrderId || !canUndoAutoCompletion(selectedOrder, shipment)" :aria-disabled="!!syncingOrderId || !canUndoAutoCompletion(selectedOrder, shipment)" @click="claimShipment(selectedOrder, shipment)">{{ isCompletionRevoked(shipment) ? '已撤销自动完成' : '撤销自动完成' }}</button>
+              <text v-if="shipment.pickupConflict" class="pickup-warning">取件码有冲突，请先确认归属</text>
             </template>
-          </OrderOverview>
-          <view v-if="detailMore" class="detail-more" ref="detailMorePanel">
+          </view>
           <view class="order-tools">
             <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-if="selectedOrder.canRefresh" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" @click="refreshOrderDate(selectedOrder)">{{ syncingOrderId === selectedOrder.id ? '更新中' : '更新订单' }}</button>
             <button role="button" tabindex="0" v-if="selectedOrder.source === 'online'" @click="goToApp(selectedOrder.platform)">打开购物 App</button>
@@ -461,6 +450,9 @@ button::after{border:0;}button[disabled]{opacity:.48;cursor:default;}button:acti
 .detail-sheet{display:flex;flex-direction:column;overflow:hidden;max-height:94vh;max-height:94dvh;}.detail-sheet>.sheet-handle{flex:none;margin-bottom:8px;}.detail-header{flex:none;margin:0 18px 18px;font-size:23px;}.detail-body{min-height:0;overflow-y:auto;padding-bottom:10px;overscroll-behavior:contain;}.detail-footer{flex:none;display:flex;gap:9px;padding:12px 16px max(16px,env(safe-area-inset-bottom));border-top:1px solid #fff;background:var(--sf-sheet);}.detail-footer .primary-button,.detail-footer .secondary-button{flex:1;min-width:0;margin:0;font-size:17px;min-height:46px;}.detail-more-button{flex:none;min-width:85px;min-height:46px;border:1px solid #c8d9eb;border-radius:14px;background:#f7fbffb3;color:#506b84;font-size:15px;font-weight:600;}.detail-more .order-tools{margin:15px 0 6px;}.shipment-picker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:15px;}.shipment-picker button{padding:6px 10px;border:1px solid #cbd8e6;border-radius:10px;color:var(--sf-muted);font-size:12px;min-height:36px;}.shipment-picker button[aria-pressed=true]{color:var(--sf-blue);background:#e5eefb;}.history-main .goods-info{width:100%;}
 .detail-sheet{background:linear-gradient(145deg,#f1f6fb,#e7eef7);}.detail-footer{background:#eaf1f8;}.completed .order-journeys{border-top:0;padding-top:0;}
 .detail-header{margin-bottom:8px;}
+.detail-footer>button,.detail-more .order-tools>button,.detail-more .secondary-button,.shipment-picker>button,.dialog-actions>button,.station-action-button{display:flex;align-items:center;justify-content:center;text-align:center;}
+.detail-more-button{padding:0 12px;line-height:1.25;}.station-action-button{min-height:32px;padding:4px 8px;border-radius:9px;background:#e8f3f3;color:#177e76;font-size:12px;line-height:1.5;white-space:nowrap;}.shipment-management{margin-top:14px;}
+.small-primary{display:flex;align-items:center;justify-content:center;text-align:center;}.tracking-number{display:flex;align-items:center;}
 </style>
 <style>
 .record-list::view-transition-group(*){animation-duration:240ms;}

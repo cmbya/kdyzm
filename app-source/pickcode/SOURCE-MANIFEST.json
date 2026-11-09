@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.38",
+  "version": "3.1.39",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -62,7 +62,7 @@
       "reason": "Unused upstream image barrel with a stale relative import."
     }
   ],
-  "localImportChecks": 168,
+  "localImportChecks": 169,
   "files": [
     {
       "path": ".semgrep.yml",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "7264d7f9cedbffbd9db147f83139d1b2ec5034e60c0268f874550d58eb0a7bb4"
+      "sha256": "8ca6e03bf656e9fe6d4e581510a6a3e5ab621298a066079635b57a7d2bf8b13e"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -491,18 +491,18 @@
     },
     {
       "path": "components/OrderOverview.vue",
-      "size": 12679,
-      "sha256": "0093ff60c2e14ee0f8db6c09330f7b6828ae625dada01ded99fbe2f1c9f6aaa8"
+      "size": 13552,
+      "sha256": "35cfd725acfdebf5d26566dd4704517fb08f92bbee3d1b463d8e43f9628605bd"
     },
     {
       "path": "components/ParcelJourney.vue",
-      "size": 11563,
-      "sha256": "ade0055441600b4168cbf8f952eccf042e4a56f31e58dc108c05f56d3eb0e0c9"
+      "size": 14972,
+      "sha256": "b6f2e5239b0687fc43caad6815f93f843b6fa29ffca369d476411c86dfa1179b"
     },
     {
       "path": "components/PickupDetail.vue",
-      "size": 29276,
-      "sha256": "adb570d9074d3769a6131430a1ec3c32137cbe63958e0b4448ff99897259add4"
+      "size": 29835,
+      "sha256": "621dbf43a554fd68d7dd9661863428608fd21d1675f264eba43005016fc710a0"
     },
     {
       "path": "components/PickupStamp.vue",
@@ -547,17 +547,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "8d28d0b1a31a4c71ae8d08a08b0614ab65f8a57c0f4a00162531ebe7c5fe244b"
+      "sha256": "525fd651f0625b44a18c1cda4635b26a093651fe98496ad5619ccedfba33d302"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "07b1f92af9aa46102673f0c0a7f1e5a8a0bbf4fb9638b26115f705f9cdbdf16a"
+      "sha256": "7fc0c9beff83c09a9b46ef7415efa29b5f819e8e626d7c8e68c2fc4b4ccb581a"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "6601a350ca0b4ec4cd65060e97afb77da4a83591507cea94345d28ee95951afc"
+      "sha256": "d2f788887753749783a61dd1528a3890537ed12d43f04b004fd950f31e1d5eac"
     },
     {
       "path": "pages.json",
@@ -571,8 +571,8 @@
     },
     {
       "path": "pages/index/index.vue",
-      "size": 67609,
-      "sha256": "cb04dde4c691a8094ae235b4c6f365d9bfeab8cb390500bcd8361134f332720b"
+      "size": 67900,
+      "sha256": "44c3b857629e775733bfde535d7d64b3fc0192b22a78f27703271a5bdd7b79e9"
     },
     {
       "path": "pages/my/about.vue",
@@ -586,8 +586,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 38383,
-      "sha256": "d7f243f3cc87b1b5a8ca9ed89c1d287788579500be1dbb96131b8b66680cc269"
+      "size": 39361,
+      "sha256": "e912e58a968e25238b4759636a021ba7a4add433a895f8341e2b1d30785c2dff"
     },
     {
       "path": "pages/my/faq.vue",
@@ -631,8 +631,8 @@
     },
     {
       "path": "pages/packages/index.vue",
-      "size": 77218,
-      "sha256": "a69d108fecc4fe48dc0642ea1d61bd8238f96e7534535a64b9a5c382138a6d75"
+      "size": 74081,
+      "sha256": "c00db94d71adea9f12c8dd0504072318331ad6714a8cd6c12141bba8f9d6f841"
     },
     {
       "path": "scripts/ai-context.mjs",
@@ -726,8 +726,8 @@
     },
     {
       "path": "services/parcel-journey.js",
-      "size": 7045,
-      "sha256": "08a8c4d88eb444a2dcc385271c6080a57d7714c11a31472863272dae904c8e27"
+      "size": 8228,
+      "sha256": "5e4e0932d8e33fd622429ea4497e68e159064eed2e7cbd738d171fe2aa354f48"
     },
     {
       "path": "services/pickup-groups.js",
@@ -2529,7 +2529,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "8084bdcc982a8288610838110019e2bc5096524d3f78b22d489a5d9223aea0f1"
+      "sha256": "b7eae36abf7ff78d11e7dee282ef88a0d1675b9260c06a781c9a3fe656b1be64"
     },
     {
       "path": ".gitignore",

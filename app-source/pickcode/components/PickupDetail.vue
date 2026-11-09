@@ -4,7 +4,9 @@
     <scroll-view scroll-y class="detail-scroll">
       <template v-if="!matchingSourceId">
         <view v-if="members.length > 1" class="shipment-picker" role="group" aria-label="选择查看的包裹"><button v-for="(member, index) in members" :key="member.id" role="button" tabindex="0" :aria-pressed="currentMember?.id === member.id" @click="detailMemberId = member.id">包裹 {{ index + 1 }} · {{ member.picked ? '已取' : '未取' }}</button></view>
-        <OrderOverview :order="currentOrder" :shipment="currentShipment" :pickup="item" :sources="sources" :status="item.needsPickupAssignment ? '待确认归属' : currentShipment.picked ? '已取件' : '待取件'" />
+        <OrderOverview :order="currentOrder" :shipment="currentShipment" :pickup="item" :sources="sources" :status="item.needsPickupAssignment ? '待确认归属' : currentShipment.picked ? '已取件' : '待取件'">
+          <template #station-action><button class="station-action-button" type="button" role="button" tabindex="0" :data-pickup-station="item.id" :disabled="busy" @click="$emit('station-change', item, $event)">更换站点</button></template>
+        </OrderOverview>
       </template>
       <text v-if="item.pickupCabinetConflict" class="review-note">柜号信息不一致，请核对原始短信与关联来源。</text>
       <view class="section" v-if="members.length && !matchingSourceId && (members.length > 1 || showManagement)">
@@ -90,7 +92,7 @@ import { stationDisplayName, pickupCabinet } from '@/services/station-presentati
 import { pickupSources, canMatchSource, linkedShipmentIds, sourcePackageCount, pickupShipmentRows, matchingRows, matchSelectionError, matchLinkPayload, timeDifference, matchReason } from '@/services/pickup-matching-view.js';
 export default {
   components:{OrderOverview},
-  props: { item: Object, packages: {type:Array,default:()=>[]}, matchOnOpen:Boolean }, emits:['close','changed','ignore'],
+  props: { item: Object, packages: {type:Array,default:()=>[]}, matchOnOpen:Boolean }, emits:['close','changed','ignore','station-change'],
   data:()=>({detailMemberId:'',showManagement:false,selected:[],chosenCode:'',busy:false,error:'',matchingSourceId:'',matchSelected:[],matchQuery:'',matchFamily:'',matchPlatform:'',showOtherPackages:false}),
   watch:{'item.id'(){this.detailMemberId='';this.showManagement=false;this.selected=[];this.chosenCode='';this.error='';this.closeMatching();}},
   mounted(){this.$nextTick?.(()=>this.$el?.querySelector?.('[aria-label="关闭取件详情"]')?.focus?.());if(this.matchOnOpen){const source=this.sources.find(s=>canMatchSource(s)&&(this.item.needsMatchReview||s.matchNeedsReview||linkedShipmentIds(s).length<sourcePackageCount(s)));if(source)this.openMatching(source);}},
@@ -209,7 +211,7 @@ export default {
 .candidate-reason.conflict-reason { color:#78591e; }
 .match-empty { display:block; padding:24px 10px; color:var(--sf-muted); font-size:.875rem; line-height:1.7; text-align:center; }
 .footer { flex:none; padding-top:12px; }
-button { min-height:46px; margin:10px 0 0; padding:11px 12px; border-radius:13px; font-size:.9375rem; line-height:1.55; }
+button { display:flex; align-items:center; justify-content:center; text-align:center; min-height:46px; margin:10px 0 0; padding:11px 12px; border-radius:13px; font-size:.9375rem; line-height:1.55; }
 button::after { border:0; }
 button[disabled] { opacity:.55; }
 .primary { background:var(--sf-blue); color:#fff; font-weight:650; box-shadow:inset 0 1px 1px #ffffff3b, 0 4px 10px #0867ff14; }
@@ -221,4 +223,5 @@ button[disabled] { opacity:.55; }
 button:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--sf-blue); outline-offset:3px; }
 @media(forced-colors:active) { button, .cabinet-badge, .match-choice { border:1px solid ButtonText; } }
 .detail-sheet{max-width:520px;max-height:94vh;max-height:94dvh;padding:0 0 max(14px,env(safe-area-inset-bottom));border:1px solid #fff;background:var(--sf-sheet);box-shadow:none;}.sheet-handle{flex:none;width:34px;height:4px;margin:10px auto 8px;border-radius:6px;background:#aab6c6;}.heading{margin:0 18px 18px;font-size:23px;}.heading>.link{border-radius:50%;border:1px solid white;background:#ffffff65;}.detail-scroll{box-sizing:border-box;height:72vh;height:72dvh;padding:0 18px;}.footer{padding:12px 16px 0;border-top:1px solid #fff;background:var(--sf-sheet);}.footer.simple-footer{display:grid;grid-template-columns:85px minmax(0,1fr);gap:9px;}.footer.simple-footer>button{margin:0;min-width:0;}.footer.simple-footer>.review-note,.footer.simple-footer>.error{grid-column:1 / -1;}.footer .primary{font-size:17px;font-weight:650;}.more-control{border:1px solid #c8d9eb;background:#f7fbffb3;color:#506b84;font-size:15px;font-weight:600;}.shipment-picker{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:15px;}.shipment-picker button{margin:0;min-height:36px;padding:6px 10px;border:1px solid #cbd8e6;border-radius:10px;background:transparent;color:var(--sf-muted);font-size:12px;}.shipment-picker button[aria-pressed=true]{color:var(--sf-blue);background:#e5eefb;}button:focus-visible{outline:3px solid var(--sf-blue);outline-offset:3px;}.detail-sheet{height:94vh;height:94dvh;background:linear-gradient(145deg,#f1f6fb,#e7eef7);}.detail-scroll{height:0;flex:1;}.heading{margin-bottom:8px;}.heading>.link{margin:0;padding:0;}.footer{background:#eaf1f8;}
+.station-action-button{min-height:32px;margin:0;padding:4px 8px;border-radius:9px;background:#e8f3f3;color:#177e76;font-size:12px;line-height:1.5;white-space:nowrap;}.more-control{line-height:1.25;}
 </style>
