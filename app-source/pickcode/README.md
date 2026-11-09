@@ -1,8 +1,10 @@
-# 取件助手 App 3.1.41 公开源码
+# 取件助手 App 3.1.42 公开源码
 
 这是已授权发布的 Android / Vue App 生产源码快照。源于 [SongZX0106/PickCode](https://github.com/SongZX0106/PickCode) 的提交 `07f9fed59122d7f2210a825aadedc2a913a83176`，包含当前私人取件助手的后续实现与 B 版界面。原木兰宽松许可证保留在 [LICENSE](LICENSE)。运行源码保持与构建工作区字节一致；`SOURCE-MANIFEST.json` 记录逐文件 SHA-256。
 
 App **3.1.41 / 30141** 使用微缩站台、小车和纸箱拖车呈现真实物流阶段；新事件才播放行程，完成后收拢为四时间记录。配套后台 **3.1.37** 补查旧订单缺失的时间精度。见 [本轮升级说明](../../docs/miniature-journey-3.1.41.md) 与 [App 3.1.41 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.41)。
+
+App **3.1.42 / 30142** 修正上述物流素材在 Android App 子目录下的路径，配套后台 **3.1.38** 内置新包。见 [资源路径修复说明](../../docs/android-journey-assets-3.1.42.md)。
 
 ## 构建
 

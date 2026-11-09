@@ -2,6 +2,12 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.42 · 私人版</text><text class="version-date">2026-11-09</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">修复</text><text class="content">修复Android内物流站台、公路及小车图片加载失败，取件卡片、包裹记录和订单详情恢复完整素材与动效</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.41 · 私人版</text><text class="version-date">2026-11-09</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">进度</text><text class="content">物流进度改为微缩站台与纸箱拖车，打开直接显示当前阶段，新的物流事件到达后才播放行程并点亮站牌</text></view>

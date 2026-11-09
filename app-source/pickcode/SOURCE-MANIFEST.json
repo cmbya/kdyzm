@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.41",
+  "version": "3.1.42",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "dbae48752569ca81e6c926584c17a0148d56e0a5bc4d8cecd210fed425e31980"
+      "sha256": "663af49a1cff67dc0fab784db68ce35cb2b107356db31961d5e5c24687ef636d"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -496,8 +496,8 @@
     },
     {
       "path": "components/ParcelJourney.vue",
-      "size": 18528,
-      "sha256": "eabfee4b4bbb89b2c5256de8fd1b8dbb7485d59a1d20d5e36fe3b697ded6dcc0"
+      "size": 18614,
+      "sha256": "93575efe8d7d68e4b4e03012fdeed05a74ac3dd9d22e1aa74b89c106105c6ce9"
     },
     {
       "path": "components/PickupDetail.vue",
@@ -547,17 +547,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "7b1dc9260d32158725759de53da2b5dd6920405c5c6f368716fe6a00c29613a7"
+      "sha256": "ff03ad2ebec78594750390d204d43a2686117ff80d92e948469bd1da086e5c03"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "f768552ca1b7a30be15c9270b40002683a0ebea94632d581d79e6ad8cd6fe1cf"
+      "sha256": "ed976c645bc29feecdb1566eec9d75d758d432aeab2ccd03fc0724986164036f"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "d6e4900903e4a610e2772fc49f4290a00eb8157ab253bd83ab39e690c6519fe6"
+      "sha256": "e350de1ddbfea646266da3a208abba2b5f9f71070a57192e56c8308f1bbd29f0"
     },
     {
       "path": "pages.json",
@@ -586,8 +586,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 41318,
-      "sha256": "f6cb84484774923807d9f38abe620de76acc04f9ad4b0387afc91e2d8a04f9dd"
+      "size": 41821,
+      "sha256": "75d7470b82bdaa33fe995b540d0215de13771eaa12190a8b26f7ec34dbb0f7a5"
     },
     {
       "path": "pages/my/faq.vue",
@@ -2583,8 +2583,8 @@
     },
     {
       "path": "README.md",
-      "size": 2424,
-      "sha256": "c8581b9cea833d49fdd354509e319464450cfec1b9069f45cad48d0473a8e386"
+      "size": 2630,
+      "sha256": "22331392e22976f751a32374fcfb62caa61946e395820e335e1820277fad8d9a"
     },
     {
       "path": ".gitignore",

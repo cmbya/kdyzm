@@ -118,7 +118,8 @@ export default {
     },
   },
   methods: {
-    asset(file) { return '/static/images/parcel-journey/' + file; },
+    // SVG hrefs bypass uni-app URL rewriting; resolve within the packaged document.
+    asset(file) { return './static/images/parcel-journey/' + file; },
     lit(point, index) { return point.state !== 'pending' && (!this.driving || index <= this.reached); },
     pointClass(point, index) { return { 'journey-point-pending': !this.lit(point, index), 'journey-point-teal': this.lit(point, index) && index > 0 }; },
     signTime(point, index) { return point.at && this.lit(point, index) ? String(point.text).split(' ') : ['—']; },
