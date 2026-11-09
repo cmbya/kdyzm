@@ -39,7 +39,10 @@ function groupValue(data) {
 }
 function mergeRecord(record, previous = {}) {
   const same = previous.connection?.id === record.connection?.id;
-  return { ...previous, ...record, selected: same && !!previous.selected, auto: same && !!previous.auto,
+  // A refresh can see the first preview's unbound child before that preview returns.
+  const firstPreview = previous.connection === null && record.connection?.identityBound === false
+    && previous.account?.id === record.account.id;
+  return { ...previous, ...record, selected: (same || firstPreview) && !!previous.selected, auto: same && !!previous.auto,
     lastDigest: same ? previous.lastDigest || '' : '', error: same ? previous.error || '' : '',
     errorCode: same ? previous.errorCode || '' : '', errorStatus: same ? previous.errorStatus || null : null, checkedAt: previous.checkedAt || 0 };
 }
@@ -113,11 +116,15 @@ export function createFamilySync(initialized) {
   }
   async function refresh(id) {
     const owner = await group(id); await permissions(owner);
+    const initial = new Map(owner.accounts.map(record => [record.account.id, JSON.stringify([record.account, record.connection])]));
     try {
       const fresh = groupValue(await apiRequest(owner.baseUrl, API + 'current', { token: owner.token }));
       if (fresh.id !== owner.id || fresh.family.id !== owner.family.id || fresh.serviceId !== owner.serviceId) throw problem('SERVICE_CHANGED');
       await mutate(groups => {
         const live = groups.find(item => item.id === id); if (!live) return;
+        // A completed preview or upload makes this earlier account snapshot obsolete.
+        if (live.accounts.length !== initial.size || live.accounts.some(record =>
+          initial.get(record.account.id) !== JSON.stringify([record.account, record.connection]))) return;
         const accounts = fresh.accounts.map(item => mergeRecord(item, live.accounts.find(old => old.account.id === item.account.id)));
         Object.assign(live, fresh, { accounts, error: '', errorCode: '', errorStatus: null, checkedAt: Date.now() });
       });

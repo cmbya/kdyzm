@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
 import { serverVersion, capabilities } from './version.mjs';
-import { corroborateTaobaoEventTimes, genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, providerEventFields, mergeProviderEventFields, logisticsEventTimeIssue } from './collector-enrichment.mjs';
+import { corroborateTaobaoEventTimes, genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, providerEventFields, mergeProviderEventFields, logisticsEventTimeIssue, logisticsTimePrecision } from './collector-enrichment.mjs';
 import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
@@ -545,7 +545,7 @@ export class Store {
   importResult(accountId, result, { partial = false, reconcile = true } = {}) {
     const rules = result.logisticsRules ?? this.getLogisticsRules?.();
     const completionRules = this.pickupCompletion.rules(), completionConfig = this.pickupCompletion.config();
-    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v1', rules, completionRules, completionConfig]));
+    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v2', rules, completionRules, completionConfig]));
     const changedShipmentIds = [];
     const account = this.account(accountId);
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
@@ -656,9 +656,10 @@ export class Store {
         const staleLogistics = !!old && ((inputCheckedAt > 0 && oldCheckedAt > 0 && inputCheckedAt < oldCheckedAt)
           || (inputCheckedAt === 0 && hasPersistedLogistics && !trustedEvent));
         const status = ['transit', 'arrived', 'signed', 'unknown'].includes(input.status) ? input.status : 'unknown';
-        // Old SSR titles change as stages advance; date their preserved prose only from this successful same-waybill PC refresh.
+        // Merged PC records can carry H5 provider fields; their complete, consistent timestamp still dates old SSR prose.
         const datedOld = !staleLogistics && account.platform === 'taobao' && input.logisticsState === 'ok' && old ? { ...old,
-          logisticsEvents: corroborateTaobaoEventTimes(old.logisticsEvents || [], (input.logisticsEvents || []).filter(event => !event.provider), this.now(),
+          logisticsEvents: corroborateTaobaoEventTimes(old.logisticsEvents || [], (input.logisticsEvents || []).filter(event =>
+            (!event.provider || event.provider === 'taobao') && logisticsTimePrecision(event.timeText) !== 'unknown' && !logisticsEventTimeIssue(event, this.now())), this.now(),
             { allowLegacy: true, notBefore: order.orderDateOrigin === 'detail' ? order.orderDate || 0 : 0 }) } : old;
         const logistics = staleLogistics ? logisticsData({}, old, false, rules, this.now()) : logisticsData(input, datedOld, false, rules, this.now());
         const pickup = staleLogistics ? pickupData({}, old || {}, old?.logisticsEvents || [], rules, this.now()) : pickupData(input, old || {}, logistics.logisticsEvents, rules, this.now());

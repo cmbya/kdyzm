@@ -23,10 +23,10 @@ const newSource = join(root, 'cookie-extension');
 const oldManifest = JSON.parse(readFileSync(join(oldSource, 'manifest.json'), 'utf8'));
 const newManifest = JSON.parse(readFileSync(join(newSource, 'manifest.json'), 'utf8'));
 assert.equal(oldManifest.name, EXTENSION_NAME); assert.equal(newManifest.name, EXTENSION_NAME);
-assert.equal(oldManifest.version, '1.1.3'); assert.equal(newManifest.version, '1.2.0');
+assert.equal(oldManifest.version, '1.1.3'); assert.equal(newManifest.version, '1.2.1');
 const probe = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], { encoding: 'utf8' });
 assert.equal(probe.status, 0, 'Windows PowerShell is required');
-const artifacts = join(root, 'artifacts', 'cookie-upgrade-browser-1.2.0');
+const artifacts = join(root, 'artifacts', 'cookie-upgrade-browser-1.2.1');
 mkdirSync(artifacts, { recursive: true });
 const temporary = mkdtempSync(join(tmpdir(), 'pickcode-upgrade-e2e-'));
 const extension = join(temporary, 'loaded-extension'), profile = join(temporary, 'profile'), bundle = join(temporary, 'bundle'), state = join(temporary, 'updater-state');
@@ -133,7 +133,7 @@ try {
     '-ExtensionDirectory', extension, '-PackageManifest', join(bundle, 'cookie-extension-update.json'), '-StateDirectory', state, '-Apply'], { encoding: 'utf8', timeout: 30000 });
   assert.equal(update.status, 0, update.stdout + update.stderr);
   writeFileSync(join(artifacts, 'updater-output.txt'), update.stdout + update.stderr);
-  assert.equal(JSON.parse(readFileSync(join(extension, 'manifest.json'), 'utf8')).version, '1.2.0');
+  assert.equal(JSON.parse(readFileSync(join(extension, 'manifest.json'), 'utf8')).version, '1.2.1');
   assert.equal(await worker.evaluate(() => chrome.runtime.getManifest().version), '1.1.3', 'Filesystem replacement must not silently replace the running extension');
   assert.deepEqual(await snapshot(worker), before, 'Updater must not modify browser storage');
   assert.equal(JSON.parse(readFileSync(join(state, 'directory.json'), 'utf8')).directory, extension);
@@ -147,14 +147,14 @@ try {
   });
   await worker.evaluate(() => { setTimeout(() => chrome.runtime.reload(), 0); });
   await stopped;
-  assert.deepEqual(await installedIds('1.2.0'), beforeIds);
+  assert.deepEqual(await installedIds('1.2.1'), beforeIds);
   // Chrome may defer the new worker until an extension page sends a message.
   // A passive manifest document lets us inspect storage before options migration.
   page = await context.newPage(); await page.goto(`chrome-extension://${extensionIdBefore}/manifest.json`);
   const upgraded = await page.evaluate(() => ({ id: chrome.runtime.id, version: chrome.runtime.getManifest().version }));
-  extensionIdAfter = upgraded.id; assert.equal(upgraded.version, '1.2.0'); assert.equal(extensionIdAfter, extensionIdBefore);
+  extensionIdAfter = upgraded.id; assert.equal(upgraded.version, '1.2.1'); assert.equal(extensionIdAfter, extensionIdBefore);
   assert.deepEqual(await page.evaluate(() => chrome.storage.local.get(null)), before);
-  check('runtime.reload loaded 1.2.0 into the same extension ID with exactly one installed instance and byte-equivalent legacy storage');
+  check('runtime.reload loaded 1.2.1 into the same extension ID with exactly one installed instance and byte-equivalent legacy storage');
 
   const existingWorker = context.serviceWorkers().find(candidate => candidate !== previousWorker && new URL(candidate.url()).host === extensionIdAfter);
   const reloaded = existingWorker ? Promise.resolve(existingWorker) : context.waitForEvent('serviceworker', {
@@ -175,7 +175,7 @@ try {
   assert.match(await page.locator('#main').innerText(), /合成家人甲/);
   assert.match(await page.locator('#main').innerText(), /合成旧授权/);
   assert.equal(await page.locator('#main').getByText('合成家人乙', { exact: true }).count(), 0);
-  await screenshot('after-1.2.0.png');
+  await screenshot('after-1.2.1.png');
   check('New settings migrated the saved backend and browser name, retained both backends, preserved role grants and per-platform selection/auto switches');
 
   await page.locator('[data-action="settings"]').click();

@@ -78,6 +78,122 @@ test('one family code selects only PDD, stops reading when deselected and expose
   assert.ok(!visible.includes('cfg_')); assert.ok(!visible.includes('lastDigest'));
 });
 
+test('first family preview survives an alarm refresh before its response reaches the extension', async t => {
+  const s = await setup(t), account = s.account('taobao'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  let release, observed;
+  const gate = new Promise(resolve => { release = resolve; }), ready = new Promise(resolve => { observed = resolve; });
+  t.after(release);
+  s.intercept(async (url, options) => {
+    if (!url.endsWith(`/accounts/${account.id}/preview`)) return;
+    const response = await s.nativeFetch(url, options); observed(); await gate; return response;
+  });
+  const pending = s.call('previewSync', ref);
+  await ready;
+  await s.flow.onAlarm('cookie-sync-periodic');
+  release();
+  const confirmation = await pending;
+  const record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.equal(record.selected, true); assert.equal(record.auto, false);
+  assert.equal(record.connection.identityBound, false);
+  await s.call('confirmSync', { ...ref, confirmation });
+  assert.equal((await s.call('list'))[0].id, group.id);
+  assert.equal(s.requests.filter(request => request.path === '/v1/cookie-sync/families/connections').length, 1);
+});
+
+test('an older alarm snapshot cannot undo a first preview, while a later child revocation still deselects it', async t => {
+  const s = await setup(t), account = s.account('taobao'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  let release, observed;
+  const gate = new Promise(resolve => { release = resolve; }), ready = new Promise(resolve => { observed = resolve; });
+  t.after(release);
+  s.intercept(async (url, options) => {
+    if (!url.endsWith('/v1/cookie-sync/families/current')) return;
+    const response = await s.nativeFetch(url, options); observed(); await gate; return response;
+  });
+  const pending = s.flow.onAlarm('cookie-sync-periodic');
+  await ready;
+  const confirmation = await s.call('previewSync', ref);
+  release(); await pending; s.intercept(undefined);
+  let record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.equal(record.selected, true);
+  assert.equal(record.connection.id, confirmation.connectionId);
+  await s.call('confirmSync', { ...ref, confirmation });
+  await s.call('auto', { ...ref, enabled: true });
+  await s.api(`/v1/admin/cookie-sync/connections/${record.connection.id}`, undefined, 'DELETE');
+  await s.flow.onAlarm('cookie-sync-periodic');
+  record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.equal(record.connection, null);
+  assert.equal(record.selected, false); assert.equal(record.auto, false);
+});
+
+test('an older alarm snapshot cannot roll back a successful first confirmation', async t => {
+  const s = await setup(t), account = s.account('taobao'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  const confirmation = await s.call('previewSync', ref);
+  let release, observed;
+  const gate = new Promise(resolve => { release = resolve; }), ready = new Promise(resolve => { observed = resolve; });
+  t.after(release);
+  s.intercept(async (url, options) => {
+    if (!url.endsWith('/v1/cookie-sync/families/current')) return;
+    const response = await s.nativeFetch(url, options); observed(); await gate; return response;
+  });
+  const pending = s.flow.onAlarm('cookie-sync-periodic');
+  await ready;
+  await s.call('confirmSync', { ...ref, confirmation });
+  release(); await pending;
+  const record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.equal(record.selected, true); assert.equal(record.connection.identityBound, true);
+  assert.equal(record.account.credentialVersion, s.service.store.account(account.id).credentialVersion);
+});
+
+for (const action of ['deselect', 'cancel-sync']) test(`${action} during the first preview is not undone by an alarm refresh`, async t => {
+  const s = await setup(t), account = s.account('taobao'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  let release, observed;
+  const gate = new Promise(resolve => { release = resolve; }), ready = new Promise(resolve => { observed = resolve; });
+  t.after(release);
+  s.intercept(async (url, options) => {
+    if (!url.endsWith(`/accounts/${account.id}/preview`)) return;
+    const response = await s.nativeFetch(url, options); observed(); await gate; return response;
+  });
+  const pending = s.call('previewSync', ref);
+  const rejected = assert.rejects(pending, { code: action === 'deselect' ? 'PLATFORM_NOT_SELECTED' : 'REQUEST_CANCELED' });
+  await ready;
+  if (action === 'deselect') await s.call('select', { ...ref, enabled: false });
+  else await s.call('cancelSync', ref);
+  await s.flow.onAlarm('cookie-sync-periodic'); release(); await rejected;
+  const record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.equal(record.selected, action !== 'deselect'); assert.equal(record.auto, false);
+  assert.equal(s.requests.filter(request => request.path.endsWith('/cookie')).length, 0);
+});
+
+test('a refresh does not carry selection into an already bound first child or a replacement child', async t => {
+  const s = await setup(t), account = s.account('taobao'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
+  await s.call('select', { ...ref, enabled: true });
+  const token = s.storage.familyConnections[0].token;
+  const remote = async (suffix, body) => {
+    const response = await s.nativeFetch(`${s.base}/v1/cookie-sync/families/current/accounts/${account.id}/${suffix}`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 200); return response.json();
+  };
+  const preview = await remote('preview', { cookie: header('taobao') });
+  await remote('cookie', { cookie: header('taobao'), expectedCredentialVersion: preview.account.credentialVersion,
+    confirmationToken: preview.confirmationToken });
+  await s.flow.onAlarm('cookie-sync-periodic');
+  let record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.equal(record.selected, false); assert.equal(record.auto, false);
+  await s.call('select', { ...ref, enabled: true }); await s.call('auto', { ...ref, enabled: true });
+  await s.api(`/v1/admin/cookie-sync/connections/${record.connection.id}`, undefined, 'DELETE');
+  await remote('preview', { cookie: header('taobao') });
+  await s.flow.onAlarm('cookie-sync-periodic');
+  const oldId = record.connection.id;
+  record = (await s.call('list'))[0].accounts.find(item => item.account.id === account.id);
+  assert.notEqual(record.connection.id, oldId);
+  assert.equal(record.selected, false); assert.equal(record.auto, false);
+});
+
 test('PDD preview recovers a missing URL-query identity from matching platform-domain cookies', async t => {
   const s = await setup(t), account = s.account('pdd'), group = await s.bind(), ref = { id: group.id, accountId: account.id };
   await s.call('select', { ...ref, enabled: true });

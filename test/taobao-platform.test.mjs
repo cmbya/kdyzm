@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createCollector, taobaoParcels } from '../src/collectors.mjs';
 import { Store } from '../src/store.mjs';
+import { hash } from '../src/security.mjs';
 
 const capture = JSON.parse(readFileSync(new URL('../fixtures/taobao-collected.json', import.meta.url)));
 const NOW = Date.parse('2026-11-10T01:00:00+08:00');
@@ -20,6 +21,23 @@ async function collect({ fields = capture.fields, transit = capture.transit, ord
       ? [{ id: order.platformOrderId, statusInfo: { text: '待收货' }, createTime: '2026-11-06 12:20:09' }] : [] } } });
     return reply({ ret: ['SUCCESS'], data: { data: {} } });
   } })({ platform: 'taobao' }, '_m_h5_tk=SYNTHETIC_1794240000', full ? { knownOrders: [order] } : { targetOrder: order });
+}
+
+async function legacyTransport(t, { cached = false, extraEvents = [] } = {}) {
+  const store = new Store({ key: Buffer.alloc(32, 8), now: () => NOW }); t.after(() => store.close());
+  store.saveAccount({ platform: 'taobao', label: '合成淘宝', cookie: 'SYNTHETIC' }, 'a', true);
+  const fresh = await collect();
+  store.importResult('a', { ...fresh, orders: [target], shipments: [{ ...fresh.shipments[0], logisticsCheckedAt: NOW - 1000,
+    logisticsEvents: [...fresh.shipments[0].logisticsEvents, ...capture.legacyTransportEvents, ...extraEvents] }] });
+  const saved = store.shipment(store.snapshot(['a']).shipments[0].id);
+  if (cached) {
+    // Recreate the 3.1.41 cache key, not the current implementation's parser key.
+    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v1', undefined, [], store.pickupCompletion.config()]));
+    const { logisticsCheckedAt, logisticsDetailCheckedAt, logisticsUpdatedAt, updatedAt, ...evidence } = fresh.shipments[0];
+    saved.logisticsEvidenceHash = hash(JSON.stringify([parserKey, evidence]));
+    store.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(saved), saved.id);
+  }
+  return { store, fresh, read: () => store.snapshot(['a']).shipments[0] };
 }
 
 test('real Taobao collected stage gets a time only from its own unique full-track minute', async () => {
@@ -49,6 +67,65 @@ test('refresh repairs stored undated Taobao duplicates and completes the actual 
   assert.equal(saved.pickupCompletion.completedAt, COMPLETED);
   assert.ok(saved.logisticsEvents.every(e => e.time > 0));
   assert.equal(saved.logisticsEvents.filter(e => e.description.includes('取出')).length, 1);
+});
+
+test('successful Taobao refresh dates all nine legacy transport summaries before completing pickup', async t => {
+  const { store, fresh, read } = await legacyTransport(t);
+  assert.equal(read().picked, false);
+  assert.equal(read().logisticsEvents.filter(event => !event.time).length, 9);
+  const transport = fresh.shipments[0].logisticsEvents.filter(event => capture.transit.address.slice(2).some(step => step.place === event.description));
+  assert.equal(transport.length, 6);
+  assert.ok(transport.every(event => event.provider === 'taobao' && /^2026-/.test(event.timeText) && event.time > 0));
+  store.importResult('a', fresh);
+  assert.equal(read().logisticsEvents.filter(event => !event.time).length, 0);
+  assert.equal(read().picked, true);
+  assert.equal(read().pickupCompletion.completedAt, COMPLETED);
+});
+
+test('unchanged Taobao evidence repairs a legacy transport cache after upgrading its parser', async t => {
+  const { store, fresh, read } = await legacyTransport(t, { cached: true });
+  assert.equal(read().picked, false);
+  const oldHash = store.shipment(read().id).logisticsEvidenceHash;
+  store.importResult('a', fresh);
+  assert.equal(read().picked, true);
+  assert.equal(read().logisticsEvents.filter(event => !event.time).length, 0);
+  assert.notEqual(store.shipment(read().id).logisticsEvidenceHash, oldHash);
+});
+
+test('repairing legacy Taobao transport times preserves a manual pending decision', async t => {
+  const { store, fresh, read } = await legacyTransport(t, { cached: true });
+  const device = store.device(store.redeem(store.createPairing(['a']).code, '合成设备').token);
+  store.applyOperations(device, [{ id: 'manual-pending', shipmentId: read().id, action: 'restore', occurredAt: NOW }]);
+  store.importResult('a', fresh);
+  assert.equal(read().pickupCompletion.autoPicked, true);
+  assert.equal(read().pickupCompletion.manualOverride, 'pending');
+  assert.equal(read().picked, false);
+});
+
+test('an undated return still vetoes pickup after the old Taobao transport times are repaired', async t => {
+  const { store, fresh, read } = await legacyTransport(t, { extraEvents: [{ time: 0, description: '快件已退回商家' }] });
+  store.importResult('a', fresh);
+  const unknown = read().logisticsEvents.filter(event => !event.time);
+  assert.equal(unknown.length, 1);
+  assert.equal(unknown[0].description, '快件已退回商家');
+  assert.equal(read().pickupCompletion.autoPicked, false);
+  assert.equal(read().picked, false);
+});
+
+test('yearless, conflicting or other-provider input cannot repair old Taobao transport times', async t => {
+  for (const mode of ['yearless', 'conflicting', 'other-provider']) {
+    const { store, fresh, read } = await legacyTransport(t);
+    for (const event of fresh.shipments[0].logisticsEvents.filter(event => capture.transit.address.slice(2).some(step => step.place === event.description))) {
+      if (mode === 'yearless') event.timeText = event.timeText.slice(5, 16);
+      if (mode === 'conflicting') event.timeText = event.timeText.replace('2026', '2025');
+      if (mode === 'other-provider') event.provider = 'pdd';
+    }
+    store.importResult('a', fresh);
+    const summaries = read().logisticsEvents.filter(event => event.description.startsWith('运输中：'));
+    assert.equal(summaries.length, 3, mode);
+    assert.ok(summaries.every(event => event.time === 0), mode);
+    assert.equal(read().picked, false, mode);
+  }
 });
 
 test('unmatched, ambiguous, future or other-waybill timestamps never date a Taobao collection', async () => {
