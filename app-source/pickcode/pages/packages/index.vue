@@ -46,25 +46,27 @@
           <view v-if="!filteredGroups.length" class="empty-state"><image class="empty-icon" src="/static/images/parcel-outline.svg" mode="aspectFit" /><text class="empty-title">{{ packages.length ? '没有符合条件的记录' : '还没有包裹记录' }}</text><text class="empty-copy">{{ emptyNotice() }}</text><button role="button" tabindex="0" v-if="packages.length" @click="openFilters">调整筛选</button><button role="button" tabindex="0" v-else @click="showAddPackage">添加快递</button></view>
           <view v-for="group in filteredGroups" :key="group.date" class="day-section">
             <view class="day-head"><text>{{ formatDate(group.date) }}</text><text v-if="selectedProgress === 'done' && !showExpired" class="date-basis">按取件时间</text><button role="button" tabindex="0" :aria-label="'隐藏' + formatDate(group.date) + '当前筛选的订单'" @click="confirmDeleteDateGroup(group)">管理</button></view>
-            <view v-for="list in group.list" :key="list.id" class="order-card" :class="{ completed: list.collected, 'hidden-order': list.hidden }" :style="{ 'view-transition-name': transitionName(list.id) }" :aria-label="familyLabel(list) + '的' + list.title + '，' + cardStatus(list)">
+            <view v-for="list in group.list" :key="list.id" class="order-card" :class="{ completed: journeyCard(list).collected, 'hidden-order': list.hidden }" :style="{ 'view-transition-name': transitionName(list.id) }" :aria-label="familyLabel(list) + '的' + list.title + '，' + cardStatus(list)">
+              <template v-for="card in [journeyCard(list)]" :key="card.id">
               <button role="button" tabindex="0" class="order-open" :aria-label="'查看' + familyLabel(list) + '的' + list.title + '详情'" @click="openDetails(list)">
-                <view class="order-top"><view class="order-identity"><text class="order-platform">{{ platformLabel(list) }}</text><view class="family-ticket" :style="familyStyle(list.familyId)" :title="familyLabel(list)"><text class="family-ticket-name">{{ familyLabel(list) }}</text></view></view><text class="status-label" :class="cardProgress(list)"><text class="status-dot"></text>{{ cardStatus(list) }}</text></view>
-                <view class="order-main" :class="{ 'history-main': list.collected }">
-                  <view v-if="!list.collected" class="goods-glyph" aria-hidden="true"><image class="goods-icon" src="/static/images/parcel-outline.svg" mode="aspectFit" /></view>
-                  <view class="goods-info"><text class="goods-name" :title="list.title">{{ shortTitle(list.title || '未命名订单') }}</text><text v-if="!list.collected" class="order-sub"><template v-if="list.amount != null">{{ money(list.amount) }}</template></text></view>
-                  <uni-icons v-if="!list.collected" type="right" size="17" color="#536073" />
+                <view class="order-top"><view class="order-identity"><text class="order-platform">{{ platformLabel(card) }}</text><view class="family-ticket" :style="familyStyle(card.familyId)" :title="familyLabel(card)"><text class="family-ticket-name">{{ familyLabel(card) }}</text></view></view><text class="status-label" :class="cardProgress(card)"><text class="status-dot"></text>{{ cardStatus(card) }}</text></view>
+                <view class="order-main" :class="{ 'history-main': card.collected }">
+                  <view v-if="!card.collected" class="goods-glyph" aria-hidden="true"><image class="goods-icon" src="/static/images/parcel-outline.svg" mode="aspectFit" /></view>
+                  <view class="goods-info"><text class="goods-name" :title="card.title">{{ shortTitle(card.title || '未命名订单') }}</text><text v-if="!card.collected" class="order-sub"><template v-if="card.amount != null">{{ money(card.amount) }}</template></text></view>
+                  <uni-icons v-if="!card.collected" type="right" size="17" color="#536073" />
                 </view>
-                <view v-if="!list.collected" class="order-status"><text v-if="completionSummary(list) && !isExpiredOrder(list)" class="completion-chip">{{ completionSummary(list) }}</text><text class="order-count">{{ recordCountLabel(list) }}</text></view>
-                <text v-if="!list.collected && summaryLogistics(list)" class="order-summary">{{ summaryLogistics(list) }}</text>
+                <view v-if="!card.collected" class="order-status"><text v-if="completionSummary(card) && !isExpiredOrder(card)" class="completion-chip">{{ completionSummary(card) }}</text><text class="order-count">{{ recordCountLabel(card) }}</text></view>
+                <text v-if="!card.collected && summaryLogistics(card)" class="order-summary">{{ summaryLogistics(card) }}</text>
               </button>
-              <view v-if="list.collected" class="order-journeys" @click="openDetails(list)"><view v-for="(entry, journeyIndex) in journeysByOrder[list.id]" :key="entry.id" class="order-journey"><text v-if="journeysByOrder[list.id].length > 1" class="journey-parcel-label">包裹 {{ journeyIndex + 1 }}</text><ParcelJourney :journey="entry.journey" mode="summary" /></view></view>
-              <view v-if="!isExpiredOrder(list) && summaryShipment(list) && displayPickupCode(summaryShipment(list)) && !summaryShipment(list).picked" class="pickup-row">
-                <view class="pickup-copy"><view class="pickup-line"><text v-if="pickupCabinet(summaryShipment(list))" class="cabinet-badge">{{ pickupCabinet(summaryShipment(list)) }}</text><button role="button" tabindex="0" class="pickup-code" :class="{ 'long-code': displayPickupCode(summaryShipment(list)).length > 8 }" @click="copyValue(displayPickupCode(summaryShipment(list)), '取件码')">{{ displayPickupCode(summaryShipment(list)) }}</button></view><text class="station">{{ stationDisplayName(summaryShipment(list), '站点未知') }}</text></view>
-                <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-if="canPickShipment(list, summaryShipment(list))" class="small-primary" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" :aria-label="'领取' + list.title" @click="requestPickup(list, summaryShipment(list))">取件</button>
-                <button role="button" :tabindex="(!!syncingOrderId || list.hidden) ? -1 : 0" v-else-if="summaryShipment(list).needsPickupAssignment" class="small-primary" :disabled="!!syncingOrderId || list.hidden" :aria-disabled="!!syncingOrderId || list.hidden" @click="claimShipment(list, summaryShipment(list))">确认归属</button>
+              <view v-if="!isExpiredOrder(card) && summaryShipment(card) && displayPickupCode(summaryShipment(card)) && !summaryShipment(card).picked" class="pickup-row">
+                <view class="pickup-copy"><view class="pickup-line"><text v-if="pickupCabinet(summaryShipment(card))" class="cabinet-badge">{{ pickupCabinet(summaryShipment(card)) }}</text><button role="button" tabindex="0" class="pickup-code" :class="{ 'long-code': displayPickupCode(summaryShipment(card)).length > 8 }" @click="copyValue(displayPickupCode(summaryShipment(card)), '取件码')">{{ displayPickupCode(summaryShipment(card)) }}</button></view><text class="station">{{ stationDisplayName(summaryShipment(card), '站点未知') }}</text></view>
+                <button v-if="journeyCardShipment(list).picked" role="button" tabindex="-1" class="small-primary" disabled aria-disabled="true">已取</button>
+                <button role="button" :tabindex="(!!syncingOrderId) ? -1 : 0" v-else-if="canPickShipment(list, journeyCardShipment(list))" class="small-primary" :disabled="!!syncingOrderId" :aria-disabled="!!syncingOrderId" :aria-label="'领取' + list.title" @click="requestPickup(list, journeyCardShipment(list))">取件</button>
+                <button role="button" :tabindex="(!!syncingOrderId || list.hidden) ? -1 : 0" v-else-if="journeyCardShipment(list).needsPickupAssignment" class="small-primary" :disabled="!!syncingOrderId || list.hidden" :aria-disabled="!!syncingOrderId || list.hidden" @click="claimShipment(list, journeyCardShipment(list))">确认归属</button>
               </view>
-              <view v-else-if="!isExpiredOrder(list) && summaryShipment(list)?.needsReceiptConfirmation && !summaryShipment(list).picked" class="receipt-row"><text>物流送达后，请确认已收到</text><button role="button" :tabindex="(!!syncingOrderId || !canPickShipment(list, summaryShipment(list))) ? -1 : 0" class="small-primary receipt-confirm" :disabled="!!syncingOrderId || !canPickShipment(list, summaryShipment(list))" :aria-disabled="!!syncingOrderId || !canPickShipment(list, summaryShipment(list))" @click.stop="confirmReceipt(list, summaryShipment(list))">确认收到</button></view>
-              <view v-if="!list.collected && !isExpiredOrder(list)" class="order-journeys" @click="openDetails(list)"><view v-for="(entry, journeyIndex) in journeysByOrder[list.id]" :key="entry.id" class="order-journey"><text v-if="journeysByOrder[list.id].length > 1" class="journey-parcel-label">包裹 {{ journeyIndex + 1 }}</text><ParcelJourney :journey="entry.journey" :mode="entry.journey.completed ? 'summary' : 'road'" /></view></view>
+              <view v-else-if="!isExpiredOrder(card) && summaryShipment(card)?.needsReceiptConfirmation && !summaryShipment(card).picked" class="receipt-row"><text>物流送达后，请确认已收到</text><button role="button" :tabindex="(!!syncingOrderId || !canPickShipment(list, journeyCardShipment(list))) ? -1 : 0" class="small-primary receipt-confirm" :disabled="!!syncingOrderId || !canPickShipment(list, journeyCardShipment(list))" :aria-disabled="!!syncingOrderId || !canPickShipment(list, journeyCardShipment(list))" @click.stop="confirmReceipt(list, journeyCardShipment(list))">{{ journeyCardShipment(list).picked ? '已收到' : '确认收到' }}</button></view>
+              </template>
+              <view v-if="list.collected || !isExpiredOrder(list)" class="order-journeys" @click="openDetails(list)"><view v-for="(entry, journeyIndex) in journeysByOrder[list.id]" :key="entry.id" class="order-journey"><text v-if="journeysByOrder[list.id].length > 1" class="journey-parcel-label">包裹 {{ journeyIndex + 1 }}</text><ParcelJourney :journey="entry.journey" /></view></view>
             </view>
           </view>
         </view>
@@ -141,7 +143,7 @@ import { getSnapshot, getSyncStatus, mutate, openShoppingApp, refreshOrder, refr
 import LogisticsTimeline from '@/components/LogisticsTimeline.vue';
 import ParcelJourney from '@/components/ParcelJourney.vue';
 import OrderOverview from '@/components/OrderOverview.vue';
-import { parcelJourney, packageCollectedDateKey, comparePackagesByCollectedAt } from '@/services/parcel-journey.js';
+import { parcelJourney, packageCollectedDateKey, comparePackagesByCollectedAt, JOURNEY_COMPLETION_MS } from '@/services/parcel-journey.js';
 import PickupStamp from '@/components/PickupStamp.vue';
 import StationChooser from '@/components/StationChooser.vue';
 import { packageDateKey, shouldArchivePackage, isPackageCollected, packagePlatform, shipmentProgress, packageProgressMatches, summarizePackages } from '@/core/package-presentation.js';
@@ -152,7 +154,7 @@ export default {
   data() { return {
     codes: [], detailShipmentId: '', detailMore: false, packages: [], families: [], stationRules: [], stationChoices: [], stationChooserOpen: false, tableData: [], archivedData: [], selectedFamily: 'all', selectedPlatform: 'all', selectedProgress: 'all',
     showHidden: false, showHistory: false, showExpired: false, hydrated: false, online: {}, refreshing: false, backgroundSyncing: false, error: '', notice: '', refreshProgressText: '',
-    detailId: '', dateEditing: false, activePopup: '', filterDraft: { family: 'all', history: false, hidden: false }, dateDraft: '', dateTarget: null, syncingOrderId: '', reducedMotion: false,
+    detailId: '', dateEditing: false, activePopup: '', filterDraft: { family: 'all', history: false, hidden: false }, dateDraft: '', dateTarget: null, syncingOrderId: '', reducedMotion: false, journeyCompletions: {},
     mainPlatforms: [{ key: 'taobao', label: '淘宝', mark: '淘' }, { key: 'jd', label: '京东', mark: 'JD' }, { key: 'pdd', label: '拼多多', mark: '拼' }],
     progressOptions: [{ key: 'pickup', label: '待取' }, { key: 'transit', label: '运输中' }, { key: 'waiting', label: '待发货' }, { key: 'done', label: '已完成' }, { key: 'other', label: '其他' }, { key: 'all', label: '未收到' }]
   }; },
@@ -165,7 +167,8 @@ export default {
     totals() { return summarizePackages(this.scopedPackages); },
     progressTotals() { return summarizePackages(this.platformPackages); },
     resultTotals() { return summarizePackages(this.platformPackages, this.selectedProgress); },
-    filteredGroups() { return this.dateGroups(this.platformPackages.filter(p => this.showExpired || this.hiddenRecoveryMode || packageProgressMatches(p, this.selectedProgress)), this.selectedProgress === 'done' && !this.showExpired); },
+    journeyFilter() { return JSON.stringify([this.selectedFamily, this.selectedPlatform, this.selectedProgress, this.showHistory, this.showExpired, this.showHidden]); },
+    filteredGroups() { return this.dateGroups(this.platformPackages.filter(p => this.showExpired || this.hiddenRecoveryMode || packageProgressMatches(p, this.selectedProgress) || this.journeyCompletion(p)), this.selectedProgress === 'done' && !this.showExpired, true); },
     journeysByOrder() { const result = Object.create(null); for (const order of this.packages) result[order.id] = (order.shipments?.length ? order.shipments.filter(s => !s.hidden) : [{}]).map(s => ({ id: s.id || order.id, journey: parcelJourney(s, order) })); return result; },
     detailShipment() { return this.selectedOrder?.shipments?.find(s => s.id === this.detailShipmentId) || this.summaryShipment(this.selectedOrder || {}) || {}; },
     detailPickup() { return this.codes.find(code => (code.members || []).some(member => member.shipmentId === this.detailShipment.id)) || null; },
@@ -188,6 +191,7 @@ export default {
       return this.online.lastSuccessAt ? '上次更新 ' + new Date(this.online.lastSuccessAt).toLocaleString('zh-CN', { hour12: false }) : '已显示本地记录';
     }
   },
+  watch: { journeyFilter() { this.clearJourneyCompletions(); } },
   onLoad() {
     uni.$on('assistant-changed', this.applySnapshot); uni.$on('assistant-sync-status', this.applySyncStatus);
     if (typeof window !== 'undefined' && window.matchMedia) {
@@ -199,11 +203,40 @@ export default {
   },
   onShow() { this.revealSavedManualPackage(); this.revealSavedCompletion(); this.applySyncStatus(getSyncStatus()); this.loadData(); },
   mounted() { this.$el?.addEventListener?.('keydown', this.handleKeydown); },
-  beforeUnmount() { this.$el?.removeEventListener?.('keydown', this.handleKeydown); },
-  onHide() { this.$refs.stationChooser?.close(); if (this.activePopup) this.closePopup(this.activePopup); },
+  beforeUnmount() { this.clearJourneyCompletions(); this.$el?.removeEventListener?.('keydown', this.handleKeydown); },
+  onHide() { this.clearJourneyCompletions(); this.$refs.stationChooser?.close(); if (this.activePopup) this.closePopup(this.activePopup); },
   onBackPress() { if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if (!this.activePopup) return false; if (this.dateEditing) this.dateEditing = false; else this.closePopup(this.activePopup); return true; },
-  onUnload() { uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); this._motionQuery?.removeEventListener?.('change', this._motionChanged); this._transition?.skipTransition(); },
+  onUnload() { this.clearJourneyCompletions(); uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); this._motionQuery?.removeEventListener?.('change', this._motionChanged); this._transition?.skipTransition(); },
   methods: {
+    journeyCompletion(item) { const value = this.journeyCompletions[item.id]; return value?.filter === this.journeyFilter && value.until > Date.now() ? value : null; },
+    journeyCard(item) { return this.journeyCompletion(item)?.card || item; },
+    journeyCardShipment(item) { const id = this.summaryShipment(this.journeyCard(item))?.id; return (item.shipments || []).find(shipment => shipment.id === id) || {}; },
+    clearJourneyCompletions() { clearTimeout(this._journeyCompletionTimer); this._journeyCompletionTimer = null; this.journeyCompletions = {}; },
+    scheduleJourneyCompletions() {
+      clearTimeout(this._journeyCompletionTimer); this._journeyCompletionTimer = null;
+      const deadlines = Object.values(this.journeyCompletions).map(value => value.until);
+      if (deadlines.length) this._journeyCompletionTimer = setTimeout(() => {
+        this.journeyCompletions = Object.fromEntries(Object.entries(this.journeyCompletions).filter(([, value]) => value.until > Date.now()));
+        this.scheduleJourneyCompletions();
+      }, Math.max(0, Math.min(...deadlines) - Date.now()));
+    },
+    retainCompletedJourneys(snapshot) {
+      const binding = online => JSON.stringify([!!online?.bound, online?.baseUrl || '', online?.deviceId || '']);
+      if (binding(snapshot.online) !== binding(this.online) || this.showExpired) { this.clearJourneyCompletions(); return; }
+      const now = Date.now(), next = new Map((snapshot.packages || []).map(item => [item.id, item])), retained = {};
+      const eligible = item => item && !item.hidden && !this.isExpiredOrder(item);
+      for (const [id, value] of Object.entries(this.journeyCompletions)) {
+        const item = next.get(id);
+        if (value.until > now && value.filter === this.journeyFilter && eligible(item) && item.accountId === value.accountId && value.shipmentIds.every(id => (item.shipments || []).some(shipment => shipment.id === id && !shipment.hidden && parcelJourney(shipment, item).completed))) retained[id] = value;
+      }
+      for (const group of this.filteredGroups) for (const previous of group.list) {
+        const item = next.get(previous.id);
+        if (!eligible(previous) || !eligible(item) || item.accountId !== previous.accountId) continue;
+        const newIds = (item.shipments || []).filter(shipment => shipment.id && !shipment.hidden && parcelJourney(shipment, item).completed && (previous.shipments || []).some(old => old.id === shipment.id && !old.hidden && !parcelJourney(old, previous).completed)).map(shipment => shipment.id);
+        if (newIds.length) retained[item.id] = { until: now + JOURNEY_COMPLETION_MS, filter: this.journeyFilter, date: group.date, accountId: item.accountId, card: retained[item.id]?.card || previous, shipmentIds: [...new Set([...(retained[item.id]?.shipmentIds || []), ...newIds])] };
+      }
+      this.journeyCompletions = retained; this.scheduleJourneyCompletions();
+    },
     stationDisplayName, pickupCabinet,
     shortTitle(value) { const chars = Array.from(value); return chars.length > 15 ? chars.slice(0, 15).join('') + '…' : value; },
     toggleDetailMore() { this.detailMore = !this.detailMore; if (this.detailMore) this.$nextTick(() => { const el = this.$refs.detailMorePanel?.$el || this.$refs.detailMorePanel; el?.scrollIntoView?.({ block: 'nearest', behavior: this.reducedMotion ? 'instant' : 'smooth' }); }); },
@@ -280,6 +313,7 @@ export default {
       finally { this.syncingOrderId = ''; }
     },
     animateList(update) {
+      this.clearJourneyCompletions();
       const revision = this._filterRevision = (this._filterRevision || 0) + 1;
       const apply = async () => { if (revision !== this._filterRevision) return; update(); await this.$nextTick?.(); };
       const list = this.$refs?.recordList?.$el || this.$refs?.recordList;
@@ -288,11 +322,12 @@ export default {
         this._transition = list.startViewTransition(apply); this._transition.ready.catch(() => {});
       } else { apply(); }
     },
-    dateGroups(items, collected = false) {
+    dateGroups(items, collected = false, retainJourneys = false) {
       const groups = new Map();
-      for (const item of items) { const date = collected ? packageCollectedDateKey(item) : this.dateKey(item); if (!groups.has(date)) groups.set(date, []); groups.get(date).push(item); }
+      const compare = collected ? comparePackagesByCollectedAt : (a, b) => Number(b.orderDate || 0) - Number(a.orderDate || 0);
+      for (const item of items) { const date = retainJourneys && this.journeyCompletion(item)?.date || (collected ? packageCollectedDateKey(item) : this.dateKey(item)); if (!groups.has(date)) groups.set(date, []); groups.get(date).push(item); }
       return [...groups].sort(([a], [b]) => a === b ? 0 : a === 'unknown' ? 1 : b === 'unknown' ? -1 : b.localeCompare(a)).map(([date, list]) => ({
-        date, list: [...list].sort(collected ? comparePackagesByCollectedAt : (a, b) => Number(b.orderDate || 0) - Number(a.orderDate || 0))
+        date, list: [...list].sort((a, b) => compare(retainJourneys ? this.journeyCard(a) : a, retainJourneys ? this.journeyCard(b) : b))
       }));
     },
     regroup(now = new Date()) {
@@ -305,7 +340,7 @@ export default {
       }
       this.tableData = this.dateGroups(current); this.archivedData = this.dateGroups(archived);
     },
-    applySnapshot(snapshot) { this._snapshotRevision = (this._snapshotRevision || 0) + 1; this.packages = snapshot.packages || []; this.codes = snapshot.codes || []; this.families = snapshot.families || snapshot.online?.families || []; this.stationRules = snapshot.stationRules || []; this.stationChoices = snapshot.stationChoices || []; this.regroup(); this.online = snapshot.online || {}; this.error = this.online.error || ''; this.notice = this.online.notice || ''; this.hydrated = true; if (this.activePopup === 'detailPopup' && !this.selectedOrder) this.closePopup('detailPopup'); const marker = this._pendingCompletionNavigation; const target = marker && this.packages.find(order => order.id === marker.orderId); if (target) { this._pendingCompletionNavigation = null; this.detailId = target.id; this.$nextTick?.(() => { if (this.$refs?.detailPopup?.open) this.openDetails(target); }); } },
+    applySnapshot(snapshot) { this.retainCompletedJourneys(snapshot); this._snapshotRevision = (this._snapshotRevision || 0) + 1; this.packages = snapshot.packages || []; this.codes = snapshot.codes || []; this.families = snapshot.families || snapshot.online?.families || []; this.stationRules = snapshot.stationRules || []; this.stationChoices = snapshot.stationChoices || []; this.regroup(); this.online = snapshot.online || {}; this.error = this.online.error || ''; this.notice = this.online.notice || ''; this.hydrated = true; if (this.activePopup === 'detailPopup' && !this.selectedOrder) this.closePopup('detailPopup'); const marker = this._pendingCompletionNavigation; const target = marker && this.packages.find(order => order.id === marker.orderId); if (target) { this._pendingCompletionNavigation = null; this.detailId = target.id; this.$nextTick?.(() => { if (this.$refs?.detailPopup?.open) this.openDetails(target); }); } },
     applySyncStatus(status) { this.backgroundSyncing = status.syncing; },
     async loadData() {
       const revision = this._snapshotRevision || 0, request = this._loadRequest = (this._loadRequest || 0) + 1;
@@ -315,7 +350,7 @@ export default {
     async retrySync() { if (this.refreshing || this.backgroundSyncing) return; this.refreshing = true; try { if (!this.hydrated) this.applySnapshot(await getSnapshot()); if (!this.online.bound) { await this.loadData(); return; } const result = await refreshOnline(progress => { this.refreshProgressText = progress.label; }); this.applySnapshot(result.snapshot); this.error = result.onlineError || ''; this.notice = [result.onlineNotice, result.pending ? result.pendingNotice || '后台仍在处理中，稍后刷新查看' : ''].filter(Boolean).join('；'); } catch (e) { this.error = e.message || '更新失败，已有记录已保留'; } finally { this.refreshing = false; this.refreshProgressText = ''; } },
     openFilters() { this.filterDraft = { family: this.selectedFamily, history: this.showHistory, hidden: this.showHidden }; this.openPopup('filterPopup'); },
     applyFilters() { this.animateList(() => { this.selectedFamily = this.filterDraft.family; this.showHistory = this.filterDraft.history; this.showExpired = false; this.showHidden = this.filterDraft.hidden; this.regroup(); }); this.closePopup('filterPopup'); },
-    openDetails(item) { this.detailId = item.id; this.detailShipmentId = ''; this.detailMore = false; this.dateEditing = false; this.openPopup('detailPopup'); },
+    openDetails(item) { this.detailId = item.id; this.detailShipmentId = this.summaryShipment(item)?.id || ''; this.detailMore = false; this.dateEditing = false; this.openPopup('detailPopup'); },
     openPopup(name) { this._popupTrigger = typeof document !== 'undefined' ? document.activeElement : null; this.activePopup = name; this.$refs[name].open(); },
     closePopup(name) { this.$refs[name]?.close(); },
     popupChanged(name, event) {

@@ -30,9 +30,10 @@ export function taobaoDetailDateEvidence(data, timestamp) {
     for (const label of Array.isArray(cell?.fields?.labels) ? cell.fields.labels : []) {
       if (!/^(?:创建时间|下单时间)[:：]?$/.test(text(label?.name))) continue;
       const value = text(label.value);
-      if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$/.test(value)) continue;
+      const orderDatePrecision = orderTimePrecision(value);
+      if (!/^\d{4}[-年/]/.test(value) || !['second', 'minute'].includes(orderDatePrecision)) continue;
       const date = timestamp(value);
-      if (date) return { orderDate: date, orderDatePrecision: orderTimePrecision(value) };
+      if (date) return { orderDate: date, orderDatePrecision };
     }
   }
   return { orderDate: 0, orderDatePrecision: 'unknown' };
@@ -42,7 +43,9 @@ export function logisticsTimestamp(value, timestamp) {
   const raw = text(value);
   // Never assign a fabricated year to platform labels such as "10-30 12:45" or "今天".
   if (/^\d{10,13}$/.test(raw)) return timestamp(value);
-  const normalized = raw.replace(/年|月|\//g, '-').replace('日', '').replace(' ', 'T');
+  const normalized = raw.replace(/年|月|\//g, '-').replace('日', '').replace(' ', 'T')
+    .replace(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:T(\d{1,2}))?/, (_, year, month, day, hour) =>
+      `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}${hour === undefined ? '' : `T${hour.padStart(2, '0')}`}`);
   if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(normalized)) return 0;
   return timestamp(/Z$|[+-]\d{2}:?\d{2}$/.test(normalized) ? normalized : `${normalized}${normalized.length === 10 ? 'T00:00:00' : ''}+08:00`);
 }
@@ -50,14 +53,14 @@ export function logisticsTimestamp(value, timestamp) {
 export function logisticsTimePrecision(value) {
   const raw = text(value);
   if (/^\d{10,13}$/.test(raw)) return 'second';
-  if (/^\d{4}[-年/]\d{2}[-月/]\d{2}日?[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})?$/.test(raw)) return 'second';
-  if (/^\d{4}[-年/]\d{2}[-月/]\d{2}日?[ T]\d{2}:\d{2}(?:Z|[+-]\d{2}:?\d{2})?$/.test(raw)) return 'minute';
+  if (/^\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?[ T]\d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})?$/.test(raw)) return 'second';
+  if (/^\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?[ T]\d{1,2}:\d{2}(?:Z|[+-]\d{2}:?\d{2})?$/.test(raw)) return 'minute';
   return 'unknown';
 }
 
 export function orderTimePrecision(value) {
   const result = logisticsTimePrecision(value);
-  return result !== 'unknown' ? result : /^\d{4}[-年/]\d{2}[-月/]\d{2}日?$/.test(text(value)) ? 'day' : 'unknown';
+  return result !== 'unknown' ? result : /^\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?$/.test(text(value)) ? 'day' : 'unknown';
 }
 
 export function providerEventFields(event) {

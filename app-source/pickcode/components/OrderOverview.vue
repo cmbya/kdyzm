@@ -17,7 +17,7 @@
       </view>
     </view>
     <view class="station-row"><uni-icons class="station-icon" type="location" size="21" color="#008d80" /><text class="station-name">{{ stationDisplayName(pickup || shipment, '站点待获取') }}</text><view v-if="$slots['station-action']" class="station-action"><slot name="station-action" /></view></view>
-    <view class="journey-section"><text class="section-title">订单信息</text><ParcelJourney :journey="journey" /></view>
+    <view class="journey-section"><text class="section-title">订单信息</text><ParcelJourney :key="shipment.id || order.id || pickup?.id" :journey="journey" /></view>
 
     <view class="fold-card">
       <button class="fold-heading" role="button" tabindex="0" :aria-expanded="logisticsOpen" @click="logisticsOpen = !logisticsOpen"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M2 5h12v13H2zM14 10h5l3 4v4h-8" /><circle cx="6" cy="18" r="2" fill="#f7faff" /><circle cx="18" cy="18" r="2" fill="#f7faff" /></svg><text>物流详情</text><view class="fold-action">{{ (shipment.logisticsEvents || []).length }}条轨迹 <uni-icons :type="logisticsOpen ? 'top' : 'bottom'" size="15" color="#1874d4" /></view></button>

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.40",
+  "version": "3.1.41",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "6f060126873138c3962ce9d1394127340b24f84cea845bcb09c6e3357073b39c"
+      "sha256": "dbae48752569ca81e6c926584c17a0148d56e0a5bc4d8cecd210fed425e31980"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -491,18 +491,18 @@
     },
     {
       "path": "components/OrderOverview.vue",
-      "size": 13570,
-      "sha256": "6bde8e9b71e5940ff45cf2cbb29b021301ff36db063176091da303a75802315a"
+      "size": 13615,
+      "sha256": "8aff1ae763a3207b176afe79a0bf558a7c5914fd60aaabf6cc9e96d4c9ef561e"
     },
     {
       "path": "components/ParcelJourney.vue",
-      "size": 16384,
-      "sha256": "c7d2ea86c325efcd4df749a77f4736dc09aa1dfd27d8ed07c11db013cd2f00a4"
+      "size": 18528,
+      "sha256": "eabfee4b4bbb89b2c5256de8fd1b8dbb7485d59a1d20d5e36fe3b697ded6dcc0"
     },
     {
       "path": "components/PickupDetail.vue",
-      "size": 29835,
-      "sha256": "621dbf43a554fd68d7dd9661863428608fd21d1675f264eba43005016fc710a0"
+      "size": 29953,
+      "sha256": "52c592ef8f2fcc0326beda40dc039138264bb9684b5410344e38dda9e74f444a"
     },
     {
       "path": "components/PickupStamp.vue",
@@ -547,17 +547,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "75838d0766430e7114dbffb72cae88b31af75510f0af2a4e6f0c9396e3bca3dd"
+      "sha256": "7b1dc9260d32158725759de53da2b5dd6920405c5c6f368716fe6a00c29613a7"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "8aa0e3acf5e526d264f426bddf88a17b6ddb8e92586116c6e8123d8447c18710"
+      "sha256": "f768552ca1b7a30be15c9270b40002683a0ebea94632d581d79e6ad8cd6fe1cf"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "10c5bee148c200e6590de0f0f87ca52ff746871d93efcf5e62c858180c9fe51f"
+      "sha256": "d6e4900903e4a610e2772fc49f4290a00eb8157ab253bd83ab39e690c6519fe6"
     },
     {
       "path": "pages.json",
@@ -571,8 +571,8 @@
     },
     {
       "path": "pages/index/index.vue",
-      "size": 67900,
-      "sha256": "44c3b857629e775733bfde535d7d64b3fc0192b22a78f27703271a5bdd7b79e9"
+      "size": 70565,
+      "sha256": "5da1b2c3cc2d70708f8244ff431d59a852215f3ccde7811e3feb2a48a6eb36c9"
     },
     {
       "path": "pages/my/about.vue",
@@ -586,8 +586,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 40339,
-      "sha256": "098bef77d194a50db0ce6b7a02b07cdf04c21f9134ea63ef5e15b0d66b4db9fd"
+      "size": 41318,
+      "sha256": "f6cb84484774923807d9f38abe620de76acc04f9ad4b0387afc91e2d8a04f9dd"
     },
     {
       "path": "pages/my/faq.vue",
@@ -631,8 +631,8 @@
     },
     {
       "path": "pages/packages/index.vue",
-      "size": 74081,
-      "sha256": "c00db94d71adea9f12c8dd0504072318331ad6714a8cd6c12141bba8f9d6f841"
+      "size": 77696,
+      "sha256": "2a492aa6141a7e2e822dfdd1271c8619ece32ee35f054e4985968652d7108248"
     },
     {
       "path": "scripts/ai-context.mjs",
@@ -726,8 +726,8 @@
     },
     {
       "path": "services/parcel-journey.js",
-      "size": 8527,
-      "sha256": "e54359d6ce46febbc7513871f8a2b776112d7d6f2067f31e99fdbe2227439b85"
+      "size": 8119,
+      "sha256": "5fc651098659709fcd26f60b34d7bbc7c37f160c54d4fe23ef096df7e5dc3a9a"
     },
     {
       "path": "services/pickup-groups.js",
@@ -883,6 +883,61 @@
       "path": "static/images/parcel-journey-car.png",
       "size": 38440,
       "sha256": "cd91f41233c451d368241a8b6f3c9f800f7bd6434e72447b5f0891bec2327b5c"
+    },
+    {
+      "path": "static/images/parcel-journey/route/lane-marks.png",
+      "size": 8546,
+      "sha256": "51a7d943c7a54ceac73d48e1efc729965fcfb446345061d00b09f7b4c62d7f8b"
+    },
+    {
+      "path": "static/images/parcel-journey/route/map.png",
+      "size": 326991,
+      "sha256": "938e13546a1d28bf5274d4ef89eeec73bb7db5afde49db538a6404ea1717187f"
+    },
+    {
+      "path": "static/images/parcel-journey/route/road.png",
+      "size": 488324,
+      "sha256": "5d4f1651afa0d3764e74ac34ee60c320aba653fd48166774fe49b0cafc0e532d"
+    },
+    {
+      "path": "static/images/parcel-journey/stations/blue.png",
+      "size": 346615,
+      "sha256": "7867ce91fa4605fde9c0859fe5901370d71b388d5c36fd962eb491adf4e9bf67"
+    },
+    {
+      "path": "static/images/parcel-journey/stations/contact-shadow.png",
+      "size": 3352,
+      "sha256": "c313fecf6db213f770a92d6e863182ca693efcded17ffde16c25e75fa2ac3e1b"
+    },
+    {
+      "path": "static/images/parcel-journey/stations/gray.png",
+      "size": 337411,
+      "sha256": "437b9e035c7a78642ca11268fe172e92d2ea6aaa3e039877d7a9a1dcf12121f8"
+    },
+    {
+      "path": "static/images/parcel-journey/stations/green.png",
+      "size": 342147,
+      "sha256": "a4af6660de6001a98e23dd8d0917515df38f2f02b7c5fa9e2898c567b3faaa0b"
+    },
+    {
+      "path": "static/images/parcel-journey/vehicle/car.png",
+      "size": 72014,
+      "sha256": "cc873ed15938d00ecc29ce68bfb2eed05076f7020b1fe135b6443d2e4e0a0f67"
+    },
+    {
+      "path": "static/images/parcel-journey/vehicle/contact-shadow.png",
+      "size": 4431,
+      "sha256": "617530466cafb9217bbeb2cda14973028a39e439036f41a4ca8fc5e362ec1b53"
+    },
+    {
+      "path": "static/images/parcel-journey/vehicle/empty-trailer.png",
+      "size": 28715,
+      "sha256": "bb5dac435b57378898f8d71c0047236e336661be8d209c464fbaeffb4fbf67a6"
+    },
+    {
+      "path": "static/images/parcel-journey/vehicle/parcel.png",
+      "size": 21489,
+      "sha256": "7bcf9f3a6a41a9fa47c27773341338dca37c7a34599ef054d41bb06fe8fe6096"
     },
     {
       "path": "static/images/parcel-outline.svg",
@@ -2528,8 +2583,8 @@
     },
     {
       "path": "README.md",
-      "size": 2600,
-      "sha256": "c0684657a09934ff891ccbe28f2af8df3b663f7893ef3d41f0f6e7f2946cbe82"
+      "size": 2424,
+      "sha256": "c8581b9cea833d49fdd354509e319464450cfec1b9069f45cad48d0473a8e386"
     },
     {
       "path": ".gitignore",

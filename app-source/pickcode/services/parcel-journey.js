@@ -3,6 +3,8 @@ const own = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, ke
 const validAt = value => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000 ? value : null;
 const precision = value => ['second', 'minute', 'day'].includes(value) ? value : 'unknown';
 const autoKinds = ['user_collected', 'recipient_pickup', 'recipient_signed'];
+// Keep a newly completed card mounted through drive, stop and record folding.
+const JOURNEY_COMPLETION_MS = 2600;
 
 function chinaDate(at) { return new Date(at + 8 * 3600000); }
 function pad(value) { return String(value).padStart(2, '0'); }
@@ -84,18 +86,12 @@ function parcelJourneySegments(journey, now = Date.now()) {
       ? duration(start.at, ongoing ? validAt(now) : end.at) : '—' };
   });
 }
-function parcelJourneyProgress(journey, now = Date.now()) {
+function parcelJourneyProgress(journey) {
   if (journey?.completed === true) return 3;
   const index = journey?.currentIndex;
   if (!Number.isInteger(index) || index < 0 || index > 3) return -1;
-  if (index === 3) return 3;
-  const points = Array.isArray(journey.points) ? journey.points : [];
-  const start = points[index];
-  const sources = [['platform', 'manual'], ['platform_event'], ['platform_event', 'locker_arrival']];
-  if (!validAt(start?.at) || !validAt(now) || now < start.at || !['second', 'minute'].includes(start.precision) || !sources[index].includes(start.source)) return index;
-  const known = points.filter(point => validAt(point?.at));
-  if (known.some((point, position) => position > 0 && point.at < known[position - 1].at)) return index;
-  return index + Math.min(1, (now - start.at) / ([2, 3, 1][index] * 86400000));
+  // Position means observed stage, never a delivery estimate based on elapsed time.
+  return [0, 1.5, 2, 3][index];
 }
 function parcelJourney(shipment = {}, order = {}) {
   shipment = shipment || {}; order = order || {};
@@ -124,4 +120,4 @@ function parcelJourney(shipment = {}, order = {}) {
     carrier: /^(?:unknown|other|未知(?:快递|物流|承运商|快递公司)?|快递公司未知|其他(?:快递|物流)?|暂无|未识别|线上包裹|[-—–]+)$/i.test(carrier) ? '' : carrier };
 }
 
-export { parcelJourney, parcelJourneySegments, parcelJourneyProgress, shipmentCollectedAt, packageCollectedAt, packageCollectedDateKey, comparePackagesByCollectedAt };
+export { parcelJourney, parcelJourneySegments, parcelJourneyProgress, JOURNEY_COMPLETION_MS, shipmentCollectedAt, packageCollectedAt, packageCollectedDateKey, comparePackagesByCollectedAt };

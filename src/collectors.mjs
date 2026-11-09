@@ -24,9 +24,9 @@ export function timestamp(value) {
     return n < 100000000000 ? n * 1000 : n;
   }
   // Platform timestamps without an offset are China local time, regardless of the server TZ.
+  if (['second', 'minute'].includes(logisticsTimePrecision(value))) return logisticsTimestamp(value, raw => Date.parse(raw) || 0);
   const normalized = String(value).replace(/年|月/g, '-').replace('日', '').trim();
-  const iso = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$/.test(normalized) ? `${normalized.replace(' ', 'T')}+08:00` : normalized;
-  return Date.parse(iso) || 0;
+  return Date.parse(normalized) || 0;
 }
 
 export async function platformRequest(url, cookie, { fetchImpl = fetch, method = 'GET', body, headers = {}, encoding = 'utf-8' } = {}) {
@@ -252,7 +252,8 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
   let pickupCodes = {};
   async function enrichDate(metadata) {
     const previous = known.get(metadata.platformOrderId);
-    if (dateBudget <= 0 || dateAttempted.has(metadata.platformOrderId) || (!targetOrder && (previous?.orderDateOrigin === 'detail' || (!previous && metadata.orderDate)))) return;
+    const verifiedDetail = previous?.orderDateOrigin === 'detail' && ['second', 'minute', 'day'].includes(previous.orderDatePrecision);
+    if (dateBudget <= 0 || dateAttempted.has(metadata.platformOrderId) || (!targetOrder && (verifiedDetail || (!previous && metadata.orderDate)))) return;
     const checkedAt = now();
     if (!targetOrder && previous?.dateCheckedAt && checkedAt - previous.dateCheckedAt < 24 * 60 * 60 * 1000) return;
     dateBudget--; dateAttempted.add(metadata.platformOrderId);

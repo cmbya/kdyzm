@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createCollector, taobaoParcels } from '../src/collectors.mjs';
 import { normalizeLogisticsEvents } from '../src/collector-enrichment.mjs';
 import { timestamp } from '../src/collectors.mjs';
+import { Store } from '../src/store.mjs';
 
 const NOW = Date.parse('2026-10-31T10:00:00+08:00');
 const response = data => new Response(JSON.stringify(data));
@@ -238,6 +239,7 @@ test('Taobao date supplement corrects known list dates, throttles requests and c
   const knownOrders = records.map(order => ({ platformOrderId: order.id, orderDateOrigin: 'list', dateCheckedAt: 0, shipments: [] }));
   knownOrders[0].dateCheckedAt = NOW - 1000;
   knownOrders[1].orderDateOrigin = 'detail';
+  knownOrders[1].orderDatePrecision = 'second';
   const result = await createCollector({ now: () => NOW, fetchImpl: taobaoDateFetch(records, { o2: detail([{ name: '创建时间：', value: '2026-10-28 10:00:00' }]) }, calls) })(
     { platform: 'taobao' }, cookie, { knownOrders });
   assert.equal(calls.length, 10);
@@ -247,6 +249,69 @@ test('Taobao date supplement corrects known list dates, throttles requests and c
   assert.equal(result.orders[2].orderDateOrigin, 'detail');
   assert.equal(result.orders[2].orderDate, Date.parse('2026-10-28T10:00:00+08:00'));
   assert.equal(result.orders.at(-1).dateCheckedAt, undefined);
+});
+
+test('Taobao repairs legacy detail precision within the existing cooldown and budget without replacing protected dates', async t => {
+  const store = new Store({ key: Buffer.alloc(32, 1), now: () => NOW });
+  t.after(() => store.close());
+  store.saveAccount({ platform: 'taobao', label: 'fixture', cookie: 'SYNTHETIC' }, 'a', true);
+  const originalDate = Date.parse('2026-10-28T09:00:00+08:00');
+  const orders = Array.from({ length: 16 }, (_, i) => ({ platformOrderId: `o${i}`, orderDate: originalDate, orderDateOrigin: 'detail',
+    dateCheckedAt: i === 0 ? NOW - 1000 : NOW - 2 * 86400000, ...([1, 2, 3].includes(i) ? { orderDatePrecision: ['minute', 'second', 'day'][i - 1] } : {}) }));
+  store.importResult('a', { orders, shipments: [] });
+  const knownOrders = store.snapshot(['a']).orders;
+  assert.equal(knownOrders.find(order => order.platformOrderId === 'o4').orderDatePrecision, undefined);
+  knownOrders.find(order => order.platformOrderId === 'o5').orderDatePrecision = 'unknown';
+  const records = orders.map(order => ({ id: order.platformOrderId, statusInfo: { text: '待发货' }, createTime: '2026-10-30 10:00:00' }));
+  const details = Object.fromEntries(orders.map(order => [order.platformOrderId, detail([{ name: '下单时间', value: '2026-10-28 09:00' }])]));
+  const calls = [];
+  const result = await createCollector({ now: () => NOW, fetchImpl: taobaoDateFetch(records, details, calls) })({ platform: 'taobao' }, cookie, { knownOrders });
+  assert.deepEqual(calls.map(call => call.data.bizOrderId), Array.from({ length: 10 }, (_, i) => `o${i + 4}`));
+  store.importResult('a', result);
+  const repaired = store.snapshot(['a']).orders;
+  assert.ok(repaired.every(order => order.orderDate === originalDate && order.orderDateOrigin === 'detail'));
+  for (let i = 4; i < 14; i++) assert.equal(repaired.find(order => order.platformOrderId === `o${i}`).orderDatePrecision, 'minute');
+  for (const id of ['o0', 'o14', 'o15']) assert.equal(repaired.find(order => order.platformOrderId === id).orderDatePrecision, undefined);
+});
+
+test('Taobao explicit single-digit dates retain minute or second precision through collection and Store', async t => {
+  const store = new Store({ key: Buffer.alloc(32, 1), now: () => NOW });
+  t.after(() => store.close());
+  store.saveAccount({ platform: 'taobao', label: 'fixture', cookie: 'SYNTHETIC' }, 'a', true);
+  const cases = [
+    ['list-minute', '2026-1-2 3:04', 'minute', '2026-01-02T03:04:00+08:00'],
+    ['list-second', '2026/1/2 3:04:05', 'second', '2026-01-02T03:04:05+08:00'],
+    ['detail-minute', '2026-1-2T3:04', 'minute', '2026-01-02T03:04:00+08:00'],
+    ['detail-second', '2026年1月2日 3:04:05', 'second', '2026-01-02T03:04:05+08:00'],
+  ];
+  const records = cases.map(([id, raw]) => ({ id, statusInfo: { text: '待发货' }, ...(id.startsWith('list') ? { createTime: raw } : {}) }));
+  const details = Object.fromEntries(cases.map(([id, raw]) => [id, detail([{ name: '下单时间', value: raw }])]));
+  const result = await createCollector({ now: () => NOW, fetchImpl: taobaoDateFetch(records, details) })({ platform: 'taobao' }, cookie);
+  store.importResult('a', result);
+  for (const [id, , precision, iso] of cases) {
+    const order = store.snapshot(['a']).orders.find(order => order.platformOrderId === id);
+    assert.equal(order.orderDate, Date.parse(iso), id);
+    assert.equal(order.orderDatePrecision, precision, id);
+  }
+});
+
+test('Taobao empty legacy detail supplements preserve unknown precision and cool down even outside the list', async t => {
+  const store = new Store({ key: Buffer.alloc(32, 1), now: () => NOW });
+  t.after(() => store.close());
+  store.saveAccount({ platform: 'taobao', label: 'fixture', cookie: 'SYNTHETIC' }, 'a', true);
+  const originalDate = NOW - 3 * 86400000;
+  store.importResult('a', { orders: [{ platformOrderId: 'old', orderDate: originalDate, orderDateOrigin: 'detail', dateCheckedAt: NOW - 2 * 86400000 }], shipments: [] });
+  const calls = [];
+  const collect = createCollector({ now: () => NOW, fetchImpl: taobaoDateFetch([], {}, calls) });
+  store.importResult('a', await collect({ platform: 'taobao' }, cookie, { knownOrders: store.snapshot(['a']).orders }));
+  assert.equal(calls.length, 1);
+  const saved = store.snapshot(['a']).orders[0];
+  assert.equal(saved.orderDate, originalDate);
+  assert.equal(saved.orderDatePrecision, undefined);
+  assert.equal(saved.dateState, 'empty');
+  assert.equal(saved.dateCheckedAt, NOW);
+  await collect({ platform: 'taobao' }, cookie, { knownOrders: [saved] });
+  assert.equal(calls.length, 1);
 });
 
 test('Taobao date supplement updates known orders outside the list without importing them', async () => {

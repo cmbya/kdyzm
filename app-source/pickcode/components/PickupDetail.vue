@@ -94,7 +94,7 @@ export default {
   components:{OrderOverview},
   props: { item: Object, packages: {type:Array,default:()=>[]}, matchOnOpen:Boolean }, emits:['close','changed','ignore','station-change'],
   data:()=>({detailMemberId:'',showManagement:false,selected:[],chosenCode:'',busy:false,error:'',matchingSourceId:'',matchSelected:[],matchQuery:'',matchFamily:'',matchPlatform:'',showOtherPackages:false}),
-  watch:{'item.id'(){this.detailMemberId='';this.showManagement=false;this.selected=[];this.chosenCode='';this.error='';this.closeMatching();}},
+  watch:{'item.id':{immediate:true,handler(){const members=this.item?.members||[];this.detailMemberId=(members.find(member=>!member.picked)||members[0])?.id||'';this.showManagement=false;this.selected=[];this.chosenCode='';this.error='';this.closeMatching();}}},
   mounted(){this.$nextTick?.(()=>this.$el?.querySelector?.('[aria-label="关闭取件详情"]')?.focus?.());if(this.matchOnOpen){const source=this.sources.find(s=>canMatchSource(s)&&(this.item.needsMatchReview||s.matchNeedsReview||linkedShipmentIds(s).length<sourcePackageCount(s)));if(source)this.openMatching(source);}},
   computed:{
     currentMember(){return this.members.find(member=>member.id===this.detailMemberId)||this.members.find(member=>!member.picked)||this.members[0]||null;},

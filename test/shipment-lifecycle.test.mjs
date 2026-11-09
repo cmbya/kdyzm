@@ -166,8 +166,12 @@ test('order precision comes from raw platform values and does not fabricate prec
   assert.equal(orderTimePrecision('2026-11-09'), 'day');
   assert.equal(orderTimePrecision('2026-11-09 09:15'), 'minute');
   assert.equal(orderTimePrecision('2026-11-09 09:15:00'), 'second');
+  assert.equal(orderTimePrecision('2026-1-2'), 'day');
+  assert.equal(orderTimePrecision('2026-1-2 3:04'), 'minute');
+  assert.equal(orderTimePrecision('2026/1/2 3:04:05'), 'second');
+  assert.equal(orderTimePrecision('2026年1月2日 3:04:05'), 'second');
   assert.equal(orderTimePrecision(NOW), 'second');
-  assert.equal(orderTimePrecision('今天09:15'), 'unknown');
+  for (const value of ['今天09:15', '1-2 3:04', '2026-1-2 3:4', '2026-1-2 3:04 已下单']) assert.equal(orderTimePrecision(value), 'unknown');
   assert.equal(taobaoDetailDateEvidence({ data: { order: { fields: { labels: [{ name: '下单时间', value: '2026-11-09 09:15' }] } } } }, timestamp).orderDatePrecision, 'minute');
   const f = fixture(t);
   f.sync([]);

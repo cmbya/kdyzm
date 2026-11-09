@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.41 · 私人版</text><text class="version-date">2026-11-09</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">进度</text><text class="content">物流进度改为微缩站台与纸箱拖车，打开直接显示当前阶段，新的物流事件到达后才播放行程并点亮站牌</text></view>
+          <view class="update-item"><text class="tag optimize">时间</text><text class="content">三段耗时喷印在路面并保留分钟；确认取件后停留片刻，平滑收拢为四个时间和三段耗时记录</text></view>
+          <view class="update-item"><text class="tag fix">修复</text><text class="content">配套后台补查旧订单缺失的下单时间精度，修复已有下单和发货时间却不显示发货用时的问题</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.40 · 私人版</text><text class="version-date">2026-11-09</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">路牌</text><text class="content">下单、发货、到货、取件改成立体路牌与独立时间牌，实际到达或经过才点亮，未到节点保持灰色</text></view>

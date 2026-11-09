@@ -1,207 +1,173 @@
 <template>
-  <view class="parcel-journey" :class="'journey-' + mode" role="group" aria-label="包裹时间进度">
-    <template v-if="mode === 'summary'">
-      <view class="journey-time-grid">
-        <view v-for="point in points" :key="point.key" class="journey-time-block" :class="pointClass(point)">
-          <text class="journey-summary-label">{{ point.label }}</text>
-          <text class="journey-summary-time">{{ point.text }}</text>
-          <svg class="journey-summary-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="icons[point.key]" /></svg>
-        </view>
-      </view>
-      <view class="journey-summary-durations">
-        <view v-for="segment in segments" :key="segment.key" class="journey-duration" :class="'duration-' + segment.key">
-          <text class="journey-duration-label"><text class="journey-duration-dot" />{{ segment.label }}</text>
-          <text class="journey-duration-value">{{ segment.text }}</text>
-        </view>
-      </view>
-    </template>
-    <template v-else>
+  <view class="parcel-journey" :class="{ 'journey-collapsed': collapsed, 'journey-driving': driving, 'journey-reduced': reducedMotion }" role="group" aria-label="包裹时间进度">
+    <view class="journey-road-region" :aria-hidden="collapsed ? 'true' : null"><view class="journey-region-inner">
       <view class="journey-road-scene">
-      <svg class="journey-road-map" viewBox="0 0 390 190" preserveAspectRatio="none" fill="none" role="img" :aria-label="roadSegments.map(segment => segment.label + '：' + segment.text).join('，')">
-        <defs>
-          <linearGradient :id="roadId + '-surface'" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bdcad6" /><stop offset="1" stop-color="#97aaba" /></linearGradient>
-          <path v-for="(segment, index) in roadSegments" :id="roadId + '-' + segment.key" :key="segment.key" :d="'M' + coordinates(curves[index][0]) + ' ' + command(curves[index])" />
-        </defs>
-        <g transform="translate(0,49)">
-        <g class="journey-map-blocks" stroke="#f9fcff" stroke-width=".55" stroke-dasharray="1 1">
-          <path d="M3 43 19 29 45 32 57 44 40 49Z M62 28 88 18 98 25 80 40 66 37Z M103 33 122 21 145 28 143 43 122 45Z M151 23 175 17 187 29 178 41 155 41Z M194 32 215 21 235 28 226 45 210 43Z M250 23 267 19 278 31 265 43 251 39Z M290 33 315 20 326 27 319 40 299 45Z M335 34 360 23 374 30 371 42 349 47Z" />
-        </g>
-        </g>
-        <g transform="translate(0,68)">
-          <path class="journey-road-shadow" :d="roadPath" stroke-width="44" transform="translate(0,2)" />
-          <path class="journey-road-edge" :d="roadPath" stroke-width="42" />
-          <path class="journey-road-surface" :d="roadPath" :stroke="'url(#' + roadId + '-surface)'" stroke-width="38" />
-          <path v-if="progressPath" class="journey-progress" :d="progressPath" stroke-width="38" />
-          <path class="journey-road-lane" :d="roadPath" stroke-width="1.2" stroke-dasharray="7 6" />
-        </g>
-        <g v-for="segment in roadSegments" :key="segment.key" class="journey-road-interval">
-          <!-- Keep SVG text native: uni-app compiles a literal text tag to uni-text. -->
-          <component :is="'text'" class="journey-road-duration" :class="{ 'journey-road-duration-long': segment.text.length > 8 }" transform="translate(0,82)" text-anchor="middle"><textPath :href="'#' + roadId + '-' + segment.key" startOffset="50%">{{ segment.text }}</textPath></component>
-          <component :is="'text'" class="journey-road-label" transform="translate(0,110)" text-anchor="middle"><textPath :href="'#' + roadId + '-' + segment.key" startOffset="50%">{{ segment.label }}</textPath></component>
-        </g>
-      </svg>
-      <view v-if="activeIndex >= 0" :key="activeIndex" class="journey-car-position" :class="{ 'journey-car-complete': journey.completed }" :style="carStyle">
-        <view class="journey-car-body">
-          <image class="journey-car" src="/static/images/parcel-journey-car.png" mode="aspectFit" aria-hidden="true" />
-          <text v-if="journey.carrier" class="journey-carrier" :aria-label="'承运商 ' + journey.carrier">{{ journey.carrier }}</text>
-        </view>
+        <svg class="journey-road-map" viewBox="0 0 2320 1200" fill="none" role="img" :aria-label="roadSegments.map(s => s.label + '：' + s.text).join('，')">
+          <defs>
+            <path v-for="(path, index) in paintPaths" :id="roadId + '-paint-' + index" :key="index" :d="path" />
+            <pattern :id="roadId + '-grain'" width="31" height="23" patternUnits="userSpaceOnUse"><rect width="31" height="23" fill="white" /><circle cx="3" cy="7" r="2" fill="#888" /><circle cx="21" cy="18" r="1.4" fill="#777" /><path d="M12 1h3v2h-3zM25 9h2v3h-2z" fill="#bbb" /></pattern>
+            <mask :id="roadId + '-ink'" maskUnits="userSpaceOnUse" x="0" y="800" width="2320" height="230"><rect y="800" width="2320" height="230" :fill="'url(#' + roadId + '-grain)'" /></mask>
+            <clipPath :id="roadId + '-progress'" clipPathUnits="userSpaceOnUse"><rect :key="'clip-' + motionSerial" class="journey-progress-window" width="2320" height="1200" :style="progressStyle" /></clipPath>
+            <clipPath v-for="(segment, index) in roadSegments" :id="roadId + '-reveal-' + index" :key="segment.key" clipPathUnits="userSpaceOnUse"><rect :key="motionSerial + '-' + segment.text" :class="{ 'journey-paint-reveal': paintAnimate }" :x="[0, 810, 1510][index]" y="800" :width="[840, 730, 810][index]" height="260" :style="{ transformOrigin: [0, 810, 1510][index] + 'px 0px' }" /></clipPath>
+          </defs>
+          <component :is="'image'" :href="asset('route/map.png')" x="0" y="0" width="2320" height="801" />
+          <component :is="'image'" class="journey-road-surface" :href="asset('route/road.png')" x="0" y="733" width="2320" height="283" />
+          <component :is="'image'" :href="asset('route/lane-marks.png')" x="23" y="796" width="2250" height="53" />
+          <g v-if="progress >= 0" :clip-path="'url(#' + roadId + '-progress)'">
+            <path class="journey-progress" d="M45 970 C330 956 610 973 844 984 S1280 977 1474 979 S1900 1005 2290 986" stroke="#318bd1" stroke-width="13" stroke-linecap="round" />
+            <path d="M45 967 C330 953 610 970 844 981 S1280 974 1474 976 S1900 1002 2290 983" stroke="#8ed4ee" stroke-width="4" stroke-linecap="round" />
+          </g>
+          <g v-for="(point, index) in points" :key="point.key" class="journey-stage" :class="pointClass(point, index)" :aria-label="point.label + '，' + (lit(point, index) ? '已到达' : '未到达') + '，' + point.text">
+            <component :is="'image'" :href="asset('stations/contact-shadow.png')" :x="stations[index].x + 31" :y="stations[index].y + 594" width="330" height="48" />
+            <component :is="'image'" :href="asset('stations/gray.png')" :x="stations[index].x" :y="stations[index].y" width="386" height="628" />
+            <component :is="'image'" class="journey-station-color" :class="{ lit: lit(point, index) }" :href="asset('stations/' + (index === 0 ? 'blue' : 'green') + '.png')" :x="stations[index].x" :y="stations[index].y" width="386" height="628" />
+            <component :is="'text'" class="journey-stage-label" :x="stations[index].x + 193" :y="stations[index].y + 168" dominant-baseline="central" text-anchor="middle">{{ point.label }}</component>
+            <g :key="point.key + '-' + lit(point, index) + '-' + point.text" class="journey-stage-time" :class="{ 'journey-time-reveal': paintAnimate && lit(point, index) }">
+              <component :is="'text'" v-for="(line, lineIndex) in signTime(point, index)" :key="lineIndex" :x="stations[index].x + 193" :y="stations[index].y + (signTime(point, index).length === 1 ? 316 : 278 + lineIndex * 75)" dominant-baseline="central" text-anchor="middle">{{ line }}</component>
+            </g>
+          </g>
+          <g v-for="(segment, index) in roadSegments" :key="segment.key" class="journey-road-interval">
+            <g :key="segment.text" :clip-path="paintAnimate ? 'url(#' + roadId + '-reveal-' + index + ')' : null">
+              <component :is="'text'" class="journey-road-duration" :class="{ 'journey-road-duration-long': segment.text.length > 9 }" transform="translate(130,137) skewX(-8) scale(1,.85)" :mask="'url(#' + roadId + '-ink)'" text-anchor="middle"><textPath :href="'#' + roadId + '-paint-' + index" startOffset="50%" :textLength="segment.text.length > 9 ? 590 : null" lengthAdjust="spacingAndGlyphs">{{ segment.text }}</textPath></component>
+            </g>
+            <component :is="'text'" class="journey-road-label" :x="[490, 1162, 1850][index]" y="1115" dominant-baseline="central" text-anchor="middle">{{ segment.label }}</component>
+          </g>
+          <g v-if="progress >= 0" :key="'car-' + motionSerial" class="journey-car-position" :style="carStyle">
+            <component :is="'image'" :href="asset('vehicle/contact-shadow.png')" x="-212" y="-13" width="425" height="45" />
+            <g transform="translate(-216,-187) scale(.931)">
+              <g class="journey-trailer">
+                <component :is="'image'" :href="asset('vehicle/empty-trailer.png')" x="0" y="89" width="215" height="112" />
+                <component :is="'image'" class="journey-parcel" :href="asset('vehicle/parcel.png')" x="20" y="14" width="156" height="100" />
+                <g transform="translate(75,164)"><g class="journey-wheel-spin"><path d="M-13 0H13M0-13V13" stroke="#d9d5cc" stroke-width="4" opacity=".65" /></g></g>
+              </g>
+              <component :is="'image'" class="journey-car" :href="asset('vehicle/car.png')" x="215" y="0" width="249" height="201" />
+              <g v-for="x in [263, 407]" :key="x" :transform="'translate(' + x + ',163)'" ><g class="journey-wheel-spin"><path d="M-13 0H13M0-13V13" stroke="#d9d5cc" stroke-width="4" opacity=".65" /></g></g>
+            </g>
+            <g v-if="journey.carrier" class="journey-carrier" :aria-label="'承运商 ' + journey.carrier"><rect x="-142" y="-250" width="284" height="60" rx="22" fill="#f8fbff" stroke="#91aec8" stroke-width="6" /><component :is="'text'" x="0" y="-218" dominant-baseline="central" text-anchor="middle" :font-size="journey.carrier.length > 5 ? 40 : 48">{{ journey.carrier }}</component></g>
+          </g>
+        </svg>
       </view>
-      <view v-for="(point, index) in points" :key="point.key" class="journey-stage" :class="pointClass(point)" :style="{ left: positions[index].x / 390 * 100 + '%', height: (positions[index].y + 47) / 190 * 100 + '%' }" :aria-label="point.label + '，' + (point.state === 'pending' ? '未到达' : '已到达') + '，' + point.text">
-        <view class="journey-sign-post" aria-hidden="true" />
-        <view class="journey-sign-foot" aria-hidden="true" />
-        <text class="journey-stage-label">{{ point.label }}</text>
-        <view class="journey-stage-time"><text v-for="(line, lineIndex) in signTime(point)" :key="lineIndex">{{ line }}</text></view>
-      </view>
-      </view>
-    </template>
+    </view></view>
+    <view class="journey-summary-region" :aria-hidden="!collapsed ? 'true' : null"><view class="journey-region-inner"><view class="journey-summary">
+      <view class="journey-time-grid"><view v-for="(point, index) in points" :key="point.key" class="journey-time-block" :class="pointClass(point, index)"><text class="journey-summary-label">{{ point.label }}</text><text class="journey-summary-time">{{ point.at ? point.text : '—' }}</text></view></view>
+      <view class="journey-summary-durations"><view v-for="segment in roadSegments" :key="segment.key" class="journey-duration"><text class="journey-duration-label">{{ segment.label }}</text><text class="journey-duration-value">{{ segment.value }}</text></view></view>
+    </view></view></view>
   </view>
 </template>
 
 <script>
 import { parcelJourneyProgress, parcelJourneySegments } from '@/services/parcel-journey.js';
 const stages = [{ key: 'order', label: '下单' }, { key: 'ship', label: '发货' }, { key: 'arrival', label: '到货' }, { key: 'pickup', label: '取件' }];
-const durations = [{ key: 'waiting', label: '待发货' }, { key: 'transit', label: '运输' }, { key: 'pickup', label: '待取' }];
-const positions = [{ x: 34, y: 61 }, { x: 141, y: 65 }, { x: 248, y: 58 }, { x: 356, y: 66 }];
-const curves = [
-  [positions[0], { x: 80, y: 60 }, { x: 109, y: 63 }, positions[1]],
-  [positions[1], { x: 173, y: 67 }, { x: 208, y: 65 }, positions[2]],
-  [positions[2], { x: 288, y: 51 }, { x: 316, y: 69 }, positions[3]]
-];
-const mix = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-const coordinates = point => `${Number(point.x.toFixed(3))} ${Number(point.y.toFixed(3))}`;
-const command = curve => `C${curve.slice(1).map(coordinates).join(' ')}`;
-let nextRoadId = 0;
-function partialCurve(curve, t) {
-  const a = mix(curve[0], curve[1], t), b = mix(curve[1], curve[2], t), c = mix(curve[2], curve[3], t);
-  const d = mix(a, b, t), e = mix(b, c, t);
-  return [curve[0], a, d, mix(d, e, t)];
-}
+const stations = [{ x: 35, y: 131 }, { x: 651, y: 141 }, { x: 1281, y: 128 }, { x: 1891, y: 144 }];
+const positions = [{ x: 228, y: 800 }, { x: 844, y: 822 }, { x: 1474, y: 815 }, { x: 2084, y: 837 }];
+const paintPaths = ['M150 913 Q490 918 825 930', 'M850 941 Q1150 946 1480 929', 'M1520 932 Q1850 958 2190 950'];
+const ease = value => value * value * (3 - 2 * value);
 function curvePosition(value) {
-  const index = Math.min(2, Math.floor(value));
-  return partialCurve(curves[index], value - index).at(-1);
+  const segment = Math.min(2, Math.max(0, Math.floor(value))), t = Math.max(0, value - segment);
+  const a = positions[segment], b = positions[segment + 1];
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * ease(t) + (segment === 1 ? Math.sin(t * Math.PI) * 5 : 0) };
 }
-// All mounted road cards share one minute timer; summary cards need no clock.
 const clockListeners = new Set();
-let clockTimer;
+let clockTimer, nextRoadId = 0;
 function subscribeClock(listener) {
   clockListeners.add(listener);
-  if (clockTimer === undefined) clockTimer = setInterval(() => {
-    const now = Date.now();
-    clockListeners.forEach(update => update(now));
-  }, 60000);
-  return () => {
-    clockListeners.delete(listener);
-    if (!clockListeners.size && clockTimer !== undefined) { clearInterval(clockTimer); clockTimer = undefined; }
-  };
+  if (clockTimer === undefined) clockTimer = setInterval(() => { const now = Date.now(); clockListeners.forEach(update => update(now)); }, 60000);
+  return () => { clockListeners.delete(listener); if (!clockListeners.size && clockTimer !== undefined) { clearInterval(clockTimer); clockTimer = undefined; } };
 }
-const icons = {
-  order: 'M6 3h12v18l-3-2-3 2-3-2-3 2V3Zm3 4h6M9 11h6M9 15h4',
-  ship: 'M3 5h12v12H3V5Zm12 5h4l3 4v3h-7M16 10v4h6M8 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0Zm12 0a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z',
-  arrival: 'M5 10v10h14V10M3 10l3-6h12l3 6c0 3-4 3-5 0-1 3-7 3-8 0-1 3-5 3-5 0ZM9 20v-5h6v5',
-  pickup: 'M10 2h8v7h-8V2Zm4 0v3M3 16h4l3-3h6c2 0 2 3 0 3h-4M16 16l4-3c2-1 4 1 2 3l-7 5H8l-3-1H2v-4'
-};
 export default {
   props: { journey: { type: Object, default: () => ({}) }, mode: { type: String, default: 'road' } },
-  data: () => ({ clockNow: Date.now(), stopClock: null, roadId: `parcel-road-${++nextRoadId}` }),
-  mounted() { this.syncClock(); },
-  beforeUnmount() { this.stopClock?.(); },
-  watch: { clockNeeded() { this.syncClock(); } },
-  computed: {
-    positions() { return positions; },
-    curves() { return curves; },
-    icons() { return icons; },
-    roadPath() { return `M-8 61 C6 61 21 61 34 61 ${curves.map(command).join(' ')} C370 66 384 65 398 65`; },
-    points() {
-      const values = Array.isArray(this.journey.points) ? this.journey.points : [];
-      return stages.map(stage => {
-        const value = values.find(point => point && point.key === stage.key) || {};
-        return { ...stage, ...value, text: value.text || (stage.key === 'pickup' ? '待取件' : '待获取'), state: ['done', 'current'].includes(value.state) ? value.state : 'pending' };
-      });
-    },
-    segments() {
-      const values = Array.isArray(this.journey.segments) ? this.journey.segments : [];
-      return durations.map(segment => {
-        const value = values.find(item => item && item.key === segment.key) || {};
-        return { ...segment, ...value, text: value.text || '—' };
-      });
-    },
-    roadSegments() {
-      return parcelJourneySegments(this.journey, this.clockNow).map((segment, index) => {
-        const text = /[天时]/.test(segment.text) ? segment.text.replace(/\d+分$/, '') : segment.text;
-        return { ...segment, label: ['发货时间', '运输时间', '取件时间'][index], text: (segment.ongoing && text !== '—' ? '已用' : '') + text };
-      });
-    },
-    activeIndex() { const index = this.journey.currentIndex; return Number.isInteger(index) && index >= 0 && index < 4 ? index : -1; },
-    clockNeeded() { return this.mode === 'road' && !this.journey.completed && this.activeIndex >= 0 && this.activeIndex < 3; },
-    progress() { return parcelJourneyProgress(this.journey, this.clockNow); },
-    progressPath() {
-      if (this.progress <= 0) return '';
-      const index = Math.floor(this.progress), complete = curves.slice(0, index).map(command);
-      if (index < 3 && this.progress > index) complete.push(command(partialCurve(curves[index], this.progress - index)));
-      return `M${coordinates(positions[0])} ${complete.join(' ')}`;
-    },
-    carStyle() {
-      if (this.progress < 0) return {};
-      const point = curvePosition(this.progress);
-      // Wheel contacts sit inside the upper lane, 8 units above its divider.
-      return { left: point.x / 390 * 100 + '%', top: (point.y + 60) / 190 * 100 + '%' };
+  emits: ['settled'],
+  data() {
+    const progress = parcelJourneyProgress(this.journey);
+    return { clockNow: Date.now(), stopClock: null, roadId: `parcel-road-${++nextRoadId}`, progress,
+      reached: Math.floor(progress), collapsed: this.mode === 'summary' || !!this.journey.completed,
+      driving: false, paintAnimate: false, motionSerial: 0, motionFrom: progress, motionTo: progress, motionStarted: 0,
+      reducedMotion: false, timers: [], motionQuery: null, motionListener: null };
+  },
+  mounted() {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      this.motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+      this.reducedMotion = this.motionQuery.matches;
+      this.motionListener = event => { this.reducedMotion = event.matches; if (event.matches) this.snap(); };
+      this.motionQuery.addEventListener?.('change', this.motionListener);
     }
+    this.syncClock();
+  },
+  beforeUnmount() { this.cancelMotion(); this.stopClock?.(); this.motionQuery?.removeEventListener?.('change', this.motionListener); },
+  watch: {
+    eventStamp() { this.updateJourney(); },
+    clockNeeded() { this.syncClock(); },
+  },
+  computed: {
+    stations() { return stations; }, paintPaths() { return paintPaths; },
+    points() { return stages.map(stage => ({ ...stage, state: 'pending', at: null, text: '—', ...(this.journey.points || []).find(point => point?.key === stage.key) })); },
+    eventStamp() { return [this.journey.currentIndex, this.journey.completed, ...this.points.map(point => point.at)].join('|'); },
+    clockNeeded() { return !this.journey.completed && this.mode !== 'summary' && this.journey.currentIndex >= 0 && this.journey.currentIndex < 3; },
+    roadSegments() { return parcelJourneySegments(this.journey, this.clockNow).map((segment, index) => ({ ...segment, label: ['发货时间', '运输时间', '取件时间'][index], value: segment.text, text: segment.text === '—' ? '—' : '已用' + segment.text })); },
+    motionSamples() { return [0, .2, .4, .6, .8, 1].map(t => curvePosition(this.motionFrom + (this.motionTo - this.motionFrom) * ease(t))); },
+    carStyle() {
+      const target = curvePosition(Math.max(0, this.progress)), style = { transform: `translate(${target.x}px,${target.y}px)` };
+      this.motionSamples.forEach((point, index) => { style[`--drive-${index}`] = `translate(${point.x}px,${point.y}px)`; });
+      return style;
+    },
+    progressStyle() {
+      const scale = point => Math.max(0, point.x - 200) / 2320;
+      const style = { transform: `scaleX(${scale(curvePosition(Math.max(0, this.progress)))})` };
+      this.motionSamples.forEach((point, index) => { style[`--trail-${index}`] = `scaleX(${scale(point)})`; });
+      return style;
+    },
   },
   methods: {
-    coordinates,
-    command,
-    signTime(point) { return point.at ? point.text.split(' ') : ['—']; },
-    syncClock() {
-      this.stopClock?.(); this.stopClock = null;
-      if (this.clockNeeded) { this.clockNow = Date.now(); this.stopClock = subscribeClock(now => { this.clockNow = now; }); }
+    asset(file) { return '/static/images/parcel-journey/' + file; },
+    lit(point, index) { return point.state !== 'pending' && (!this.driving || index <= this.reached); },
+    pointClass(point, index) { return { 'journey-point-pending': !this.lit(point, index), 'journey-point-teal': this.lit(point, index) && index > 0 }; },
+    signTime(point, index) { return point.at && this.lit(point, index) ? String(point.text).split(' ') : ['—']; },
+    later(callback, delay) { const timer = setTimeout(callback, delay); this.timers.push(timer); },
+    cancelMotion() { this.timers.forEach(clearTimeout); this.timers = []; this.driving = false; this.paintAnimate = false; },
+    snap() { this.cancelMotion(); this.progress = parcelJourneyProgress(this.journey); this.reached = Math.floor(this.progress); this.collapsed = this.mode === 'summary' || !!this.journey.completed; },
+    updateJourney() {
+      const target = parcelJourneyProgress(this.journey), previous = this.progress;
+      this.clockNow = Date.now();
+      if (target === previous) return;
+      const elapsed = Math.min(1, Math.max(0, (Date.now() - this.motionStarted) / 1000));
+      const from = this.driving ? this.motionFrom + (this.motionTo - this.motionFrom) * ease(elapsed) : previous;
+      this.cancelMotion(); this.clockNow = Date.now();
+      if (this.reducedMotion || (typeof document !== 'undefined' && document.hidden) || from < 0 || target <= previous || (this.mode === 'summary' && !this.journey.completed)) { this.snap(); return; }
+      this.collapsed = false; this.motionFrom = from; this.motionTo = target; this.motionStarted = Date.now();
+      this.progress = target; this.reached = Math.floor(from); this.motionSerial++; this.driving = true; this.paintAnimate = true;
+      for (let stage = Math.floor(from) + 1; stage <= Math.floor(target); stage++) {
+        let fraction = 0; while (fraction < 1 && from + (target - from) * ease(fraction) < stage) fraction += .01;
+        this.later(() => { this.reached = stage; }, Math.min(1000, Math.ceil(fraction * 1000)));
+      }
+      this.later(() => { this.driving = false; this.reached = Math.floor(target); }, 1000);
+      if (this.journey.completed) this.later(() => { this.collapsed = true; this.later(() => this.$emit('settled'), 350); }, 1800);
+      this.later(() => { this.paintAnimate = false; }, 2150);
     },
-    pointClass(point) { return { 'journey-point-pending': point.state === 'pending', 'journey-point-teal': point.state === 'current' || point.key === 'pickup' && point.state === 'done' }; }
-  }
+    syncClock() { this.stopClock?.(); this.stopClock = null; if (this.clockNeeded) { this.clockNow = Date.now(); this.stopClock = subscribeClock(now => { this.clockNow = now; }); } },
+  },
 };
 </script>
 
 <style scoped lang="scss">
-.parcel-journey{position:relative;width:100%;min-width:0;box-sizing:border-box;color:#24394f;font-variant-numeric:tabular-nums;}
-.journey-road{height:190px;min-height:190px;}
-.journey-road-scene{position:absolute;inset:0;}
-.journey-road-map{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;}
-.journey-map-blocks{fill:#dbe5ed;opacity:.46;}
-.journey-road-shadow{stroke:#9eb2c6;opacity:.3;}.journey-road-edge{stroke:#f5f8fc;}.journey-road-lane{stroke:#fff;}
-.journey-progress{stroke:#397cbb;opacity:.36;}
-.journey-road-duration{fill:#fff;font-size:14px;font-weight:750;paint-order:stroke;stroke:#536f89;stroke-width:.45px;}.journey-road-duration-long{font-size:12px;}
-.journey-road-label{fill:#455e7a;font-size:14px;font-weight:700;}
-.journey-stage{position:absolute;top:0;transform:translateX(-50%);width:16%;max-width:62px;text-align:center;}
-.journey-sign-post{position:absolute;top:3px;bottom:2px;left:50%;transform:translateX(-50%);width:6px;border:1px solid #9eaab7;border-radius:3px;background:linear-gradient(90deg,#7e8c9a,#f4f7fa 43%,#a4afba 74%,#758291);box-shadow:1px 0 1px #ffffffbf;}
-.journey-sign-foot{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:16px;height:5px;border:1px solid #99a6b3;border-radius:50% / 35%;background:linear-gradient(90deg,#9daab6,#eef3f8 45%,#8c9ba8);box-shadow:1px 2px 2px #50677933;}
-.journey-stage-label,.journey-stage-time{position:relative;box-sizing:border-box;display:flex;align-items:center;justify-content:center;white-space:nowrap;border:1px solid #899eb4;box-shadow:inset 0 0 0 1px #f5f9ffbf,0 2px 1px #7790ab45;}
-.journey-stage-label{height:26px;margin-top:8px;border-radius:8px;background:linear-gradient(#4b8cd9 0%,#1b68bf 32%,#1253a8 76%,#2d71ba);font-size:14px;font-weight:750;line-height:1.2;color:#fff;text-shadow:0 1px 1px #173d70;}
-.journey-stage-time{flex-direction:column;min-height:29px;margin:3px 2px 0;border-radius:7px;background:linear-gradient(135deg,#fff,#e2e8f0);font-size:11px;font-weight:700;line-height:13px;color:#19477e;}
-.journey-stage-time>text{display:block;}
-.journey-point-pending .journey-stage-label{background:linear-gradient(#a4aab2,#7b8590 40%,#66717d);border-color:#949da6;color:#f5f6f7;text-shadow:0 1px 1px #555e68;}
-.journey-point-pending .journey-stage-time{background:linear-gradient(135deg,#f5f5f5,#dedfe1);border-color:#a8adb2;color:#717981;box-shadow:inset 0 0 0 1px #ffffffb3,0 2px 1px #7d879140;}
-.journey-point-teal .journey-stage-label{background:linear-gradient(#62b8a8,#278f81 35%,#177667 78%,#3a9e8b);border-color:#7eaaa2;text-shadow:0 1px 1px #185d51;}
-.journey-point-teal .journey-stage-time{border-color:#91b6ab;background:linear-gradient(135deg,#f8fffc,#deeee8);color:#146d60;}
-.journey-car-position{position:absolute;z-index:1;width:17%;max-width:72px;aspect-ratio:264/112;transform:translate(-50%,-100%);animation:journey-car-enter .8s cubic-bezier(.2,.65,.25,1) both;pointer-events:none;}
-.journey-car-body{position:relative;width:100%;height:100%;transform-origin:50% 85%;animation:journey-car-rock .8s ease-in-out .8s 4;}
-.journey-car{display:block;width:100%;height:100%;}
-.journey-carrier{position:absolute;top:-17px;left:50%;transform:translateX(-50%);box-sizing:border-box;width:max-content;max-width:calc(100% + 10px);padding:0 3px;border:1px solid #9fb4c9;border-radius:5px;background:#f5f9fff5;box-shadow:0 1px 2px #526d8530;color:#21516d;font-size:10px;font-weight:650;line-height:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.journey-car-complete .journey-car-body{animation:none;}
-@keyframes journey-car-enter{from{opacity:0;transform:translate(calc(-50% - 22px),calc(-100% + 3px));}to{opacity:1;transform:translate(-50%,-100%);}}
-@keyframes journey-car-rock{0%,100%{transform:translateY(0) rotate(0);}30%{transform:translateY(-1.2px) rotate(-1.5deg);}65%{transform:translateY(.5px) rotate(1deg);}}
-.journey-summary{padding-top:7px;border-top:1px solid #c5d6e9;}
-.journey-time-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}
-.journey-time-block{position:relative;min-width:0;box-sizing:border-box;min-height:38px;padding:2px 10px;border:1px solid #d1e1f2;border-radius:8px;background:#f9fbffe0;box-shadow:inset 0 0 0 1px #ffffffc4;}
-.journey-summary-label,.journey-summary-time{display:block;line-height:16px;white-space:nowrap;}
-.journey-summary-label{font-weight:700;font-size:12px;color:#20354d;}.journey-summary-time{font-size:12px;color:#526b88;}
-.journey-summary-icon{position:absolute;right:12px;top:10px;width:16px;height:16px;color:#506e90;}
-.journey-time-block.journey-point-pending .journey-summary-time{color:#8292a6;}
-.journey-time-block.journey-point-teal{border-color:#94ddd0;background:linear-gradient(120deg,#ecfcf7dc,#d8f4eceb);}
-.journey-point-teal .journey-summary-label,.journey-point-teal .journey-summary-time,.journey-point-teal .journey-summary-icon{color:#087e70;}
-.journey-summary-durations{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:6px;padding-top:4px;border-top:1px solid #c8d9ea;}
-.journey-duration{text-align:center;min-width:0;}.journey-duration-label,.journey-duration-value{display:block;white-space:nowrap;line-height:15px;font-size:11px;}
-.journey-duration-label{font-weight:600;color:#405b77;}.journey-duration-value{color:#546f8e;}
-.journey-duration-dot{display:inline-block;width:5px;height:5px;border-radius:1.5px;background:#9cb4d0;margin-right:4px;vertical-align:1px;}
-.duration-transit .journey-duration-dot{background:#237efa;}.duration-pickup .journey-duration-dot{background:#43b6a6;}
-@media(prefers-reduced-motion:reduce){.journey-car-position,.journey-car-body{animation:none;}}
-@media(forced-colors:active){.journey-road-surface{stroke:CanvasText;}.journey-progress{stroke:Highlight;}.journey-road-duration{fill:Canvas;stroke:none;}.journey-road-label{fill:CanvasText;}.journey-stage-label,.journey-stage-time,.journey-time-block{border-color:ButtonBorder;color:CanvasText;background:Canvas;text-shadow:none;}.journey-point-pending .journey-stage-label,.journey-point-pending .journey-stage-time{color:GrayText;}.journey-map-blocks{opacity:.2;}}
+.parcel-journey{position:relative;width:100%;min-width:0;color:#193d5a;font-variant-numeric:tabular-nums;}
+.journey-road-region,.journey-summary-region{display:grid;transition:grid-template-rows .35s ease,opacity .3s ease;}
+.journey-road-region{grid-template-rows:1fr;opacity:1;}.journey-summary-region{grid-template-rows:0fr;opacity:0;}
+.journey-collapsed .journey-road-region{grid-template-rows:0fr;opacity:0;}.journey-collapsed .journey-summary-region{grid-template-rows:1fr;opacity:1;}
+.journey-region-inner{min-height:0;overflow:hidden;}.journey-road-scene{position:relative;aspect-ratio:2320/1200;width:100%;}.journey-road-map{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;}
+.journey-stage-label{fill:#fff;font-size:100px;font-weight:750;}.journey-stage-time{fill:#173c56;font-size:83px;font-weight:750;}
+.journey-station-color{opacity:0;transition:opacity .25s ease;}.journey-station-color.lit{opacity:1;}.journey-point-pending .journey-stage-time{fill:#53636e;}
+.journey-road-duration{fill:#fff5df;font-size:89px;font-weight:850;font-style:italic;letter-spacing:1px;}.journey-road-duration-long{font-size:78px;}
+.journey-road-label{fill:#294a6b;font-size:86px;font-weight:700;}.journey-carrier{fill:#173f65;font-weight:750;}
+.journey-car-position,.journey-progress-window{transform-origin:0 0;}.journey-driving .journey-car-position{animation:journey-drive 1s linear both;}.journey-driving .journey-progress-window{animation:journey-trail 1s linear both;}
+.journey-driving .journey-wheel-spin{animation:journey-wheel .32s linear infinite;transform-origin:0 0;}.journey-driving .journey-trailer{animation:journey-trailer 1s ease-in-out both;transform-origin:200px 156px;}.journey-driving .journey-parcel{animation:journey-parcel 1s ease-out both;transform-origin:98px 114px;}
+.journey-time-reveal{animation:journey-time .3s ease both;}.journey-paint-reveal{animation:journey-paint .3s ease-out both;}
+@keyframes journey-drive{0%{transform:var(--drive-0);}20%{transform:var(--drive-1);}40%{transform:var(--drive-2);}60%{transform:var(--drive-3);}80%{transform:var(--drive-4);}100%{transform:var(--drive-5);}}
+@keyframes journey-trail{0%{transform:var(--trail-0);}20%{transform:var(--trail-1);}40%{transform:var(--trail-2);}60%{transform:var(--trail-3);}80%{transform:var(--trail-4);}100%{transform:var(--trail-5);}}
+@keyframes journey-wheel{to{transform:rotate(360deg);}}@keyframes journey-trailer{0%,100%{transform:translate(0,0) rotate(0);}20%{transform:translate(-5px,1px) rotate(-1deg);}55%{transform:translate(-2px,-1px) rotate(.6deg);}}
+@keyframes journey-parcel{0%,55%,100%{transform:rotate(0);}16%{transform:rotate(-5deg);}34%{transform:rotate(2deg);}}
+@keyframes journey-time{from{opacity:0;}to{opacity:1;}}@keyframes journey-paint{from{transform:scaleX(0);}to{transform:scaleX(1);}}
+.journey-summary{padding-top:7px;border-top:1px solid #c5d6e9;}.journey-time-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}.journey-time-block{box-sizing:border-box;min-width:0;padding:5px 10px;border:1px solid #d1e1f2;border-radius:8px;background:#f9fbffe0;}.journey-summary-label,.journey-summary-time{display:block;font-size:12px;line-height:17px;white-space:nowrap;}.journey-summary-label{font-weight:700;}.journey-summary-time{color:#526b88;}.journey-point-teal.journey-time-block{border-color:#a1cec3;background:#eaf5ef;}.journey-point-pending .journey-summary-time{color:#8292a6;}.journey-summary-durations{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:6px 0 2px;gap:3px;}.journey-duration{text-align:center;min-width:0;}.journey-duration-label,.journey-duration-value{display:block;font-size:11px;line-height:16px;}.journey-duration-label{font-weight:650;color:#405b77;}.journey-duration-value{color:#546f8e;}
+.journey-reduced .journey-road-region,.journey-reduced .journey-summary-region{transition:none;}
+@media(prefers-reduced-motion:reduce){.journey-road-region,.journey-summary-region,.journey-station-color{transition:none;}.journey-car-position,.journey-progress-window,.journey-wheel-spin,.journey-trailer,.journey-parcel,.journey-time-reveal,.journey-paint-reveal{animation:none!important;}}
+@media(forced-colors:active){.journey-stage-label{stroke:#000;stroke-width:2px;}.journey-summary,.journey-time-block{border-color:ButtonBorder;color:CanvasText;background:Canvas;}}
 </style>

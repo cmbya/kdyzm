@@ -49,7 +49,7 @@
           <view class="card-header sf-surface" @click="toggleCompletedSection(section)">
             <view class="card-title"><uni-icons v-if="pickupGrouping === 'station'" type="location" size="16" color="#2469ed" /><text>{{ section.label }}</text></view>
             <view class="header-right">
-              <text v-if="getPendingCount(section.addresses)" class="card-extra">
+              <text v-if="getPendingCount(section.addresses) || hasJourneyCompletion(section.addresses)" class="card-extra">
                 <text class="pending-count">{{ getPendingCount(section.addresses) }}</text>
                 <text>件待取</text>
               </text>
@@ -78,7 +78,7 @@
               </view>
             </view>
           </view>
-          <view class="code-list" v-if="getPendingCount(section.addresses) || expandedGroups[section.key]">
+          <view class="code-list" v-if="getPendingCount(section.addresses) || expandedGroups[section.key] || hasJourneyCompletion(section.addresses)">
             <!-- 按地址分组显示 -->
             <view 
               v-for="(items, address) in visibleAddresses(section.addresses, expandedGroups[section.key])"
@@ -179,7 +179,7 @@
                 <view v-if="pickupJourneys[item.id]?.length" class="pickup-journeys" @click.stop="showSource(item)">
                   <view v-for="(entry, journeyIndex) in pickupJourneys[item.id]" :key="entry.id" class="pickup-journey">
                     <text v-if="pickupJourneys[item.id].length > 1" class="journey-parcel-label">包裹 {{ journeyIndex + 1 }} · {{ entry.title }}</text>
-                    <ParcelJourney :journey="entry.journey" :mode="entry.journey.completed ? 'summary' : 'road'" />
+                    <ParcelJourney :journey="entry.journey" />
                   </view>
                 </view>
                 <view class="pickup-detail-block">
@@ -249,10 +249,10 @@
 import yizhanIcon from '@/static/yizhan.png';
 import PickupDetail from '@/components/PickupDetail.vue';
 import ParcelJourney from '@/components/ParcelJourney.vue';
-import { parcelJourney } from '@/services/parcel-journey.js';
+import { parcelJourney, JOURNEY_COMPLETION_MS } from '@/services/parcel-journey.js';
 import StationChooser from '@/components/StationChooser.vue';
 import { getSnapshot, getSyncStatus, mutate, refreshAll, refreshOnline as refreshOnlineOrders, syncOnline } from '@/services/assistant.js';
-import { pendingCount, visibleAddresses, reconcileExpandedDates } from '@/services/pickup-groups.js';
+import { pendingCount, reconcileExpandedDates } from '@/services/pickup-groups.js';
 import { groupCodesByStation, pickupCabinet, pickupSections, reconcileExpandedStations } from '@/services/station-presentation.js';
 import { shouldArchivePackage } from '@/core/package-presentation.js';
 import { pickupMatchSummary } from '@/services/pickup-matching-view.js';
@@ -265,7 +265,7 @@ const reviewNoticeIcon = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns=
 export default {
   components: { ParcelJourney, PickupDetail, StationChooser },
   data() {
-    return { sourceOpen: false, expandedTitles: {}, newCode: '', addingCode: false, packageCodes: [], snapshot: emptySnapshot(), dateShowActions: {}, expandedDates: {}, expandedStations: {}, pickupGrouping: 'station', sourceItem: null, detailRevision: 0, matchingOnOpen: false, yizhanIcon,
+    return { sourceOpen: false, expandedTitles: {}, newCode: '', addingCode: false, packageCodes: [], snapshot: emptySnapshot(), dateShowActions: {}, expandedDates: {}, expandedStations: {}, pickupGrouping: 'station', sourceItem: null, detailRevision: 0, matchingOnOpen: false, journeyCompletions: {}, yizhanIcon,
       hydrated: false, backgroundSyncing: false, scanning: false, syncing: false, confirmingReceiptId: '', refreshProgressText: '更新中', syncMessage: '', syncErrors: { sms: '', online: '' }, pendingPickupId: '', ignoring: null, ignoreReason: '', savingIgnore: false, loadError: '',
       notificationsOpen: false, stationChooserOpen: false, notificationCategory: 'all', expandedReminderId: '', reviewNoticeIcon, notificationDismissals: readNotificationDismissals(),
       reducedMotion: typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches };
@@ -317,7 +317,11 @@ export default {
     groupedCodes() {
       return groupCodesByStation(this.packageCodes);
     },
-    pickupSections() { return pickupSections(this.packageCodes, this.pickupGrouping); },
+    pickupSections() {
+      const live = new Map(this.packageCodes.map(item => [item.id, item]));
+      const placement = this.packageCodes.map(item => this.journeyCompletions[item.id]?.until > Date.now() ? this.journeyCompletions[item.id].card : item);
+      return pickupSections(placement, this.pickupGrouping).map(section => ({ ...section, addresses: Object.fromEntries(Object.entries(section.addresses).map(([address, items]) => [address, items.map(item => live.get(item.id))])) }));
+    },
     expandedGroups() { return Object.assign(Object.create(null), this.pickupGrouping === 'station' ? this.expandedStations : this.expandedDates); },
     receiptDeliveries() {
       return (this.snapshot.packages || []).filter(order => order.source === 'online' && !order.hidden && !shouldArchivePackage(order)).flatMap(order => (order.shipments || []).filter(shipment => shipment.needsReceiptConfirmation && !shipment.picked && !shipment.hidden).map(shipment => ({ order, shipment })));
@@ -325,8 +329,8 @@ export default {
   },
   onLoad(options) { this.pendingPickupId=options?.pickupId || ''; uni.$on('assistant-changed', this.applySnapshot); uni.$on('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.addEventListener('pickcode-open-pickup',this.openPickupIntent); },
   onShow() { this.applySyncStatus(getSyncStatus()); const pending = uni.getStorageSync('pendingPickupId'); if (pending) { this.pendingPickupId = pending; uni.removeStorageSync('pendingPickupId'); } this.loadData(); },
-  onUnload() { uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.removeEventListener('pickcode-open-pickup',this.openPickupIntent); },
-  onHide() { this.closeNotifications(false); this.$refs.stationChooser?.close(); },
+  onUnload() { this.clearJourneyCompletions(); uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.removeEventListener('pickcode-open-pickup',this.openPickupIntent); },
+  onHide() { this.clearJourneyCompletions(); this.closeNotifications(false); this.$refs.stationChooser?.close(); },
   onBackPress() { if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if(this.sourceOpen){this.$refs.sourcePopup.close();return true;} if (this.notificationsOpen) { this.closeNotifications(); return true; } },
   mounted() {
     this.$el?.addEventListener?.('keydown', this.notificationKeyboard);
@@ -334,6 +338,7 @@ export default {
     if (typeof window !== 'undefined') window.addEventListener('popstate', this.notificationPopState);
   },
   beforeUnmount() {
+    this.clearJourneyCompletions();
     this.$el?.removeEventListener?.('keydown', this.notificationKeyboard);
     this.$el?.removeEventListener?.('keyup', this.notificationKeyboard);
     if (typeof window !== 'undefined') window.removeEventListener('popstate', this.notificationPopState);
@@ -342,6 +347,26 @@ export default {
     this._notificationBackResolve?.();
   },
   methods: {
+    clearJourneyCompletions() { clearTimeout(this._journeyCompletionTimer); this._journeyCompletionTimer = null; this.journeyCompletions = {}; },
+    scheduleJourneyCompletions() {
+      clearTimeout(this._journeyCompletionTimer); this._journeyCompletionTimer = null;
+      const deadlines = Object.values(this.journeyCompletions).map(value => value.until);
+      if (deadlines.length) this._journeyCompletionTimer = setTimeout(() => {
+        this.journeyCompletions = Object.fromEntries(Object.entries(this.journeyCompletions).filter(([, value]) => value.until > Date.now()));
+        this.scheduleJourneyCompletions();
+      }, Math.max(0, Math.min(...deadlines) - Date.now()));
+    },
+    retainCompletedJourneys(snapshot) {
+      if (this.onlineBindingKey(snapshot) !== this.onlineBindingKey()) { this.clearJourneyCompletions(); return; }
+      const now = Date.now(), next = new Map((snapshot.codes || []).map(item => [item.id, item])), retained = {};
+      for (const [id, value] of Object.entries(this.journeyCompletions)) if (value.until > now && next.get(id)?.isPicked) retained[id] = value;
+      for (const section of this.pickupSections) for (const previous of Object.values(this.visibleAddresses(section.addresses, this.expandedGroups[section.key])).flat()) {
+        const item = next.get(previous.id);
+        if (!previous.isPicked && item?.isPicked) retained[item.id] = { until: now + JOURNEY_COMPLETION_MS, card: previous };
+      }
+      this.journeyCompletions = retained; this.scheduleJourneyCompletions();
+    },
+    hasJourneyCompletion(group) { return Object.values(group).flat().some(item => this.journeyCompletions[item.id]?.until > Date.now()); },
     notificationTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); },
     completionOutcomeText(entry) {
       const completion = entry.shipment?.pickupCompletion || {};
@@ -457,6 +482,7 @@ export default {
       finally { this.syncing = false; this.refreshProgressText = '更新中'; }
     },
     applySnapshot(snapshot) {
+      this.retainCompletedJourneys(snapshot);
       this.expandedDates = reconcileExpandedDates(this.packageCodes, snapshot.codes, this.expandedDates);
       this.expandedStations = reconcileExpandedStations(this.packageCodes, snapshot.codes, this.expandedStations);
       if (this.onlineBindingKey(snapshot) !== this.onlineBindingKey()) { this.syncErrors.online = ''; this.syncMessage = ''; }
@@ -546,11 +572,13 @@ export default {
       finally { this.savingIgnore = false; }
     },
     getPendingCount: pendingCount,
-    visibleAddresses,
+    visibleAddresses(group, showPicked = false) {
+      return Object.fromEntries(Object.entries(group).map(([address, items]) => [address, items.filter(item => showPicked || (item.pendingCount ?? (item.isPicked ? 0 : 1)) > 0 || this.journeyCompletions[item.id]?.until > Date.now())]).filter(([, items]) => items.length));
+    },
     getPickedCount(group) { return Object.values(group).flat().reduce((n,item)=>n+(item.totalCount || 1)-(item.pendingCount ?? (item.isPicked?0:1)),0); },
     toggleDateHistory(date) { this.handlePageClick(); this.expandedDates[date] = !this.expandedDates[date]; },
     toggleCompletedDate(date, group) { if (!pendingCount(group)) this.toggleDateHistory(date); },
-    setPickupGrouping(mode) { if (!['station', 'time'].includes(mode)) return; this.handlePageClick(); this.pickupGrouping = mode; },
+    setPickupGrouping(mode) { if (!['station', 'time'].includes(mode)) return; this.clearJourneyCompletions(); this.handlePageClick(); this.pickupGrouping = mode; },
     toggleSectionHistory(key) { this.handlePageClick(); const name = this.pickupGrouping === 'station' ? 'expandedStations' : 'expandedDates'; this[name] = { ...this[name], [key]: !Object.hasOwn(this[name], key) || !this[name][key] }; },
     toggleCompletedSection(section) { if (!pendingCount(section.addresses)) this.toggleSectionHistory(section.key); },
     pickupArrivalText(item) {
@@ -601,7 +629,7 @@ export default {
       }});
     },
     isLastItem(item) {
-      return this.pickupSections.some(section=>Object.values(visibleAddresses(section.addresses, this.expandedGroups[section.key])).some(items=>items[items.length-1]===item));
+      return this.pickupSections.some(section=>Object.values(this.visibleAddresses(section.addresses, this.expandedGroups[section.key])).some(items=>items[items.length-1]===item));
     },
     clearInput() { this.newCode=''; },
     handlePageClick() { this.packageCodes.forEach(i=>{i.showActions=false;}); this.dateShowActions={}; }
