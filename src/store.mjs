@@ -8,6 +8,7 @@ import { corroborateTaobaoEventTimes, genericPickupStation, pickupCycleReset, pi
 import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
+import { cookieIdentity } from './cookie-sync.mjs';
 import { retainMilestoneEvents, shippingEvidence } from './shipment-lifecycle.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
@@ -440,6 +441,16 @@ export class Store {
     return row && decryptCookie(row.credential, this.key, id);
   }
   refreshCookie(id, cookie) {
+    const account = this.account(id);
+    let identity;
+    try { identity = cookieIdentity(account.platform, this.cookie(id), false); }
+    catch (error) { if (error.code !== 'COOKIE_IDENTITY_REQUIRED') throw error; }
+    // Legacy manual credentials may lack an identity; rotations must preserve any known identity.
+    if (identity) {
+      let nextIdentity;
+      try { nextIdentity = cookieIdentity(account.platform, cookie); } catch { /* Reject incomplete rotations below. */ }
+      if (nextIdentity !== identity) fail(409, 'ACCOUNT_EXPIRED', '平台登录信息已失效，请重新同步登录信息');
+    }
     this.db.prepare('UPDATE accounts SET credential=? WHERE id=?').run(encryptCookie(cookie, this.key, id), id);
   }
   updateAccount(id, fields) {

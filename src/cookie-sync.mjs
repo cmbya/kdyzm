@@ -230,8 +230,10 @@ export function createCookieSyncHandler({ store, jobs, configuration, now, rate,
       // Legacy credentials without an identity may be paired only by explicit first confirmation.
       if (error.code !== 'COOKIE_IDENTITY_REQUIRED') fail(409, 'COOKIE_BACKEND_IDENTITY_INVALID', '后台登录信息包含无效或冲突的账号标识，请管理员先核对');
     }
-    if ((row.identity_hash && row.identity_hash !== digest) || (existing && identityHash(row.platform, existing) !== digest)
-      || (row.identity_hash && !existing)) fail(409, 'COOKIE_IDENTITY_MISMATCH', '浏览器与已授权账号身份不一致，请核对后台账号并重新配对');
+    if ((row.identity_hash && row.identity_hash !== digest) || (existing && identityHash(row.platform, existing) !== digest)) {
+      fail(409, 'COOKIE_IDENTITY_MISMATCH', '浏览器与已授权账号身份不一致，请核对后台账号并重新配对');
+    }
+    if (row.identity_hash && !existing) fail(409, 'COOKIE_BACKEND_IDENTITY_INVALID', '后台原登录信息的账号标识已失效，请核对账号并重新配对');
     return identity;
   };
   const previewCookie = (row, body, rateKey = row.id) => {

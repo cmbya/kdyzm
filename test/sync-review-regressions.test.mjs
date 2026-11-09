@@ -94,6 +94,44 @@ test('a stale collector cannot overwrite credentials replaced while its request 
   assert.equal(jobs.latest(account.id), null);
 });
 
+for (const [platform, identityName, loginName, aliasName] of [
+  ['taobao', 'unb', 'cookie2', 'unb'],
+  ['pdd', 'pdd_user_id', 'PDDAccessToken', 'pdduid'],
+  ['jd', 'pin', 'thor', 'pt_pin'],
+]) {
+  const identity = `${identityName}=12345678`, login = `${loginName}=SYNTHETIC-ROTATED`;
+  const original = `${identity}; ${loginName}=SYNTHETIC-ORIGINAL`;
+  for (const [name, refreshedCookie, accepted = false] of [
+    ['missing identity', login],
+    ['different identity', `${identityName}=99999999; ${login}`],
+    ['conflicting identity', `${identity}; ${aliasName}=99999999; ${login}`],
+    ['missing login', identity],
+    ['same identity', `${identity}; ${login}`, true],
+  ]) test(`${platform} final cookie rotation: ${name} is checked before importing results`, async t => {
+    const store = new Store({ key: Buffer.alloc(32, 8), now: () => NOW });
+    const account = store.saveAccount({ platform, label: 'fixture', cookie: original }, 'fixture');
+    const importResult = t.mock.method(store, 'importResult'), callbacks = [];
+    const jobs = createSyncJobs({ store, now: () => NOW,
+      onImported: () => callbacks.push('imported'), onCompleted: () => callbacks.push('completed'),
+      collector: async () => ({ refreshedCookie,
+        orders: [{ platformOrderId: 'SYNTHETIC-ORDER' }],
+        shipments: [{ platformOrderId: 'SYNTHETIC-ORDER', waybillNo: 'SYNTHETIC-WAYBILL',
+          logisticsState: 'ok', logisticsCheckedAt: NOW, logisticsEvents: [{ time: NOW - 1000, description: '运输中' }] }],
+      }),
+    });
+    t.after(async () => { await jobs.close(); store.close(); });
+    const job = await jobs.request(account.id).done, snapshot = store.snapshot([account.id]);
+    assert.equal(job.state, accepted ? 'completed' : 'expired');
+    assert.equal(store.account(account.id).status, accepted ? 'ok' : 'expired');
+    assert.equal(store.cookie(account.id), accepted ? refreshedCookie : original);
+    assert.equal(store.account(account.id).credentialVersion, account.credentialVersion);
+    assert.equal(importResult.mock.callCount(), accepted ? 1 : 0);
+    assert.deepEqual(snapshot.orders.map(order => order.platformOrderId), accepted ? ['SYNTHETIC-ORDER'] : []);
+    assert.deepEqual(snapshot.shipments.map(parcel => parcel.waybillNo), accepted ? ['SYNTHETIC-WAYBILL'] : []);
+    assert.deepEqual(callbacks, accepted ? ['imported', 'completed'] : []);
+  });
+}
+
 test('an order joining a full refresh reports its own successful result despite an unrelated failure', async t => {
   let release;
   const gate = new Promise(resolve => { release = resolve; });

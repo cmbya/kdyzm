@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createService } from '../src/service.mjs';
+import { createCollector } from '../src/collectors.mjs';
 import { cookieIdentity } from '../src/cookie-sync.mjs';
 
 const ADMIN = 'cookie-sync-test-admin-with-at-least-32-characters';
@@ -166,6 +167,84 @@ test('first preview can bind a legacy header without identity, but the required 
   const s = await setup(t), a = s.account('taobao', { cookie: 'legacy=SYNTHETIC' }), grant = await s.bind(a.id);
   assert.equal((await s.preview(grant.token, 'cookie2=SYNTHETIC')).data.error.code, 'COOKIE_IDENTITY_REQUIRED');
   assert.equal((await s.confirm(grant, COOKIES.taobao)).status, 200);
+});
+
+test('taobao identity recovery: an expired platform response cannot lock out the original browser account', async t => {
+  let requests = 0;
+  const collector = createCollector({ now: () => TIME, fetchImpl: async () => {
+    requests++;
+    return new Response(JSON.stringify({ ret: ['FAIL_SYS_SESSION_EXPIRED::synthetic'] }), {
+      headers: { 'Set-Cookie': 'unb=; Max-Age=0; Path=/' },
+    });
+  } });
+  const s = await setup(t, { collector });
+  const original = `${COOKIES.taobao}; _m_h5_tk=SYNTHETIC_TOKEN_1`;
+  const a = s.account('taobao', { cookie: original }), grant = await s.bind(a.id);
+  assert.equal((await s.confirm(grant, original)).status, 200);
+  await s.service.requestSync(a.id);
+  assert.ok(requests > 0, 'the real collector must receive the synthetic expiry response');
+  const preview = await s.preview(grant.token, original);
+  assert.equal(preview.status, 200, 'the original browser identity must remain eligible after collection expires');
+  assert.equal(s.service.store.cookie(a.id), original, 'an expiry response must not erase the trusted identity');
+  assert.equal(s.service.store.account(a.id).status, 'expired');
+  assert.equal(s.service.store.account(a.id).credentialVersion, a.credentialVersion);
+  const saved = await s.write(grant.token, original, preview.data.account.credentialVersion, preview.data.confirmationToken);
+  assert.equal(saved.status, 200, saved.raw);
+});
+
+test('taobao identity recovery: normal session and token rotation preserves the confirmed account', async t => {
+  const original = `${COOKIES.taobao}; _m_h5_tk=SYNTHETIC_TOKEN_1`;
+  const rotated = original.replace('SYNTHETIC-TB-LOGIN', 'SYNTHETIC-TB-ROTATED')
+    .replace('SYNTHETIC_TOKEN_1', 'SYNTHETIC_TOKEN_2');
+  let continued = false;
+  const s = await setup(t, { collector: async (_account, _cookie, options) => {
+    options.onCookieRefresh(rotated);
+    continued = true;
+    return { orders: [], shipments: [], refreshedCookie: rotated };
+  } });
+  const a = s.account('taobao', { cookie: original }), grant = await s.bind(a.id);
+  assert.equal((await s.confirm(grant, original)).status, 200);
+  await s.service.requestSync(a.id);
+  assert.equal(continued, true);
+  assert.equal(s.service.store.cookie(a.id), rotated);
+  assert.equal(s.service.store.account(a.id).credentialVersion, a.credentialVersion);
+  assert.equal((await s.preview(grant.token, rotated)).status, 200);
+  assert.equal((await s.write(grant.token, rotated, a.credentialVersion)).status, 200);
+});
+
+for (const [name, rotated] of [
+  ['missing identity', 'cookie2=SYNTHETIC-TB-ROTATED; _m_h5_tk=SYNTHETIC_TOKEN_2'],
+  ['different identity', 'unb=999123456; cookie2=SYNTHETIC-TB-ROTATED; _m_h5_tk=SYNTHETIC_TOKEN_2'],
+  ['duplicate conflicting identity', `${COOKIES.taobao}; unb=999123456; _m_h5_tk=SYNTHETIC_TOKEN_2`],
+  ['missing login field', 'unb=100123456; _m_h5_tk=SYNTHETIC_TOKEN_2'],
+]) test(`taobao identity recovery: ${name} rotation stops collection without replacing trusted credentials`, async t => {
+  let continued = false;
+  const s = await setup(t, { collector: async (_account, _cookie, options) => {
+    options.onCookieRefresh(rotated);
+    continued = true;
+    return { orders: [], shipments: [], refreshedCookie: rotated };
+  } });
+  const a = s.account(), grant = await s.bind(a.id);
+  assert.equal((await s.confirm(grant, COOKIES.taobao)).status, 200);
+  await s.service.requestSync(a.id);
+  assert.equal(s.service.store.cookie(a.id), COOKIES.taobao, 'rejected rotation must preserve the complete trusted header');
+  assert.equal(continued, false, 'collection must stop before subsequent requests can use an unverified identity');
+  assert.equal(s.service.store.account(a.id).status, 'expired');
+  assert.equal(s.service.store.account(a.id).credentialVersion, a.credentialVersion);
+  assert.equal((await s.preview(grant.token, COOKIES.taobao)).status, 200);
+});
+
+test('taobao identity recovery: a previously polluted backend still requires explicit reauthorization', async t => {
+  const s = await setup(t), a = s.account(), grant = await s.bind(a.id);
+  assert.equal((await s.confirm(grant, COOKIES.taobao)).status, 200);
+  const polluted = 'cookie2=SYNTHETIC-LEGACY-WITHOUT-IDENTITY';
+  assert.equal((await s.request(`/v1/admin/accounts/${a.id}`, { method: 'PATCH', admin: true,
+    body: { cookie: polluted } })).status, 200);
+  assert.equal((await s.preview(grant.token, COOKIES.taobao)).data.error.code, 'COOKIE_BACKEND_IDENTITY_INVALID');
+  assert.equal((await s.preview(grant.token, COOKIES.taobao.replace('100123456', '999123456'))).data.error.code, 'COOKIE_IDENTITY_MISMATCH');
+  assert.equal(s.service.store.cookie(a.id), polluted, 'an old binding must not silently heal a legacy credential');
+  const repaired = await s.bind(a.id);
+  assert.equal((await s.confirm(repaired, COOKIES.taobao)).status, 200);
 });
 
 test('account transfers revoke codes and grants permanently, including away and back without an intervening request', async t => {

@@ -159,9 +159,10 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
             },
             changed: progress => { record.job.logisticsProgress = progress; persist(record); } }),
         });
+        valid();
+        if (result.refreshedCookie) store.refreshCookie(accountId, result.refreshedCookie);
         importDelta(result, false);
         try { onCompleted(accountId); } catch { /* Cached classification is refreshed on the next sync. */ }
-        if (result.refreshedCookie) store.refreshCookie(accountId, result.refreshedCookie);
         record.job.state = 'completed';
         if (record.job.orderId) orderOutcome(record.job, result); else fullResult(record.job, result);
       } catch (error) {

@@ -229,7 +229,7 @@ App不再保存独立渠道选择，不采用列表第一项或本机旧密钥�
 
 每个新授权首次上传必须先预览并由用户确认角色和平台账号。确认 token 有效五分钟，只存摘要，绑定授权、完整 Cookie 摘要及账号凭据版本；重新预览替代旧确认，成功上传后清除。已存在后台 Cookie 可解析身份时必须一致；旧凭据缺少身份允许首次明确确认，冲突或格式错误则请管理员先核对。绑定后只接受同一身份的自动续更；管理员换成另一平台身份时旧连接拒绝继续，需重新配对。
 
-`expectedCredentialVersion` 为必填正安全整数，过期版本返回 `409 COOKIE_CREDENTIAL_CONFLICT`，保留原凭据。首次无有效确认返回 `409 COOKIE_CONFIRMATION_REQUIRED`；身份不一致为 `409 COOKIE_IDENTITY_MISMATCH`，已有后台身份异常为 `409 COOKIE_BACKEND_IDENTITY_INVALID`；身份缺失、冲突和缺少登录字段分别为 `400 COOKIE_IDENTITY_REQUIRED/COOKIE_IDENTITY_AMBIGUOUS/COOKIE_LOGIN_REQUIRED`；授权过期或撤销为 `401 COOKIE_SYNC_UNAUTHORIZED`；码失效为 `400 COOKIE_PAIRING_INVALID`。
+`expectedCredentialVersion` 为必填正安全整数，过期版本返回 `409 COOKIE_CREDENTIAL_CONFLICT`，保留原凭据。首次无有效确认返回 `409 COOKIE_CONFIRMATION_REQUIRED`；身份不一致为 `409 COOKIE_IDENTITY_MISMATCH`，已有后台身份异常为 `409 COOKIE_BACKEND_IDENTITY_INVALID`；已绑定身份相符但后台身份丢失也返回后者，必须重新配对并明确确认，不能自动解除绑定。身份缺失、冲突和缺少登录字段分别为 `400 COOKIE_IDENTITY_REQUIRED/COOKIE_IDENTITY_AMBIGUOUS/COOKIE_LOGIN_REQUIRED`；授权过期或撤销为 `401 COOKIE_SYNC_UNAUTHORIZED`；码失效为 `400 COOKIE_PAIRING_INVALID`。
 
 完全相同的 Cookie 返回 `changed:false`，不增加凭据版本、不采集，可更新 `lastSyncAt`。变化则使用原 AES-GCM 加密存储，增加凭据版本使旧采集结果失效，保留原 `lastAttemptAt/nextSyncAt` 冷却与定时设置，并请求一次采集。已有运行采集时在其完成后再次核对授权与凭据版本再请求；期间更新、撤权、转组或关闭服务则取消该次后续请求。原已排队任务可复用并在启动时读新凭据。停用账号不会被启用，五分钟采集冷却仍生效。每授权一分钟最多六次变化写入、一百二十次接口请求，预览最多二十次；限频失败保留原 Cookie。
 

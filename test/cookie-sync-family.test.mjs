@@ -217,6 +217,41 @@ test('family uploads reuse identity, confirmation digest, credential CAS, cooldo
   assert.equal(s.service.store.cookie(account.id), `${COOKIES.taobao}; changed=6`);
 });
 
+test('family identity recovery requires explicit whole-group reauthorization after a child loses its backend identity', async t => {
+  const s = await setup(t), family = s.family('身份恢复角色');
+  const damaged = s.account(family.id), sibling = s.account(family.id, 'pdd'), group = await s.bind(family.id);
+  const original = await s.confirm(group.token, damaged);
+  const originalSibling = await s.confirm(group.token, sibling);
+  const polluted = 'cookie2=SYNTHETIC-LEGACY-WITHOUT-IDENTITY';
+  assert.equal((await s.request(`/v1/admin/accounts/${damaged.id}`, { method: 'PATCH', admin: true,
+    body: { cookie: polluted } })).status, 200);
+
+  const rejected = await s.preview(group.token, damaged);
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.data.error.code, 'COOKIE_BACKEND_IDENTITY_INVALID');
+  assert.equal((await s.write(group.token, damaged)).data.error.code, 'COOKIE_BACKEND_IDENTITY_INVALID');
+  assert.equal((await s.preview(group.token, damaged, COOKIES.taobao.replace('12345678', '99999999')))
+    .data.error.code, 'COOKIE_IDENTITY_MISMATCH');
+  assert.equal(s.service.store.cookie(damaged.id), polluted);
+  assert.equal((await s.write(group.token, sibling)).status, 200, 'an unrelated confirmed child remains usable');
+
+  const replacement = await s.bind(family.id);
+  assert.ok(replacement.accounts.every(item => item.connection === null), 'new group requires each platform to be confirmed again');
+  assert.equal((await s.current(group.token)).status, 401);
+  assert.equal((await s.write(group.token, damaged)).status, 401);
+  assert.equal((await s.write(group.token, sibling)).status, 401);
+  assert.equal((await s.write(replacement.token, damaged)).data.error.code, 'COOKIE_CONFIRMATION_REQUIRED');
+  const repaired = await s.confirm(replacement.token, damaged);
+  assert.equal(repaired.status, 200, repaired.raw);
+  assert.equal(repaired.data.connection.identityBound, true);
+  assert.notEqual(repaired.data.connection.id, original.data.connection.id);
+  assert.equal(s.service.store.cookie(damaged.id), COOKIES.taobao);
+  const reconfirmedSibling = await s.confirm(replacement.token, sibling);
+  assert.equal(reconfirmedSibling.status, 200, reconfirmedSibling.raw);
+  assert.notEqual(reconfirmedSibling.data.connection.id, originalSibling.data.connection.id);
+  assert.equal(s.service.store.cookie(sibling.id), COOKIES.pdd);
+});
+
 test('family revocation cancels the deferred post-collector request without changing unrelated scheduler behavior', async t => {
   let finish; const blocked = new Promise(resolve => { finish = resolve; }); t.after(finish);
   const s = await setup(t, { collector: async () => { await blocked; return { orders: [], shipments: [] }; } });
