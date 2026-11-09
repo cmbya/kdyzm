@@ -1018,7 +1018,7 @@ var PickCodeCore = (function () {
     return s.status;
   }
   // Bump when bundled logistics parsing changes so persisted projections are reevaluated independently of user rules.
-  var logisticsProjectionVersion=3;
+  var logisticsProjectionVersion=4;
   var logisticsFields=['status','station','stationSource','arrivalAt','arrivalAtSource','arrivalAtPrecision'];
   function restorePlatformLogistics(s) {
     if(s.platformLogistics)logisticsFields.forEach(function(key){s[key]=s.platformLogistics[key];});
@@ -1034,7 +1034,7 @@ var PickCodeCore = (function () {
       var logisticsChanged=s.localLogisticsRevision!==state.logisticsRulesRevision||s.localLogisticsVersion!==logisticsProjectionVersion||s.localLogisticsServerRevision!==state.serverLogisticsRulesVersion;
       if(!s.remoteId||!logisticsChanged&&s.localStationRulesVersion===state.stationRulesVersion)return;
       s.localStationRulesVersion=state.stationRulesVersion;
-      if(!logisticsChanged&&(recognizeStation(state,s.station).id||activeCorrection(state,s)))return;
+      if(!logisticsChanged&&trustedArrival(s)&&(recognizeStation(state,s.station).id||activeCorrection(state,s)))return;
       if(!s.platformLogistics)rememberPlatformLogistics(s);
       if(logisticsChanged)restorePlatformLogistics(s);
       s.localLogisticsRevision=state.logisticsRulesRevision;
@@ -1042,14 +1042,19 @@ var PickCodeCore = (function () {
       s.localLogisticsServerRevision=state.serverLogisticsRulesVersion;
       var events=s.logisticsEvents||[];
       if(!events.length||s.picked||s.pickupCompletion&&s.pickupCompletion.autoPicked||s.hidden||s.deleted||shipmentArchived(state,s)||s.arrivalAtSource==='locker_arrival'||s.stationSource==='locker')return;
-      var catalogEvidence=!recognizeStation(state,s.station).id&&!activeCorrection(state,s)?logistics.catalogPickupEvidence(events,state.stationRules,rules):null;
+      if(events.some(function(event){return logistics.eventTimeIssue(event,Date.now())==='timeConflict';}))return;
+      var knownStation=recognizeStation(state,s.station).id||activeCorrection(state,s);
+      var catalogEvidence=!knownStation||!trustedArrival(s)?logistics.catalogPickupEvidence(events,state.stationRules,rules):null;
       if(catalogEvidence&&(!catalogEvidence.arrivalAt||catalogEvidence.arrivalAt>Date.now()))catalogEvidence=null;
+      var evidence=logistics.pickupEvidence(events,rules,!trustedArrival(s));
+      if(evidence.arrivalAt>Date.now())evidence=logistics.pickupEvidence([],rules);
+      if(!catalogEvidence&&!trustedArrival(s)&&evidence.arrivalAt&&evidence.arrivalAt<=Date.now())catalogEvidence=evidence;
       if(!catalogEvidence&&(!logisticsChanged||s.status==='signed'))return;
-      var evidence=logistics.pickupEvidence(events,rules);
       if(catalogEvidence){
-        if(trustedArrival(s))['arrivalAt','arrivalAtSource','arrivalAtPrecision'].forEach(function(key){catalogEvidence[key]=s[key];});
+        if(knownStation)['station','stationSource'].forEach(function(key){catalogEvidence[key]=s[key];});
         evidence=catalogEvidence;
       }
+      if(evidence.arrivalAt&&trustedArrival(s))['arrivalAt','arrivalAtSource','arrivalAtPrecision'].forEach(function(key){evidence[key]=s[key];});
       // Text timelines omit platform card fields; retain a specific card station for the same arrival.
       if(evidence.arrivalAt&&evidence.arrivalAt===s.platformLogistics.arrivalAt&&s.platformLogistics.station&&
         (!evidence.station||logistics.genericPickupStation(evidence.station))&&!logistics.genericPickupStation(s.platformLogistics.station)){
@@ -1397,7 +1402,7 @@ var PickCodeCore = (function () {
       if(p.jobs!==undefined)state.online.jobs=publicJobs(p.jobs);
       if(p.baseUrl)state.online.serviceKey=hash(p.baseUrl.replace(/\/+$/,''));
     } else if(action==='syncImport') {restoreStationProjection(state);importOnline(state,p);
-    } else if(action==='refreshStations') {state.shipments.forEach(function(s){if(!s.picked&&!s.hidden&&!s.deleted&&!shipmentArchived(state,s)&&!recognizeStation(state,s.station).id&&!activeCorrection(state,s))delete s.localStationRulesVersion;});
+    } else if(action==='refreshStations') {state.shipments.forEach(function(s){if(!s.picked&&!s.hidden&&!s.deleted&&!shipmentArchived(state,s)&&(!trustedArrival(s)||!recognizeStation(state,s.station).id&&!activeCorrection(state,s)))delete s.localStationRulesVersion;});
     } else if(action==='setStation'||action==='resetStation') {changeStation(state,p,action==='resetStation');
     } else if(action==='matchingFeedbackBatch') {return JSON.stringify({state:state,result:matchingFeedbackBatch(state)});
     } else if(action==='matchingFeedbackAck') {importMatchingFeedback(state,p,true);

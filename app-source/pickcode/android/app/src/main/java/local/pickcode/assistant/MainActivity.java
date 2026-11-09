@@ -27,6 +27,7 @@ import android.widget.Toast;
 import androidx.webkit.WebViewAssetLoader;
 import org.json.JSONObject;
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -39,6 +40,7 @@ public final class MainActivity extends Activity {
     private static final String START = "https://appassets.androidplatform.net/assets/app/index.html";
     private static final int SMS_PERMISSION = 410;
     private static final int PAIRING_SCAN = 543;
+    private static final int PICKUP_SAVE = 544;
     private static final Set<String> CORE_ACTIONS = new HashSet<>(Arrays.asList("snapshot", "migrate", "add", "update", "remove",
             "ignore", "restore", "saveRule", "deleteRule", "toggleRule", "settings", "clearTag", "migratePackages", "savePackage",
             "removePackage", "restorePackage", "pickMembers", "assignPickedMembers", "pickShipments", "resumeAutoPickup", "setOrderDate", "linkSource", "unlinkSource", "resolveCode", "setStation", "resetStation", "refreshStations",
@@ -50,6 +52,15 @@ public final class MainActivity extends Activity {
     private volatile boolean trustedPage;
     private String permissionRequestId;
     private String pairingScanRequestId;
+    private PickupExport pickupExport;
+    private int nextPickupSaveRequestCode = PICKUP_SAVE;
+    private static final class PickupExport {
+        final String id;
+        final int requestCode;
+        File file;
+        boolean awaitingDocument;
+        PickupExport(String id, int requestCode) { this.id = id; this.requestCode = requestCode; }
+    }
     private String pendingWidgetCopyId;
     private String pendingPickupId;
     private boolean pendingPackages;
@@ -63,7 +74,14 @@ public final class MainActivity extends Activity {
     private long lastOnlineAttempt;
     private final ExecutorService network = Executors.newSingleThreadExecutor();
     private final ExecutorService onlineNetwork = Executors.newSingleThreadExecutor();
+    private final ExecutorService pickupImages = Executors.newSingleThreadExecutor();
     private final Handler foreground = new Handler(Looper.getMainLooper());
+    private final Runnable pickupSaveTimeout = () -> {
+        if (pickupExport != null) {
+            finishActivity(pickupExport.requestCode);
+            finishPickupExport(pickupExport, null, "保存等待超时，请重新选择保存位置", false);
+        }
+    };
     private final Runnable onlinePoll = new Runnable() {
         @Override public void run() {
             if (!resumed || !localSnapshotShown || isDestroyed()) return;
@@ -85,6 +103,7 @@ public final class MainActivity extends Activity {
             pendingWidgetId = savedInstanceState.getInt("pendingWidgetId", AppWidgetManager.INVALID_APPWIDGET_ID);
             pendingPickupId = savedInstanceState.getString("pendingPickupId");
             pendingPackages = savedInstanceState.getBoolean("pendingPackages");
+            nextPickupSaveRequestCode = Math.max(PICKUP_SAVE, savedInstanceState.getInt("nextPickupSaveRequestCode", PICKUP_SAVE));
         }
         webView = new WebView(this);
         FrameLayout container = new FrameLayout(this);
@@ -115,6 +134,10 @@ public final class MainActivity extends Activity {
             }
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) { return !trustedDocument(Uri.parse(url)); }
             @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                if (pickupExport != null) {
+                    finishActivity(pickupExport.requestCode);
+                    finishPickupExport(pickupExport, imageResult("cancelled"), null, false);
+                }
                 pageReady = false;
                 localSnapshotShown = false;
                 foregroundStarted = false;
@@ -180,6 +203,9 @@ public final class MainActivity extends Activity {
                 if ("openSystemSettings".equals(action)) { runOnUiThread(() -> openSettings(requestId, data)); return; }
                 if ("pinWidget".equals(action)) { runOnUiThread(() -> pinWidget(requestId, data)); return; }
                 if ("openShoppingApp".equals(action)) { runOnUiThread(() -> openShoppingApp(requestId, data)); return; }
+                if ("savePickupImage".equals(action) || "sharePickupImage".equals(action)) {
+                    runOnUiThread(() -> exportPickupImage(requestId, data, "savePickupImage".equals(action))); return;
+                }
                 if (("snapshot".equals(action) || "overview".equals(action) || "onlineStatus".equals(action))
                         && AssistantStore.get(MainActivity.this).hasDisplaySnapshot()) {
                     try { reply(requestId, execute(action, data), null); }
@@ -340,6 +366,10 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode >= PICKUP_SAVE) {
+            savePickupImageResult(requestCode, resultCode, data);
+            return;
+        }
         if (requestCode != PAIRING_SCAN || pairingScanRequestId == null) return;
         String id = pairingScanRequestId; pairingScanRequestId = null;
         if (resultCode != RESULT_OK || data == null) { reply(id, null, "已取消识别"); return; }
@@ -350,6 +380,72 @@ public final class MainActivity extends Activity {
             if (result.optJSONArray("texts") == null || result.getJSONArray("texts").length() > 8) throw new IllegalArgumentException();
             reply(id, result, null);
         } catch (Exception invalid) { reply(id, null, "未取得有效识别结果，请重试"); }
+    }
+
+    private void exportPickupImage(String id, JSONObject payload, boolean save) {
+        if (isFinishing() || isDestroyed() || !trustedPage) { reply(id, null, "页面已关闭，请重新生成取件长图"); return; }
+        if (pickupExport != null) { reply(id, null, "已有图片操作正在进行，请先完成或取消"); return; }
+        if (save && nextPickupSaveRequestCode > 65535) { reply(id, null, "请重新打开应用后保存图片"); return; }
+        PickupExport current = new PickupExport(id, save ? nextPickupSaveRequestCode++ : 0); pickupExport = current;
+        pickupImages.execute(() -> {
+            try {
+                File file = PickupShareImage.cache(getApplicationContext(), PickupShareImage.decode(payload));
+                runOnUiThread(() -> {
+                    if (pickupExport != current || isFinishing() || isDestroyed() || !trustedPage) {
+                        file.delete(); finishPickupExport(current, null, "页面已关闭，请重新生成取件长图", false); return;
+                    }
+                    current.file = file;
+                    try {
+                        if (save) {
+                            current.awaitingDocument = true;
+                            startActivityForResult(PickupShareImage.saveIntent(), current.requestCode);
+                            foreground.postDelayed(pickupSaveTimeout, 9 * 60_000);
+                        } else {
+                            Intent send = PickupShareImage.share(this, file);
+                            if (getPackageManager().queryIntentActivities(send, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).isEmpty())
+                                throw new android.content.ActivityNotFoundException();
+                            startActivity(Intent.createChooser(send, "分享取件清单"));
+                            finishPickupExport(current, imageResult("shared"), null, true);
+                        }
+                    } catch (Exception unavailable) {
+                        finishPickupExport(current, null, save ? "无法打开系统保存界面，请稍后重试" : "未找到可分享图片的应用，请先保存图片后手动发送", false);
+                    }
+                });
+            } catch (Exception | OutOfMemoryError invalid) {
+                String error = invalid instanceof IllegalArgumentException ? invalid.getMessage() : "无法生成取件长图，请减少勾选后重试";
+                runOnUiThread(() -> finishPickupExport(current, null, error, false));
+            }
+        });
+    }
+
+    private void savePickupImageResult(int requestCode, int resultCode, Intent data) {
+        PickupExport current = pickupExport;
+        if (current == null || current.requestCode != requestCode || !current.awaitingDocument) return;
+        current.awaitingDocument = false;
+        if (resultCode != RESULT_OK) { finishPickupExport(current, imageResult("cancelled"), null, false); return; }
+        Uri destination = data == null ? null : data.getData();
+        pickupImages.execute(() -> {
+            try {
+                PickupShareImage.save(getApplicationContext(), current.file, destination);
+                runOnUiThread(() -> finishPickupExport(current, imageResult("saved"), null, false));
+            } catch (Exception failure) {
+                runOnUiThread(() -> finishPickupExport(current, null, "图片未保存，请重新选择可写入的位置", false));
+            }
+        });
+    }
+
+    private static JSONObject imageResult(String key) {
+        JSONObject value = new JSONObject();
+        try { value.put(key, true); } catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
+        return value;
+    }
+
+    private void finishPickupExport(PickupExport current, JSONObject result, String error, boolean keepFile) {
+        if (pickupExport != current) return;
+        pickupExport = null;
+        foreground.removeCallbacks(pickupSaveTimeout);
+        if (!keepFile && current.file != null) current.file.delete();
+        reply(current.id, result, error);
     }
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
@@ -493,6 +589,7 @@ public final class MainActivity extends Activity {
         }
         if (pendingPickupId != null) outState.putString("pendingPickupId", pendingPickupId);
         outState.putBoolean("pendingPackages", pendingPackages);
+        outState.putInt("nextPickupSaveRequestCode", nextPickupSaveRequestCode);
         super.onSaveInstanceState(outState);
     }
     private void consumeWidgetIntent(Intent intent) {
@@ -578,6 +675,11 @@ public final class MainActivity extends Activity {
     }
     @Override public void onBackPressed() { if (webView.canGoBack()) webView.goBack(); else super.onBackPressed(); }
     @Override protected void onDestroy() {
+        pickupImages.shutdownNow();
+        if (pickupExport != null) {
+            finishActivity(pickupExport.requestCode);
+            finishPickupExport(pickupExport, imageResult("cancelled"), null, false);
+        }
         trustedPage = false;
         foreground.removeCallbacksAndMessages(null);
         webView.removeJavascriptInterface("PickCodeNative");

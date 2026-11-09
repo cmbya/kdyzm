@@ -405,6 +405,7 @@ export function initStationAdmin({ api, notice }) {
     setHidden('ai-auto-apply-row', !state.tuningSupported);
     setHidden('ai-optimization-history', !state.tuningSupported);
     setHidden('ai-logistics-candidates', !state.tuningSupported);
+    if (!state.tuningSupported) setHidden('ai-daily-learning', true);
     if (force || !state.aiDirty && !state.aiSaving) {
       get('ai-enabled').setAttribute('aria-checked', String(Boolean(config?.enabled))); get('ai-enabled').classList.toggle('off', !config?.enabled);
       get('ai-auto-apply').checked = Boolean(config?.autoApply && config?.logisticsEnabled);
@@ -457,6 +458,7 @@ export function initStationAdmin({ api, notice }) {
       }
     }
     if (logistics.status === 'fulfilled') {
+      renderDailyLearning(logistics.value.dailyLearning);
       const candidates = (logistics.value.candidates || []).filter(item => !['applied', 'ignored', 'rolled_back'].includes(item.status));
       const list = get('ai-logistics-list'); list.replaceChildren(); setText('ai-logistics-count', `${candidates.length} 条`);
       if (!candidates.length) list.textContent = '暂无待处理物流片段。';
@@ -473,6 +475,20 @@ export function initStationAdmin({ api, notice }) {
         })); list.append(row);
       }
     }
+    else if (!get('ai-daily-learning').hidden) setText('ai-daily-state', '暂时无法读取');
+  }
+
+  function renderDailyLearning(daily) {
+    setHidden('ai-daily-learning', !daily);
+    if (!daily) return;
+    const run = daily.lastRun, states = run?.states || {};
+    const status = { queued: '等待分析', waiting_retry: '等待重试', requires_review: '需核对', awaiting_review: '待审核', complete: '已处理', no_candidates: '无新候选' };
+    setText('ai-daily-state', !daily.enabled ? '已暂停' : daily.running ? '检查中' : run?.error ? '等待续跑' : status[run?.aiStatus] || '尚未运行');
+    const next = daily.nextRunAt ? new Date(daily.nextRunAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '尚未安排';
+    setText('ai-daily-schedule', `每天 03:00（北京时间）${daily.enabled ? ` · 下次检查 ${next}` : ' · 开启物流自动分析后运行'}`);
+    setText('ai-daily-result', run ? `${run.day}：检查 ${run.scanned} 条，变化 ${run.changed} 条；候选 ${run.candidateCount} 条，已分析 ${run.processedCount} 条。规则已应用 ${run.appliedRules} 条，已补全时间 ${run.backfilledCount} 单${states.rolled_back ? `，已回滚 ${states.rolled_back} 条` : ''}。${run.error || ''}${run.truncated ? '剩余记录将在下一次检查继续。' : ''}` : '尚无每日学习记录。');
+    const issues = run?.issues;
+    setText('ai-daily-issues', issues ? `当前待核对 ${run.unconfirmedCount} 单：缺到货时间 ${issues.missingArrival}，时间无法识别 ${issues.unknownTime}，精度未知 ${issues.unknownPrecision}，时间冲突 ${issues.timeConflict}。同一包裹可能包含多项。` : '检查结果将在运行后显示。');
   }
 
   function stationWorkspaceVisible() { return state.open && !document.hidden && !get('station-settings-view').hidden && !get('page-settings').hidden && !get('workspace').hidden; }

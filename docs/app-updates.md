@@ -2,7 +2,7 @@
 
 手机优先读取已绑定后台内置的 `app-update.json`，后台缺包、不可用或没有更新版本时读取本仓库Latest Release，下载安装包后交给Android确认。更新不依赖Docker账号或Cookie。App 3.1.4首次需手动覆盖安装，后续使用「我的 → 检查更新」。旧私人版不要卸载；覆盖安装保留绑定、短信和领取记录。
 
-本轮推荐App **3.1.42 / 30142**，修复Android内微缩物流PNG不显示：运行时的 `/static/...` 被解析到Android appassets根目录并返回403，改为 `./static/...` 后正确加载 `/assets/app/static/` 内资源。雷电模拟器对照实测旧发布APK 11/11项失败、修复APK 11/11项成功；完整自动化门禁已通过。服务端 **3.1.38** 仅配套内置新版APK，无业务逻辑或数据库变更。见 [3.1.42修复与验证说明](android-journey-assets-3.1.42.md)。
+App **3.1.43 / 30143** 增加 B 版紧凑票据取件分享：选择待取包裹生成长图，兼容无订单的独立码，支持系统保存与分享。明确入库轨迹即时识别到货时间，已有站点可补全遗漏。配套服务端 **3.1.39** 加入北京时间03:00每日专项学习、增量续跑与真实回填统计；未来或冲突时间保留待核对。 见 [3.1.43发布说明](recognition-share-3.1.43.md)。
 
 保留App **3.1.41 / 30141** 的微缩站台物流功能：取件卡片、包裹记录和订单详情使用象牙色站台、蓝色小车及纸箱拖车，首次打开直接定位真实阶段，新事件才播放行程并点亮站牌。三段耗时喷印在路面并保留分钟；确认取件后停靠0.8秒，平滑收拢为四个时间和三段耗时记录。当时配套服务端 **3.1.37** 补查旧订单缺失的下单时间精度，修复已有下单和发货时间却没有发货用时的问题。见 [3.1.41功能说明](miniature-journey-3.1.41.md) 和 [App 3.1.41 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.41)。
 
@@ -14,9 +14,9 @@ App继续保留3.1.37的本地缓存优先、快照复用与同步去重，见 [
 
 `https://github.com/zsdd2/kdyzm/releases/latest/download/app-update.json`
 
-本轮App版本为 `3.1.42` / `30142`，沿用原签名，发布入口为 [App 3.1.42 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.42)。稳定版使用Latest Release供旧App检查并下载更新；APK签名、公开下载与镜像内置包的检查结果以实际发布记录为准。
+本轮App版本为 `3.1.43` / `30143`，沿用原签名，发布入口为 [App 3.1.43 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.43)。稳定版保持为Latest Release，供旧App检查与下载。
 
-发布完成后的用户升级顺序：先拉取 `ghcr.io/zsdd2/kdyzm:3.1.38` 或 `ghcr.io/zsdd2/kdyzm:latest`，保留原数据卷、加密密钥和部署配置重建容器；再通过“我的 → 检查更新”或原签名APK覆盖安装App。无需清库、重建数据库、卸载App或重新绑定。本轮未部署NAS，尚未完成OPPO实体手机覆盖安装与实际运行验收。
+升级顺序：先拉取 `ghcr.io/zsdd2/kdyzm:3.1.39` 或 `ghcr.io/zsdd2/kdyzm:latest`，保留原数据卷和配置重建容器；再覆盖安装App或使用“我的 → 检查更新”。无需清库、重建数据库、卸载App或重新绑定。本轮不代为部署用户NAS。
 
 自App3.1.18起优先从已绑定后台检查与下载，后台缺包、不可用或版本不高于已安装App时查询GitHub；内置目录由构建期脚本完整校验。详见 [后台优先升级](backend-app-updates-3.1.15.md)。
 

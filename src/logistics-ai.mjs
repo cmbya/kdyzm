@@ -5,7 +5,7 @@ import { LOGISTICS_SYSTEM, validateLogisticsSuggestion, logisticsActionIn as act
 import { aiCandidateDueAt, nextAiDay } from './ai-policy.mjs';
 
 const engine = globalThis.PickCodeLogistics;
-const pickupPoint = /驿站|代收点|自提点|自提站|自提柜|快递柜|智能柜|丰巢/u;
+const pickupPoint = /驿站|代收点|自提点|自提站|自提柜|快递柜|智能柜|快递超市|丰巢/u;
 const parse = row => row && JSON.parse(row.data);
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const QUEUE_LIMIT = 1000, CORPUS_LIMIT = 20000, ACTIVE_AGE = 45 * 86400000;
@@ -182,12 +182,12 @@ export class LogisticsAiJobs {
     }
     this.scheduled = setTimeout(() => { this.scheduled = null; this.runDue(); }, Math.min(2147483647, Math.max(0, due - this.now()))).unref();
   }
-  runDue() {
+  runDue({ candidateIds } = {}) {
     const response = (code, extra = {}) => ({ accepted: code === 'AI_ACCEPTED', code, running: !!this.running, ...extra });
     if (this.closed) return response('SERVICE_STOPPING');
     if (this.running) return response('AI_RUNNING');
     if (!this.ready()) return response('AI_AUTOMATIC_DISABLED');
-    const work = this.work(), reviews = work.filter(candidate => candidate.status === 'review');
+    const work = this.work().filter(candidate => !candidateIds || candidateIds.includes(candidate.id)), reviews = work.filter(candidate => candidate.status === 'review');
     if (!work.length) { this.schedule(); return response('AI_NO_PENDING'); }
     const config = this.stations.aiConfig();
     if (!reviews.length && config.usageToday >= config.dailyLimit) { this.schedule(); return response('AI_DAILY_LIMIT'); }

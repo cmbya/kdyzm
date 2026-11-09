@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.42",
+  "version": "3.1.43",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -62,7 +62,7 @@
       "reason": "Unused upstream image barrel with a stale relative import."
     }
   ],
-  "localImportChecks": 169,
+  "localImportChecks": 173,
   "files": [
     {
       "path": ".semgrep.yml",
@@ -82,12 +82,12 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "663af49a1cff67dc0fab784db68ce35cb2b107356db31961d5e5c24687ef636d"
+      "sha256": "69e0b1b305ecbd6aeccc1159b79ebb10ccb83399eed0a5bd5f8870602669e16b"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
-      "size": 3283,
-      "sha256": "6c8c7211adb1a40a900d620171a8dd0f52ea078452f32c96b24d232e06135684"
+      "size": 3781,
+      "sha256": "e9ebafa1af15167470d835a3b0510d118d85c191482f91624e7b33ab2efed75e"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/AiTemplatePrivacy.java",
@@ -141,8 +141,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/MainActivity.java",
-      "size": 36852,
-      "sha256": "a1b590c9a1eafd891171a316372a36b5c99d8f055143e9673d24f1ca4fe290de"
+      "size": 42770,
+      "sha256": "3f3d4a787d782e11aa6842706657baae4bbe5b3eefd3c67624ace46b9d1e7527"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineClient.java",
@@ -178,6 +178,16 @@
       "path": "android/app/src/main/java/local/pickcode/assistant/PickCodeApplication.java",
       "size": 683,
       "sha256": "5e9e8e1b651c9d5b4a1e708038abc23c1896907af1673c2360ccb3adb80e29af"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/PickupShareImage.java",
+      "size": 7785,
+      "sha256": "5576239b7a82ed83c4a02039ff54a100c7526790962308af1b5a26815cc3238c"
+    },
+    {
+      "path": "android/app/src/main/java/local/pickcode/assistant/PickupShareProvider.java",
+      "size": 120,
+      "sha256": "770a63814d1024bffd8db077c719d23d072fd0fc2247d2da8849a83bedc182fb"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/ScanScheduler.java",
@@ -415,6 +425,11 @@
       "sha256": "dea35ebed76536c24c13f74036f02dc874f944147cb3a49c2ad0550f71e3e0c7"
     },
     {
+      "path": "android/app/src/main/res/xml/pickup_share_paths.xml",
+      "size": 176,
+      "sha256": "b31cc6dfdb1d1a41c474dcbc19fa1e5332b11c3a86db6bde9bf23af992bbcb3e"
+    },
+    {
       "path": "android/app/src/main/res/xml/widget_large_info.xml",
       "size": 507,
       "sha256": "b2cd33e72b7abc5b1d4cd3088d1aedc7d07ec0c6aa6ee90193b9d8835bdbbff1"
@@ -505,6 +520,11 @@
       "sha256": "52c592ef8f2fcc0326beda40dc039138264bb9684b5410344e38dda9e74f444a"
     },
     {
+      "path": "components/PickupShare.vue",
+      "size": 14841,
+      "sha256": "ca3ab922ea7925e065afe39fabc7f8a6f2f19112739d2bbe386de6eb6e908ff0"
+    },
+    {
       "path": "components/PickupStamp.vue",
       "size": 778,
       "sha256": "65999e6d395e87a0733e9be6bc602efead5450aa3dd4102f621f8b151147c9cc"
@@ -526,8 +546,8 @@
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 165706,
-      "sha256": "1b7c2c7cfc968341e49b557a17bbf166358a4097fffd982e90518dae5aa099d4"
+      "size": 166267,
+      "sha256": "a876b864d70a38f558c2be3089110a24f5a9605ce415b26c71b994e8529bc1ca"
     },
     {
       "path": "index.html",
@@ -547,17 +567,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "ff03ad2ebec78594750390d204d43a2686117ff80d92e948469bd1da086e5c03"
+      "sha256": "2f8ea00a8ff640f2ef4c81e246b9a72540ce14800cc62a639626c49e3821eb62"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "ed976c645bc29feecdb1566eec9d75d758d432aeab2ccd03fc0724986164036f"
+      "sha256": "e1a2e5b3198876f203062d903c4d7e835465ec1242236ba30546bf3e5f9c2baf"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "e350de1ddbfea646266da3a208abba2b5f9f71070a57192e56c8308f1bbd29f0"
+      "sha256": "52d16e53cb106f3d5b46a88459ed4adde721265c3107d037c4223be968a9bb5a"
     },
     {
       "path": "pages.json",
@@ -571,8 +591,8 @@
     },
     {
       "path": "pages/index/index.vue",
-      "size": 70565,
-      "sha256": "5da1b2c3cc2d70708f8244ff431d59a852215f3ccde7811e3feb2a48a6eb36c9"
+      "size": 72059,
+      "sha256": "1d42ff3e82c687c222a0cbf02228b5a285fc264f2fde0ebfec104558ffeb7b6f"
     },
     {
       "path": "pages/my/about.vue",
@@ -586,8 +606,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 41821,
-      "sha256": "75d7470b82bdaa33fe995b540d0215de13771eaa12190a8b26f7ec34dbb0f7a5"
+      "size": 42763,
+      "sha256": "8ceede2d0733eb1364aaaf672966d232471f58406feb8a48fabc1b58567a5a5b"
     },
     {
       "path": "pages/my/faq.vue",
@@ -696,8 +716,8 @@
     },
     {
       "path": "server/src/logistics-rules.js",
-      "size": 25047,
-      "sha256": "75838e064f8d46ea7698ca370f0ed116c3b50f0e4074e1c93534e78a9d50c654"
+      "size": 26768,
+      "sha256": "076f6c94b3309865cd00a0afd82a6238b6b8dc975d36142528cc1d47df380c8f"
     },
     {
       "path": "services/ai-service-view.js",
@@ -706,8 +726,8 @@
     },
     {
       "path": "services/assistant.js",
-      "size": 34747,
-      "sha256": "6e2c368b4cdf60a680393d6b087ba6feae47be861922f8bca5b6321a29f8e5ff"
+      "size": 35067,
+      "sha256": "e2f1a60fd9066d012e9725f35de79f8aa51f3725d5fe4c65478a05ad218acb15"
     },
     {
       "path": "services/item-patch.js",
@@ -738,6 +758,11 @@
       "path": "services/pickup-matching-view.js",
       "size": 6322,
       "sha256": "ddb1a1e20062c74c3cc89c53aa3b383c4e2460f23ecdec2cb8fa971e839de6f0"
+    },
+    {
+      "path": "services/pickupShare.js",
+      "size": 8653,
+      "sha256": "21c38d0204db1ad38d25cc6ea75393d0c9d9521ae032f17b50dcf2398b86c17c"
     },
     {
       "path": "services/station-presentation.js",
@@ -2583,8 +2608,8 @@
     },
     {
       "path": "README.md",
-      "size": 2630,
-      "sha256": "22331392e22976f751a32374fcfb62caa61946e395820e335e1820277fad8d9a"
+      "size": 2055,
+      "sha256": "994771347e6164f8000f3b37a242dc57fc11ca56b3841da49335f5cf4c078c92"
     },
     {
       "path": ".gitignore",

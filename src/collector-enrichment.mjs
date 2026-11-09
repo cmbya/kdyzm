@@ -63,6 +63,10 @@ export function orderTimePrecision(value) {
   return result !== 'unknown' ? result : /^\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?$/.test(text(value)) ? 'day' : 'unknown';
 }
 
+export function logisticsEventTimeIssue(event, now) {
+  return logistics.eventTimeIssue(event, now);
+}
+
 export function providerEventFields(event) {
   if (event?.provider !== 'pdd') return {};
   const fields = { provider: 'pdd' };

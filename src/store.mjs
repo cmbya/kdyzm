@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
 import { serverVersion, capabilities } from './version.mjs';
-import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, providerEventFields, mergeProviderEventFields } from './collector-enrichment.mjs';
+import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, providerEventFields, mergeProviderEventFields, logisticsEventTimeIssue } from './collector-enrichment.mjs';
 import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
@@ -39,17 +39,19 @@ function logisticsData(input, old = {}, reuseEvents = false, rules, now) {
 }
 function pickupData(input = {}, old = {}, events = [], rules, now = Date.now()) {
   if (input.logisticsCheckedAt && input.logisticsCheckedAt < (old.logisticsCheckedAt || 0)) return pickupData({}, old, [], rules, now);
+  if (input.arrivalAtSource === 'platform_event' && events.some(event => event.time === input.arrivalAt && logisticsEventTimeIssue(event, now) === 'timeConflict')) return pickupData({}, old, [], rules, now);
   const source = value => ['platform_event', 'locker_arrival', 'locker_created'].includes(value) ? value : 'unknown';
   const precision = value => ['second', 'minute'].includes(value) ? value : 'unknown';
-  const explicitArrival = validTime(input.arrivalAt) && source(input.arrivalAtSource) !== 'unknown';
-  const arrivalAt = explicitArrival ? validTime(input.arrivalAt) : validTime(old.arrivalAt) || validTime(input.arrivalAt);
+  const inputArrival = validTime(input.arrivalAt) && input.arrivalAt <= now ? input.arrivalAt : 0;
+  const explicitArrival = inputArrival && source(input.arrivalAtSource) !== 'unknown';
+  const arrivalAt = explicitArrival ? inputArrival : validTime(old.arrivalAt) || inputArrival;
   const station = explicitArrival && Object.hasOwn(input, 'stationSource') ? shortText(input.station, 300)
     : shortText(input.station, 300) || shortText(old.station, 300);
   let result = { arrivalAt, arrivalAtSource: arrivalAt ? source(explicitArrival ? input.arrivalAtSource : old.arrivalAtSource) : 'unknown',
     arrivalAtPrecision: arrivalAt ? precision(explicitArrival ? input.arrivalAtPrecision : old.arrivalAtPrecision) : 'unknown', station,
     stationSource: station ? ['platform_event', 'locker'].includes(input.stationSource) && input.station ? input.stationSource
       : station === old.station && ['platform_event', 'locker'].includes(old.stationSource) ? old.stationSource : 'unknown' : 'unknown' };
-  const evidence = pickupEvidence(events, rules);
+  const evidence = pickupEvidence(events.map(event => logisticsEventTimeIssue(event, now) === 'timeConflict' ? { ...event, time: 0 } : event), rules);
   const reset = events.some(event => pickupCycleReset(event.description || '') && (!event.time || event.time <= now) && (!event.time || !arrivalAt || event.time >= arrivalAt));
   const newCycle = events.some(event => pickupCycleReset(event.description || '') && (!event.time || event.time <= now) && (!event.time || event.time >= validTime(old.arrivalAt)));
   const stationConflict = input.station && old.station && ['platform_event', 'locker'].includes(input.stationSource)
@@ -304,6 +306,7 @@ export class Store {
       for (const row of this.db.prepare('SELECT data FROM shipments').all()) {
         const old = parse(row), events = old.logisticsEvents || [];
         if (!events.length || old.stationSource === 'locker' || ['locker_arrival', 'locker_created'].includes(old.arrivalAtSource)) continue;
+        if (events.some(event => logisticsEventTimeIssue(event, this.now()) === 'timeConflict')) continue;
         const evidence = pickupEvidence(events, rules);
         const pickup = evidence.arrivalAt ? pickupData({ logisticsState: 'ok', logisticsEvents: events, arrivalAt: 0 }, old, events, rules, this.now()) : evidence;
         const fallback = old.status === 'arrived' && old.arrivalAtSource === 'platform_event' ? 'unknown' : old.status;
@@ -331,12 +334,18 @@ export class Store {
         const old = parse(row), order = orders ? orders.get(old.orderId) : this.order(old.orderId), account = this.account(old.accountId);
         if (!account?.enabled || this.shipmentAlias(old.id).id !== old.id || !order || orderRetention(order, this.now()).archived || order.hidden || order.deleted
           || old.picked || old.pickupCompletion?.autoPicked || effectivePicked(pickupCompletionState(old)) || old.hidden || old.deleted
-          || !old.logisticsEvents?.length || logistics.catalogStation(old.station, catalog).id) continue;
-        const evidence = logistics.catalogPickupEvidence(old.logisticsEvents, catalog, rules);
-        if (!evidence.arrivalAt || evidence.arrivalAt > this.now() || !evidence.station) continue;
+          || !old.logisticsEvents?.length || old.stationSource === 'locker') continue;
+        if (old.logisticsEvents.some(event => logisticsEventTimeIssue(event, this.now()) === 'timeConflict')) continue;
         const trustedArrival = validTime(old.arrivalAt) && ['platform_event', 'locker_arrival'].includes(old.arrivalAtSource);
+        const knownStation = logistics.catalogStation(old.station, catalog).id;
+        if (knownStation && trustedArrival) continue;
+        let evidence = logistics.catalogPickupEvidence(old.logisticsEvents, catalog, rules);
+        if (!evidence.arrivalAt && !trustedArrival) evidence = pickupEvidence(old.logisticsEvents, rules, true);
+        if (!evidence.arrivalAt || evidence.arrivalAt > this.now() || !evidence.station && !old.station) continue;
         const updated = { ...old, ...evidence, status: 'arrived', updatedAt: this.now() };
+        if (knownStation || !evidence.station) for (const key of ['station', 'stationSource']) updated[key] = old[key];
         if (trustedArrival) for (const key of ['arrivalAt', 'arrivalAtSource', 'arrivalAtPrecision']) updated[key] = old[key];
+        if (['status', 'station', 'stationSource', 'arrivalAt', 'arrivalAtSource', 'arrivalAtPrecision'].every(key => updated[key] === old[key])) continue;
         this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
         changed++;
       }

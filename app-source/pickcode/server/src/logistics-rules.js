@@ -1,10 +1,11 @@
 /* Shared ES5 logistics parser: Node, WebView and Android Rhino use this source. */
 var PickCodeLogistics = (function () {
   'use strict';
-  var POINT = /驿站|代收点|自提点|自提站|自提柜|快递柜|智能柜|丰巢|菜鸟|门店|便利店/;
+  var POINT = /驿站|代收点|自提点|自提站|自提柜|快递柜|快递超市|智能柜|丰巢|菜鸟|门店|便利店/;
   var FUTURE = /下一站|发往|运往|开往|前往|将(?:到|达|至)|目的(?:地|站)|即将/;
   var UNREALIZED = /预计|预定|计划|将(?:于|在|送|到|存|暂存|放)|尚未|未(?:能|曾)?(?:到|送|投|存|暂存|放)|失败|未成功|无法|未能|(?:请|要求|希望|安排|同意|约定|等待)[^，,。；;！？!?]{0,12}(?:暂存|存放|存入|到达|送达|送到|送至|投递|放)/;
   var REMINDER = /催取|提醒|再次通知|尽快|逾期|滞留|超时/;
+  var PERSONAL_COMPLETION = /(?:本人|收件人|用户|客户)已(?:经)?(?:完成)?(?:签收|领取|取件|取走)/;
   var SPLIT = /[，,。；;！？!?\n\r]/;
   var KEYS = ['id', 'name', 'enabled', 'kind', 'starts', 'end', 'keywords', 'sample', 'expectedStation', 'origin'];
   function text(value) { return typeof value === 'string' || typeof value === 'number' ? String(value).replace(/^\s+|\s+$/g, '') : ''; }
@@ -141,19 +142,37 @@ var PickCodeLogistics = (function () {
     if (/^\d{4}[-年/]\d{2}[-月/]\d{2}日?[ T]\d{2}:\d{2}(?:Z|[+-]\d{2}:?\d{2})?$/.test(raw)) return 'minute';
     return 'unknown';
   }
-  function pickupEvidence(events, rules) {
+  function eventTimeIssue(event, now) {
+    if (typeof event.time !== 'number' || !isFinite(event.time) || Math.floor(event.time) !== event.time || event.time <= 0 || event.time > 8640000000000000) return 'unknownTime';
+    if (event.time > now) return 'timeConflict';
+    var raw = text(event.timeText), parsed = 0, precision = timePrecision(raw), unit;
+    if (/^\d{10,13}$/.test(raw)) parsed = Number(raw) * (raw.length <= 10 ? 1000 : 1);
+    else if (/^\d{4}[-年/]\d{1,2}[-月/]\d{1,2}日?[ T]\d{1,2}:\d{2}/.test(raw)) {
+      raw = raw.replace(/年|月|\//g, '-').replace('日', '').replace(' ', 'T').replace(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{1,2})/, function (_, year, month, day, hour) {
+        return year + '-' + ('0' + month).slice(-2) + '-' + ('0' + day).slice(-2) + 'T' + ('0' + hour).slice(-2);
+      });
+      precision = timePrecision(raw);
+      if (precision !== 'unknown') parsed = Date.parse(/Z$|[+-]\d{2}:?\d{2}$/.test(raw) ? raw : raw + '+08:00') || 0;
+    }
+    unit = precision === 'minute' ? 60000 : 1000;
+    if (parsed && Math.floor(parsed / unit) !== Math.floor(event.time / unit)) return 'timeConflict';
+    return ['second', 'minute'].indexOf(event.timePrecision) >= 0 || !event.timePrecision && precision !== 'unknown' ? '' : 'unknownPrecision';
+  }
+  function pickupEvidence(events, rules, activeOnly) {
     var empty = { arrivalAt: 0, arrivalAtSource: 'unknown', arrivalAtPrecision: 'unknown', station: '', stationSource: 'unknown' };
     var station = '', i, event, description, described, describedMatch, card, candidate, arrival;
     events = Array.isArray(events) ? events : [];
-    if (events.some(function (item) { return !item.time && pickupCycleReset(text(item.description)); })) return empty;
+    // Backfill must not revive a completed pickup; history readers still retain its arrival milestone.
+    if (events.some(function (item) { return !item.time && (pickupCycleReset(item.description) || activeOnly && (PERSONAL_COMPLETION.test(item.description) || eventStatus(item.description, 'unknown', rules) === 'signed')); })) return empty;
     for (i = 0; i < events.length; i++) {
       event = events[i]; description = text(event.description);
-      if (pickupCycleReset(description)) break;
+      if (pickupCycleReset(description) || activeOnly && PERSONAL_COMPLETION.test(description)) break;
       describedMatch = stationMatch(description, rules);
       described = describedMatch ? describedMatch.station : '';
       card = event.station ? clean(event.station) : '';
       candidate = !described || genericPickupStation(described) ? card || described : described;
       arrival = pickupArrivalEvent(description, candidate, rules);
+      if (activeOnly && !arrival && eventStatus(description, 'unknown', rules) === 'signed') break;
       if (candidate && (arrival || /取件|取货|自提|代收/.test(description)
         || (describedMatch && describedMatch.ruleId && describedMatch.kind === 'location'))) station = station || candidate;
       if (!arrival) continue;
@@ -210,7 +229,6 @@ var PickCodeLogistics = (function () {
   }
   function catalogPickupEvidence(events, catalog, rules) {
     var empty = pickupEvidence([], rules), entries = catalogEntries(catalog), selected, event, i, parts, j, match, key, candidate, locations, starts = [];
-    var personalCompletion = /(?:本人|收件人|用户|客户)已(?:经)?(?:完成)?(?:签收|领取|取件|取走)/;
     if (!entries.length) return empty;
     // The directory confirms identity; only an explicit completed storage action supplies arrival evidence.
     ['已经成功','已经','已成功','已'].forEach(function (prefix) {
@@ -219,12 +237,12 @@ var PickCodeLogistics = (function () {
     var combined = ruleList(rules).concat([{id:'catalog-completed-pickup',enabled:true,kind:'arrival',origin:'manual',end:'',keywords:[],
       starts:starts}]);
     events = Array.isArray(events) ? events : [];
-    if (events.some(function (item) { return !item.time && (pickupCycleReset(item.description) || personalCompletion.test(item.description) || eventStatus(item.description, 'unknown', rules) === 'signed'); })) return empty;
+    if (events.some(function (item) { return !item.time && (pickupCycleReset(item.description) || PERSONAL_COMPLETION.test(item.description) || eventStatus(item.description, 'unknown', rules) === 'signed'); })) return empty;
     for (i = 0; i < events.length; i++) {
       event = events[i];
       if (pickupCycleReset(event.description)) break;
       if (UNREALIZED.test(event.description) || REMINDER.test(event.description)) continue;
-      if (personalCompletion.test(event.description)) return empty;
+      if (PERSONAL_COMPLETION.test(event.description)) return empty;
       parts = fragments(text(event.description));
       candidate = null;
       for (j = 0; j < parts.length; j++) {
@@ -305,7 +323,7 @@ var PickCodeLogistics = (function () {
     return output;
   }
   return { defaults: defaults, validateRule: validateRule, validateRules: validateRules, pickupStation: pickupStation, pickupArrivalEvent: pickupArrivalEvent,
-    pickupEvidence: pickupEvidence, catalogStation: catalogStation, catalogPickupEvidence: catalogPickupEvidence, eventStatus: eventStatus, homeDeliveryCompleted: homeDeliveryCompleted, genericPickupStation: genericPickupStation,
+    pickupEvidence: pickupEvidence, eventTimeIssue: eventTimeIssue, catalogStation: catalogStation, catalogPickupEvidence: catalogPickupEvidence, eventStatus: eventStatus, homeDeliveryCompleted: homeDeliveryCompleted, genericPickupStation: genericPickupStation,
     pickupCycleReset: pickupCycleReset, test: function (rule, sample) {
       var draft = {}, key;
       if (rule && typeof rule === 'object' && !Array.isArray(rule)) {

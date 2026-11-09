@@ -174,7 +174,7 @@ SQLite按认证设备ID+反馈ID保存持久收据。相同版本、相同内容
 
 | 方法与路径 | 权限与请求/响应 |
 | --- | --- |
-| GET /v1/admin/logistics-ai | 管理员；`{candidates,running}`，候选含状态、脱敏片段、建议及未应用原因 |
+| GET /v1/admin/logistics-ai | 管理员；`{candidates,running,dailyLearning}`，候选含状态、脱敏片段、建议及未应用原因；旧客户端可忽略新增每日摘要 |
 | POST /v1/admin/logistics-ai/:id/ignore | 管理员；`{}` → `{candidate}`，已应用规则须撤回 |
 | GET /v1/admin/ai-optimization/history | 管理员；`{changes}`，每条含id、kind、summary、status、appliedAt、rolledBackAt、canRollback |
 | POST /v1/admin/ai-optimization/history/:kind/:id/rollback | 管理员；kind为station_alias或logistics_rule；`{}` → `{change}` |
@@ -182,6 +182,12 @@ SQLite按认证设备ID+反馈ID保存持久收据。相同版本、相同内容
 撤回只移除本次新增且尚未被人工改动的内容，否则409。物流规则保存及缓存重算同事务完成；自动修改记录同事务保存。授权、渠道或开关变化会取消旧模型结果，模型不能执行代码或直接改包裹归属。
 
 设备 `GET /v1/snapshot` 兼容增加 `serverLogisticsRulesVersion` 与 `serverLogisticsRules`。规则只含 `id,name,enabled,kind,starts,end,keywords,origin`，不含管理员原始sample/expectedStation、候选、密钥或其他凭证。ETag包含规则版本。App单独保存并用于重算；同ID本机规则（包括停用）优先，解绑/换绑清除只读层。旧后台缺字段时兼容；旧App忽略新增字段。匹配仍由本机确定性证据及唯一性规则决定。
+
+### 每日物流专项（后台3.1.39）
+
+`dailyLearning` 为只读摘要：`enabled/timezone/hour/nextRunAt/running/timeFormatLearning/lastRun`。北京时间03:00检查存量遗漏，重启优先续跑未完成轮次；沿用`enabled/logisticsEnabled/autoApply`、统一渠道、冷却及每日20次共享上限。无新高频证据不调用AI，忽略和回滚状态不重置。
+
+`lastRun` 分别返回扫描状态、`scanned/changed`、`candidateCount/processedCount`、`states`、`appliedRules/backfilledCount`、当前缺失/未知/冲突计数及脱敏时间形状。扫描完成、候选入队或生成建议不代表已应用或回填；规则回滚后统计随真实数据更新。未知时间格式标为`requires_review`，不生成解析代码、猜测日期或训练模型参数。新增两张内部运行/样本表自动创建，不重建已有订单数据库。
 
 ## 手机统一后台 AI 服务（兼容 v1，后台3.1.23 / App3.1.26）
 

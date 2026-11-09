@@ -342,7 +342,7 @@ function requestTransport(action, payload = {}) {
   const bridge = nativeBridge();
   if (bridge) return new Promise((resolve, reject) => {
     const id = `request-${requestSession}-${++serial}`;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('操作超时，请检查连接后重试')); }, action === 'generateTemplate' ? 90000 : 60000);
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('操作超时，请检查连接后重试')); }, action === 'savePickupImage' ? 600000 : action === 'generateTemplate' ? 90000 : 60000);
     pending.set(id, { resolve, reject, timer });
     try { bridge.request(id, JSON.stringify({ action, payload })); }
     catch (_) { clearTimeout(timer); pending.delete(id); reject(new Error('原生服务暂不可用')); }
@@ -528,6 +528,10 @@ export function requestSmsPermission() { return request('requestSmsPermission');
 export function openSystemSettings(page = 'app') { return request('openSystemSettings', { page }); }
 export function pinWidget(size) { return request('pinWidget', { size }); }
 export function openShoppingApp(platform) { return request('openShoppingApp', { platform }); }
+export function exportPickupImage(mode, dataUrl) {
+  if (!nativeBridge() || !['save', 'share'].includes(mode)) return Promise.reject(new Error('当前环境不支持此图片操作'));
+  return request(mode === 'save' ? 'savePickupImage' : 'sharePickupImage', { dataUrl });
+}
 export function setAiKey(key, model) { return request('setAiKey', { key, model }); }
 export function getAiChannels() { return request('aiChannels'); }
 export function getAiOptimizationStatus() { return request('aiOptimizationStatus'); }

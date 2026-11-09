@@ -1,9 +1,10 @@
 <template>
   <view class="page-wrapper sf-page" @click="handlePageClick">
 
-    <view class="container" :inert="notificationsOpen || stationChooserOpen || sourceOpen ? true : null">
+    <view class="container" :inert="notificationsOpen || stationChooserOpen || sourceOpen || shareOpen ? true : null">
       <view class="title-wrapper">
         <text class="title">取件列表</text>
+        <button ref="shareButton" class="notification-bell pickup-share-button" role="button" tabindex="0" aria-label="分享取件码" aria-haspopup="dialog" :aria-expanded="shareOpen" @click.stop="$refs.pickupShare.open($refs.shareButton)" @keydown.enter.prevent.stop="!$event.repeat && $refs.pickupShare.open($refs.shareButton)" @keydown.space.prevent.stop="$event.preventDefault()" @keyup.space.prevent.stop="$refs.pickupShare.open($refs.shareButton)"><image :src="shareIcon" class="pickup-share-icon" mode="aspectFit" aria-hidden="true" /></button>
         <button ref="notificationBell" class="notification-bell" role="button" tabindex="0" data-notification-control aria-haspopup="dialog" :aria-expanded="notificationsOpen" :aria-label="'通知中心，' + notificationCount + '项待处理'" @click.stop="openNotifications">
           <uni-icons type="notification" size="24" color="#2469ed" />
           <text v-if="notificationCount" class="notification-badge">{{ notificationCount > 99 ? '99+' : notificationCount }}</text>
@@ -195,6 +196,7 @@
       </template>
     </view>
 
+    <PickupShare ref="pickupShare" :snapshot="snapshot" @open-change="shareOpen = $event" />
     <uni-popup ref="sourcePopup" @change="sourceOpen = $event.show" type="bottom" :safe-area="false" :animation="!reducedMotion">
       <PickupDetail :inert="stationChooserOpen ? true : null" :key="detailRevision" :item="sourceItem" :packages="snapshot.packages || []" :match-on-open="matchingOnOpen" @close="$refs.sourcePopup.close()" @changed="applySnapshot" @ignore="openIgnore" @station-change="changeStation" />
     </uni-popup>
@@ -248,6 +250,7 @@
 <script>
 import yizhanIcon from '@/static/yizhan.png';
 import PickupDetail from '@/components/PickupDetail.vue';
+import PickupShare from '@/components/PickupShare.vue';
 import ParcelJourney from '@/components/ParcelJourney.vue';
 import { parcelJourney, JOURNEY_COMPLETION_MS } from '@/services/parcel-journey.js';
 import StationChooser from '@/components/StationChooser.vue';
@@ -260,14 +263,15 @@ import { notificationScope, readNotificationDismissals, visibleNotificationItems
 
 const emptySnapshot = () => ({ codes: [], packages: [], reminders: [], ignored: [], lastScanAt: 0, summary: { added: 0 } });
 const notificationHistoryKey = '__pickcodeNotificationSheet';
+const shareIcon = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#2469ed" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4m-6.8 7 6.8 4"/></svg>');
 // The approved preview's source SVG avoids the cropped Figma export viewport.
 const reviewNoticeIcon = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#cf8b22" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 10-10 10L2 12Z"/><path d="M12 7v6m0 3h.01"/></svg>');
 export default {
-  components: { ParcelJourney, PickupDetail, StationChooser },
+  components: { ParcelJourney, PickupDetail, StationChooser, PickupShare },
   data() {
     return { sourceOpen: false, expandedTitles: {}, newCode: '', addingCode: false, packageCodes: [], snapshot: emptySnapshot(), dateShowActions: {}, expandedDates: {}, expandedStations: {}, pickupGrouping: 'station', sourceItem: null, detailRevision: 0, matchingOnOpen: false, journeyCompletions: {}, yizhanIcon,
       hydrated: false, backgroundSyncing: false, scanning: false, syncing: false, confirmingReceiptId: '', refreshProgressText: '更新中', syncMessage: '', syncErrors: { sms: '', online: '' }, pendingPickupId: '', ignoring: null, ignoreReason: '', savingIgnore: false, loadError: '',
-      notificationsOpen: false, stationChooserOpen: false, notificationCategory: 'all', expandedReminderId: '', reviewNoticeIcon, notificationDismissals: readNotificationDismissals(),
+      notificationsOpen: false, stationChooserOpen: false, shareOpen: false, shareIcon, notificationCategory: 'all', expandedReminderId: '', reviewNoticeIcon, notificationDismissals: readNotificationDismissals(),
       reducedMotion: typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches };
   },
   computed: {
@@ -329,9 +333,10 @@ export default {
   },
   onLoad(options) { this.pendingPickupId=options?.pickupId || ''; uni.$on('assistant-changed', this.applySnapshot); uni.$on('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.addEventListener('pickcode-open-pickup',this.openPickupIntent); },
   onShow() { this.applySyncStatus(getSyncStatus()); const pending = uni.getStorageSync('pendingPickupId'); if (pending) { this.pendingPickupId = pending; uni.removeStorageSync('pendingPickupId'); } this.loadData(); },
-  onUnload() { this.clearJourneyCompletions(); uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.removeEventListener('pickcode-open-pickup',this.openPickupIntent); },
-  onHide() { this.clearJourneyCompletions(); this.closeNotifications(false); this.$refs.stationChooser?.close(); },
-  onBackPress() { if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if(this.sourceOpen){this.$refs.sourcePopup.close();return true;} if (this.notificationsOpen) { this.closeNotifications(); return true; } },
+  onUnload() { this.clearJourneyCompletions(); this.$refs.pickupShare?.close(false); uni.$off('assistant-changed', this.applySnapshot); uni.$off('assistant-sync-status', this.applySyncStatus); if(typeof window!=='undefined')window.removeEventListener('pickcode-open-pickup',this.openPickupIntent); },
+  onHide() { this.clearJourneyCompletions(); this.closeNotifications(false); this.$refs.stationChooser?.close(); if(typeof document==='undefined'||document.visibilityState!=='hidden')this.$refs.pickupShare?.close(false); },
+  deactivated() { this.$refs.pickupShare?.close(false); },
+  onBackPress() { if (this.shareOpen) { this.$refs.pickupShare.close(); return true; } if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if(this.sourceOpen){this.$refs.sourcePopup.close();return true;} if (this.notificationsOpen) { this.closeNotifications(); return true; } },
   mounted() {
     this.$el?.addEventListener?.('keydown', this.notificationKeyboard);
     this.$el?.addEventListener?.('keyup', this.notificationKeyboard);
@@ -640,7 +645,9 @@ export default {
 <style lang="scss" scoped>
 .page-wrapper { min-height:calc(100vh - var(--window-bottom, 64px)); color:var(--sf-text); }
 .container { position:relative; padding:22px 16px 24px; min-height:inherit; box-sizing:border-box; }
-.title-wrapper { position:relative; min-height:44px; display:flex; align-items:center; padding-right:54px; margin-bottom:18px; }
+.title-wrapper { position:relative; min-height:44px; display:flex; align-items:center; padding-right:104px; margin-bottom:18px; }
+.pickup-share-button { right:52px !important; }
+.pickup-share-icon { width:24px; height:24px; }
 .title { font-size:clamp(1.75rem, 1.25rem + 2vw, 1.875rem); font-weight:750; line-height:1.2; letter-spacing:-.035em; }
 .notification-bell { position:absolute; right:0; display:flex; align-items:center; justify-content:center; width:44px; height:44px; padding:0; margin:0; border:1px solid var(--sf-edge); border-radius:50%; overflow:visible; background:var(--sf-glass); box-shadow:var(--sf-shadow); backdrop-filter:var(--sf-filter); -webkit-backdrop-filter:var(--sf-filter); }
 .notification-badge { position:absolute; top:-3px; right:-2px; min-width:19px; min-height:19px; padding:1px 4px; box-sizing:border-box; border:2px solid #edf2f8; border-radius:12px; background:#df4b44; color:white; font-size:.625rem; line-height:1.3; font-weight:650; }

@@ -12,6 +12,7 @@ import { StationAiJobs } from './station-ai.mjs';
 import { MatchingFeedbackStore } from './matching-feedback.mjs';
 import { AiAssistance } from './ai-assistance.mjs';
 import { LogisticsAiJobs } from './logistics-ai.mjs';
+import { LogisticsDailyLearning } from './logistics-daily-learning.mjs';
 import { PickupCompletionAi } from './pickup-completion-ai.mjs';
 import { serverVersion } from './version.mjs';
 import { orderRetention } from './order-retention.mjs';
@@ -50,6 +51,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const stationAi = new StationAiJobs({ stations, now, automaticEvents: scheduler, ...(aiRequest ? { request: aiRequest } : {}) });
   const aiAssistance = new AiAssistance({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
   const logisticsAi = new LogisticsAiJobs({ stations, rules: logisticsRules, store, assistance: aiAssistance, now, automaticEvents: scheduler });
+  const logisticsDaily = new LogisticsDailyLearning({ store, stations, logisticsAi, now, automaticEvents: scheduler });
   const pickupCompletion = store.pickupCompletion;
   const pickupCompletionAi = new PickupCompletionAi({ store, completionStore: pickupCompletion, stations, assistance: aiAssistance, now, automaticEvents: scheduler });
   const enrichCandidates = (accountIds, shipmentIds) => {
@@ -64,6 +66,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
     if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
   });
   if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
+  else store.refreshStationRecognition(stations.stationRules().stations);
   pickupCompletionAi.intake(store.snapshot(store.accounts().filter(account => account.enabled).map(account => account.id)));
   const rate = new RateLimiter(now);
   const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now,
@@ -96,6 +99,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
     for (const account of store.accounts()) if (account.enabled && account.nextSyncAt <= now()) void requestSync(account.id);
     stationAi.runDue();
     logisticsAi.runDue();
+    logisticsDaily.runDue();
     pickupCompletionAi.runDue();
   }, 30000).unref() : null;
 
@@ -256,7 +260,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           return;
         }
         if (path === '/v1/admin/station-ai' && req.method === 'GET') { send(res, 200, { config: stations.aiConfig(), running: !!stationAi.running }); return; }
-        if (path === '/v1/admin/logistics-ai' && req.method === 'GET') { send(res, 200, { candidates: logisticsAi.candidates(), running: !!logisticsAi.running }); return; }
+        if (path === '/v1/admin/logistics-ai' && req.method === 'GET') { send(res, 200, { candidates: logisticsAi.candidates(), running: !!logisticsAi.running, dailyLearning: logisticsDaily.summary() }); return; }
         const logisticsCandidatePath = path.match(/^\/v1\/admin\/logistics-ai\/([^/]+)\/ignore$/);
         if (logisticsCandidatePath && req.method === 'POST') {
           onlyKeys(await bodyOf(req), []); configuration.authenticate(req.headers['x-admin-token']);
@@ -435,12 +439,14 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, matchingFeedback, aiAssistance, logisticsRules, logisticsAi, pickupCompletion, pickupCompletionAi,
+  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, matchingFeedback, aiAssistance, logisticsRules, logisticsAi, logisticsDaily, pickupCompletion, pickupCompletionAi,
     async close() {
       cookieSync.close();
       unsubscribeOptimization();
+      const dailyClosing = logisticsDaily.close();
       aiAssistance.close();
       if (timer) clearInterval(timer);
+      await dailyClosing;
       await new Promise(resolve => server.close(resolve));
       await jobs.close();
       await stationAi.close();
