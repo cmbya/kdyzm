@@ -71,6 +71,19 @@ function duration(start, end) {
   const days = Math.floor(minutes / 1440), hours = Math.floor(minutes / 60) % 24;
   return (days ? `${days}天` : '') + (hours ? `${hours}时` : '') + (minutes % 60 ? `${minutes % 60}分` : '');
 }
+function parcelJourneySegments(journey, now = Date.now()) {
+  const points = Array.isArray(journey?.points) ? journey.points : [];
+  const known = points.filter(point => validAt(point?.at));
+  const ordered = known.every((point, index) => !index || point.at >= known[index - 1].at);
+  const accurate = point => validAt(point?.at) && ['second', 'minute'].includes(point.precision) &&
+    !['unknown', 'legacy', 'sms_received', 'sms_sent', 'locker_created'].includes(point.source);
+  return ['waiting', 'transit', 'pickup'].map((key, index) => {
+    const start = points[index], end = points[index + 1];
+    const ongoing = !journey?.completed && index === journey?.currentIndex && !end?.at;
+    return { key, label: ['待发货', '运输', '待取'][index], ongoing, text: ordered && accurate(start) && (accurate(end) || ongoing)
+      ? duration(start.at, ongoing ? validAt(now) : end.at) : '—' };
+  });
+}
 function parcelJourneyProgress(journey, now = Date.now()) {
   if (journey?.completed === true) return 3;
   const index = journey?.currentIndex;
@@ -103,21 +116,12 @@ function parcelJourney(shipment = {}, order = {}) {
   if (!completed && ['returning', 'returned'].includes(shipment.status)) currentIndex = -1;
   points.forEach((point, index) => {
     point.text = point.at ? timeText(point.at, point.precision) : index === 3 && !completed ? '待取件' : '待获取';
-    point.state = index === currentIndex && !completed ? 'current' : point.at || index === 3 && completed ? 'done' : 'pending';
+    point.state = index === currentIndex && !completed ? 'current' : point.at || index < currentIndex || index === 3 && completed ? 'done' : 'pending';
   });
-  const known = points.filter(point => point.at);
-  const ordered = known.every((point, index) => !index || point.at >= known[index - 1].at);
-  const accurate = point => point.at && ['second', 'minute'].includes(point.precision) &&
-    !['unknown', 'legacy', 'sms_received', 'sms_sent', 'locker_created'].includes(point.source);
-  const segments = ['waiting', 'transit', 'pickup'].map((key, index) => {
-    const start = points[index], end = points[index + 1];
-    const ongoing = !completed && index === currentIndex && !end.at;
-    return { key, label: ['待发货', '运输', '待取'][index], text: ordered && accurate(start) && (accurate(end) || ongoing)
-      ? duration(start.at, ongoing ? Date.now() : end.at) : '—' };
-  });
+  const segments = parcelJourneySegments({ points, currentIndex, completed });
   const carrier = typeof shipment.carrier === 'string' ? shipment.carrier.trim() : '';
   return { points, segments, currentIndex, completed,
     carrier: /^(?:unknown|other|未知(?:快递|物流|承运商|快递公司)?|快递公司未知|其他(?:快递|物流)?|暂无|未识别|线上包裹|[-—–]+)$/i.test(carrier) ? '' : carrier };
 }
 
-export { parcelJourney, parcelJourneyProgress, shipmentCollectedAt, packageCollectedAt, packageCollectedDateKey, comparePackagesByCollectedAt };
+export { parcelJourney, parcelJourneySegments, parcelJourneyProgress, shipmentCollectedAt, packageCollectedAt, packageCollectedDateKey, comparePackagesByCollectedAt };

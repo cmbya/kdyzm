@@ -491,13 +491,13 @@
     },
     {
       "path": "components/OrderOverview.vue",
-      "size": 13552,
-      "sha256": "35cfd725acfdebf5d26566dd4704517fb08f92bbee3d1b463d8e43f9628605bd"
+      "size": 13570,
+      "sha256": "6bde8e9b71e5940ff45cf2cbb29b021301ff36db063176091da303a75802315a"
     },
     {
       "path": "components/ParcelJourney.vue",
-      "size": 14972,
-      "sha256": "b6f2e5239b0687fc43caad6815f93f843b6fa29ffca369d476411c86dfa1179b"
+      "size": 16384,
+      "sha256": "c7d2ea86c325efcd4df749a77f4736dc09aa1dfd27d8ed07c11db013cd2f00a4"
     },
     {
       "path": "components/PickupDetail.vue",
@@ -726,8 +726,8 @@
     },
     {
       "path": "services/parcel-journey.js",
-      "size": 8228,
-      "sha256": "5e4e0932d8e33fd622429ea4497e68e159064eed2e7cbd738d171fe2aa354f48"
+      "size": 8527,
+      "sha256": "e54359d6ce46febbc7513871f8a2b776112d7d6f2067f31e99fdbe2227439b85"
     },
     {
       "path": "services/pickup-groups.js",
