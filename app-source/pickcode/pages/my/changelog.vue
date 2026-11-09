@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.40 · 私人版</text><text class="version-date">2026-11-09</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">路牌</text><text class="content">下单、发货、到货、取件改成立体路牌与独立时间牌，实际到达或经过才点亮，未到节点保持灰色</text></view>
+          <view class="update-item"><text class="tag optimize">时间</text><text class="content">小车在上车道行驶，下车道显示发货、运输和取件耗时，名称沿道路弯曲排列，进行中用时自动更新</text></view>
+          <view class="update-item"><text class="tag optimize">详情</text><text class="content">更换站点与站点名称同行对齐，保留取件码完整单行显示、商品名称展开与原有信息折叠</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.39 · 私人版</text><text class="version-date">2026-11-09</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">进度</text><text class="content">小车按待发货2天、运输3天、待取1天的已过时间显示阶段参考进度，动效更明显，车顶显示快递名称</text></view>

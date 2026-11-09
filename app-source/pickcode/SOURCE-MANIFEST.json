@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.39",
+  "version": "3.1.40",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "8ca6e03bf656e9fe6d4e581510a6a3e5ab621298a066079635b57a7d2bf8b13e"
+      "sha256": "6f060126873138c3962ce9d1394127340b24f84cea845bcb09c6e3357073b39c"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -547,17 +547,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "525fd651f0625b44a18c1cda4635b26a093651fe98496ad5619ccedfba33d302"
+      "sha256": "75838d0766430e7114dbffb72cae88b31af75510f0af2a4e6f0c9396e3bca3dd"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "7fc0c9beff83c09a9b46ef7415efa29b5f819e8e626d7c8e68c2fc4b4ccb581a"
+      "sha256": "8aa0e3acf5e526d264f426bddf88a17b6ddb8e92586116c6e8123d8447c18710"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "d2f788887753749783a61dd1528a3890537ed12d43f04b004fd950f31e1d5eac"
+      "sha256": "10c5bee148c200e6590de0f0f87ca52ff746871d93efcf5e62c858180c9fe51f"
     },
     {
       "path": "pages.json",
@@ -586,8 +586,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 39361,
-      "sha256": "e912e58a968e25238b4759636a021ba7a4add433a895f8341e2b1d30785c2dff"
+      "size": 40339,
+      "sha256": "098bef77d194a50db0ce6b7a02b07cdf04c21f9134ea63ef5e15b0d66b4db9fd"
     },
     {
       "path": "pages/my/faq.vue",
@@ -2528,8 +2528,8 @@
     },
     {
       "path": "README.md",
-      "size": 2055,
-      "sha256": "b7eae36abf7ff78d11e7dee282ef88a0d1675b9260c06a781c9a3fe656b1be64"
+      "size": 2600,
+      "sha256": "c0684657a09934ff891ccbe28f2af8df3b663f7893ef3d41f0f6e7f2946cbe82"
     },
     {
       "path": ".gitignore",

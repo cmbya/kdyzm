@@ -1,8 +1,8 @@
-# 取件助手 App 3.1.39 公开源码
+# 取件助手 App 3.1.40 公开源码
 
 这是已授权发布的 Android / Vue App 生产源码快照。源于 [SongZX0106/PickCode](https://github.com/SongZX0106/PickCode) 的提交 `07f9fed59122d7f2210a825aadedc2a913a83176`，包含当前私人取件助手的后续实现与 B 版界面。原木兰宽松许可证保留在 [LICENSE](LICENSE)。运行源码保持与构建工作区字节一致；`SOURCE-MANIFEST.json` 记录逐文件 SHA-256。
 
-当前 main 另包含 [2026-11-09 路牌时间轴改动](../../docs/designs/road-signs-20261109/README.md)，已通过完整构建验证，尚未发布包含该改动的新版 APK。安装包版本仍为 3.1.39，已有 Release 不包含这次源码更新。
+App **3.1.40 / 30140** 包含 [2026-11-09 路牌时间轴改动](../../docs/designs/road-signs-20261109/README.md)：四个真实节点路牌与独立时间牌、小车上车道定位、下车道耗时和沿曲线排列的名称，以及与站点名称同行的更换站点按钮。配套后台 **3.1.36** 内置新版APK，业务接口和数据库不变。安装包入口为 [App 3.1.40 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.40)，更新方式和验证边界见 [本轮升级说明](../../docs/road-signs-3.1.40.md)。
 
 ## 构建
 
