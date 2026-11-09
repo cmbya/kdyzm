@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { fail, onlyKeys } from './security.mjs';
+import './logistics-rules.js';
 
 export const PICKUP_COMPLETION_VERSION = 1;
 const validTime = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000;
@@ -37,15 +38,19 @@ export const builtinPickupCompletionRules = Object.freeze([
   { id: 'builtin-recipient-signature-v1', version: 1, kind: 'recipient_signed', keywords: [], enabled: true, origin: 'builtin' },
   { id: 'builtin-user-collection-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
   { id: 'builtin-pdd-out-cabinet-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
+  { id: 'builtin-taobao-pickup-point-exit-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
 ]);
 
 function providerCollection(event) {
-  if (event?.provider !== 'pdd' || event.providerStatus !== 'OUT_CABINET' || event.providerStatusTag !== '已取件'
-    || event.providerSubStatus !== 'OUT_CABINET_501') return false;
+  const ruleId = event?.provider === 'pdd' && event.providerStatus === 'OUT_CABINET' && event.providerStatusTag === '已取件'
+    && event.providerSubStatus === 'OUT_CABINET_501' ? 'builtin-pdd-out-cabinet-v1'
+    : event?.provider === 'taobao' && event.providerStatus === 'doing' && event.providerStatusTag === '已签收'
+      && event.providerStatusText === '包裹已从代收点取出' ? 'builtin-taobao-pickup-point-exit-v1' : '';
+  if (!ruleId) return '';
   const narrative = completionNarrative(event.description), text = compact(narrative).replace(/代收点/gu, '');
   // The location label is compatible with a confirmed exit; explicit failure/correction still wins.
   return !uncertainty.test(narrative) && !uncertainty.test(text) && !forbidden.test(text) && !incomplete.test(text)
-    && !nonParcel.test(text) && !instruction.test(text);
+    && !nonParcel.test(text) && !instruction.test(text) ? ruleId : '';
 }
 
 export function validatePickupCompletionRule(input) {
@@ -70,21 +75,32 @@ export function completionConflict(description) {
 
 export function detectPickupCompletion(shipment, { rules = [], now = Date.now() } = {}) {
   const events = Array.isArray(shipment?.logisticsEvents) ? shipment.logisticsEvents : [];
-  const candidates = events.filter(event => validTime(event?.time) && event.time <= now && (providerCollection(event) || completionKind(event.description)))
+  const candidates = events.filter(event => validTime(event?.time) && event.time <= now
+    && globalThis.PickCodeLogistics.eventTimeIssue(event, now) !== 'timeConflict' && (providerCollection(event) || completionKind(event.description)))
     .sort((a, b) => b.time - a.time);
   for (const event of candidates) {
     if (validTime(shipment.arrivalAt) && shipment.arrivalAt >= event.time) continue;
-    if (events.some(other => !providerCollection(other) && (other?.provider === 'pdd' && other.providerStatus === 'IN_CABINET' || completionConflict(other?.description))
-      && (!validTime(other.time) || other.time >= event.time))) continue;
-    const structured = providerCollection(event), kind = structured ? 'user_collected' : completionKind(event.description);
+    if (events.some(other => other?.time === event.time && other.description === event.description
+      && (!other.provider || !event.provider || other.provider === event.provider)
+      && globalThis.PickCodeLogistics.eventTimeIssue(other, now) === 'timeConflict')) continue;
+    const structured = providerCollection(event);
+    if (events.some(other => {
+      // A historical display status cannot retract the identical previously verified Taobao pickup fact.
+      if (structured === 'builtin-taobao-pickup-point-exit-v1' && other?.provider === 'taobao' && other.providerStatus === 'done'
+        && ['time', 'description', 'providerStatusTag', 'providerStatusText'].every(key => other[key] === event[key])
+        && (other.location || '') === (event.location || '') && (other.providerSubStatus || '') === (event.providerSubStatus || '')) return false;
+      return !providerCollection(other) && (other?.provider === 'pdd' && other.providerStatus === 'IN_CABINET' || completionConflict(other?.description))
+        && (!validTime(other.time) || other.time >= event.time);
+    })) continue;
+    const kind = structured ? 'user_collected' : completionKind(event.description);
     const description = String(event.description).slice(0, 600), value = compact(description);
-    const builtins = structured ? builtinPickupCompletionRules.filter(rule => rule.id === 'builtin-pdd-out-cabinet-v1')
-      : signature.test(value) || collection.test(value) ? builtinPickupCompletionRules.filter(rule => rule.id !== 'builtin-pdd-out-cabinet-v1') : [];
+    const builtinId = structured || (signature.test(value) ? 'builtin-recipient-signature-v1' : collection.test(value) ? 'builtin-user-collection-v1' : '');
+    const builtins = builtinPickupCompletionRules.filter(rule => rule.id === builtinId);
     const rule = [...builtins, ...rules.filter(rule => rule.enabled && rule.kind === kind && rule.keywords?.length && rule.keywords.every(keyword => value.includes(compact(keyword))))]
       .find(rule => rule.enabled && rule.kind === kind);
     if (!rule) continue;
-    const provider = structured ? { provider: 'pdd', providerStatus: event.providerStatus, providerStatusTag: event.providerStatusTag,
-      providerSubStatus: event.providerSubStatus, providerStatusText: event.providerStatusText || '' } : {};
+    const provider = structured ? { provider: event.provider, providerStatus: event.providerStatus, providerStatusTag: event.providerStatusTag,
+      ...(event.providerSubStatus ? { providerSubStatus: event.providerSubStatus } : {}), providerStatusText: event.providerStatusText || '' } : {};
     return { kind, description, eventTime: event.time, timePrecision: ['second', 'minute'].includes(event.timePrecision) ? event.timePrecision : 'unknown', ...provider,
       fingerprint: createHash('sha256').update(JSON.stringify([event.time, description, kind, ...(structured ? [provider] : [])])).digest('hex'), ruleId: rule.id, ruleVersion: rule.version };
   }

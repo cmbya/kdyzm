@@ -8,6 +8,7 @@ const validWaybill = value => !!value && !/^(?:待发货|暂无|无|0|WAITING_FO
 const unavailable = (waybillNo, message) => ({ ...(waybillNo ? { waybillNo } : {}), state: 'unavailable', message });
 const orderMatches = (value, id) => ['order_sn', 'orderSn'].every(key => value?.[key] === undefined || text(value[key]) === id);
 const waybillMatches = (value, expected) => ['tracking_number', 'trackingNumber'].every(key => value?.[key] === undefined || waybill(value[key]) === expected);
+export { orderMatches as pddOrderMatches, waybillMatches as pddWaybillMatches };
 
 function pickQuery(input, fields) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
@@ -47,6 +48,7 @@ function parcelFrom(item, expectedOrderId) {
   if (!orderMatches(item, expectedOrderId)) return { failure: unavailable(waybillNo, '平台分包订单不匹配') };
   const query = item.jump_url ? queryFromUrl(item.jump_url, [...TRACK_FIELDS, 'external']) : {};
   if (!query || query.external && query.external !== '1') return { failure: unavailable(waybillNo, '平台分包查询信息不可用') };
+  const external = query.external;
   delete query.external;
   const shippingId = text(item.shipping_id);
   if (query.order_sn && query.order_sn !== expectedOrderId
@@ -58,7 +60,7 @@ function parcelFrom(item, expectedOrderId) {
   const checked = pickQuery(query, TRACK_FIELDS);
   if (!checked?.shipping_id) return { failure: unavailable(waybillNo, '平台分包缺少运单查询标识') };
   // shipping_id is a query selector, not a verified unique platform package identity.
-  return { parcel: { waybillNo, carrier: text(item.shipping_name), query: checked } };
+  return { parcel: { waybillNo, carrier: text(item.shipping_name), query: checked, ...(external === '1' ? { external } : {}) } };
 }
 
 export async function discoverPddSplit(shipping, options) {
@@ -103,4 +105,24 @@ export async function fetchPddSplitTrack(parcel, options) {
     return { failure: unavailable(waybillNo, '平台分包物流格式或运单标识不匹配') };
   }
   return { shipping };
+}
+
+export async function fetchPddSplitCabinet(parcel, options) {
+  const { expectedOrderId } = options;
+  const waybillNo = waybill(parcel?.waybillNo), query = pickQuery(parcel?.query, TRACK_FIELDS);
+  if (parcel?.external !== '1' || !text(expectedOrderId) || !validWaybill(waybillNo) || !query?.shipping_id
+    || query.order_sn !== expectedOrderId || query.tracking_number !== waybillNo) {
+    return { failure: unavailable(waybillNo, '平台分包缺少匹配的柜码查询标识') };
+  }
+  const data = await read(`api/express/cabinet/${encodeURIComponent(expectedOrderId)}`, {
+    ...(query.entry_source ? { entry_source: query.entry_source } : {}),
+    shipping_id: query.shipping_id, tracking_number: waybillNo, external: '1',
+  }, options);
+  const cabinet = data?.result;
+  if (!cabinet || typeof cabinet !== 'object' || Array.isArray(cabinet)
+    || !orderMatches(data, expectedOrderId) || !orderMatches(cabinet, expectedOrderId)
+    || !waybillMatches(data, waybillNo) || !waybillMatches(cabinet, waybillNo)) {
+    return { failure: unavailable(waybillNo, '平台分包柜码格式或运单标识不匹配') };
+  }
+  return { cabinet };
 }

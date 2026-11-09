@@ -1,0 +1,18 @@
+{
+  "note": "2026-11-10 read-only Taobao response shape; identities, station and unrelated track removed. Current stage wording/status and timestamps retained.",
+  "fields": {
+    "mailNo": "SYNTHETIC-TB-86",
+    "logisticCompany": { "name": "申通快递" },
+    "multiStage": [
+      { "isShowLogisticDetailPop": "true", "labelDesc": { "text": "包裹已从代收点取出" }, "rightBtnText": "详细信息", "status": "doing", "subtitle": "11-10 00:34", "title": "已签收" },
+      { "labelDesc": { "richContent": [{ "text": "【驿站】您的包裹已存放至【合成驿站】，请及时取件" }], "text": "【驿站】您的包裹已存放至【合成驿站】，请及时取件" }, "status": "waitdo", "subtitle": "11-09 17:59", "title": "待取件" }
+    ]
+  },
+  "transit": {
+    "expressName": "申通快递", "expressId": "SYNTHETIC-TB-86", "isSuccess": true,
+    "address": [
+      { "place": "签收", "time": "2026-11-10 00:34:30" },
+      { "place": "【驿站】您的包裹已存放至【合成驿站】，请及时取件", "time": "2026-11-09 17:59:37" }
+    ]
+  }
+}

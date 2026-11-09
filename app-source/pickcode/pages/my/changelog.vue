@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.44 · 私人版</text><text class="version-date">2026-11-10</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">淘宝</text><text class="content">修复明确已取却未更新状态的问题，完善多包裹物流读取和时间识别</text></view>
+          <view class="update-item"><text class="tag optimize">读取</text><text class="content">配套后台分别优化京东、拼多多、淘宝的拆单、物流及取件码识别，减少漏读和串包</text></view>
+          <view class="update-item"><text class="tag fix">状态</text><text class="content">加强异常时间与冲突轨迹校验，保留可信物流信息和手动取件状态</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.43 · 私人版</text><text class="version-date">2026-11-09</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag fix">识别</text><text class="content">快递超市明确入库轨迹即时识别到货时间，已有站点也可补全遗漏；时间冲突保留待核对</text></view>

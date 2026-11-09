@@ -989,13 +989,14 @@ var PickCodeCore = (function () {
     return value;
   }
   function mergeProviderEventFields(target,source) {
-    if(source.provider!=='pdd')return;
-    var fields={provider:'pdd'};
+    if(['pdd','taobao'].indexOf(source.provider)<0)return true;
+    var fields={provider:source.provider};
     [['providerStatus',64],['providerStatusTag',120],['providerSubStatus',64],['providerStatusText',120]].forEach(function(pair){
       var value=source[pair[0]];if(typeof value==='string'&&value.trim())fields[pair[0]]=value.trim().slice(0,pair[1]);
     });
-    if(Object.keys(fields).some(function(key){return target[key]&&target[key]!==fields[key];}))return;
+    if(Object.keys(fields).some(function(key){return target[key]&&target[key]!==fields[key];}))return false;
     Object.keys(fields).forEach(function(key){target[key]=fields[key];});
+    return true;
   }
   function logisticsEvents(values) {
     var seen={},events=[];
@@ -1004,12 +1005,40 @@ var PickCodeCore = (function () {
       var e={time:timestamp(value.time),timeText:text(value.timeText,100),description:text(value.description,600),location:text(value.location,120)};
       if(['second','minute','unknown'].indexOf(value.timePrecision)>=0)e.timePrecision=value.timePrecision;
       mergeProviderEventFields(e,value);
-      var key=JSON.stringify([e.time,e.time?'':e.timeText,e.description,e.location]);
+      var key=JSON.stringify([e.time,e.time?'':e.timeText,e.description,e.location,logistics.eventTimeIssue(e,Date.now())==='timeConflict']);
       if(!e.description)return;
-      if(seen[key]){mergeProviderEventFields(seen[key],e);return;}
-      seen[key]=e;e.index=index;events.push(e);
+      var matches=seen[key]||[];
+      if(matches.some(function(prior){return mergeProviderEventFields(prior,e);}))return;
+      matches.push(e);seen[key]=matches;e.index=index;events.push(e);
     });
-    return events.sort(function(a,b){return b.time-a.time||a.index-b.index;}).slice(0,100).map(function(e){delete e.index;return e;});
+    var datedTaobao={};
+    events.forEach(function(e){
+      if(e.provider!=='taobao'||!e.time||e.time>Date.now()||!e.timeText)return;
+      var key=JSON.stringify([e.timeText,e.description,e.location]);
+      if(datedTaobao[key]===undefined)datedTaobao[key]=e;
+      else if(datedTaobao[key]&&datedTaobao[key].time!==e.time)datedTaobao[key]=false;
+    });
+    // Replace only an identical undated summary; conflicting provider facts must survive.
+    events=events.filter(function(e){
+      if(e.time||!e.timeText)return true;
+      var dated=datedTaobao[JSON.stringify([e.timeText,e.description,e.location])];
+      return !dated||['provider','providerStatus','providerStatusTag','providerSubStatus','providerStatusText'].some(function(key){return e[key]&&e[key]!==dated[key];});
+    });
+    events.sort(function(a,b){return b.time-a.time||a.index-b.index;});
+    if(events.length<=100)return events.map(function(e){delete e.index;return e;});
+    var groups={},kept=[];
+    function eventKey(e){return JSON.stringify([e.time,e.time?'':e.timeText,e.description,e.location]);}
+    events.forEach(function(e){var key=eventKey(e);(groups[key]||(groups[key]=[])).push(e);});
+    function keep(e){
+      if(!e)return true;
+      var group=groups[eventKey(e)].filter(function(item){return kept.indexOf(item)<0;});
+      if(kept.length+group.length>100)return false;
+      kept=kept.concat(group);return true;
+    }
+    keep(events.filter(function(e){return e.provider==='pdd'&&e.providerStatus==='IN_CABINET';})[0]);
+    keep(events.filter(function(e){return e.provider==='pdd'&&e.providerStatus==='IN_CABINET'&&!e.time;})[0]);
+    for(var i=0;i<events.length;i++){if(kept.length>=100||!keep(events[i]))break;}
+    return events.filter(function(e){return kept.indexOf(e)>=0;}).map(function(e){delete e.index;return e;});
   }
   function shipmentStatus(state,s) {
     var disposition=shipmentDisposition(s);if(disposition)return disposition.kind==='doorstep'?'signed':disposition.kind;

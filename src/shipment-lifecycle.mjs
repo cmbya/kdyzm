@@ -1,4 +1,5 @@
 import './logistics-rules.js';
+import { completionConflict } from './pickup-completion.mjs';
 
 const logistics = globalThis.PickCodeLogistics;
 const validTime = value => Number.isSafeInteger(value) && value > 0 && value <= 8640000000000000 ? value : 0;
@@ -31,7 +32,22 @@ export function shippingEvidence(events = [], old = {}, now = Date.now(), cycle 
 
 export function retainMilestoneEvents(events, rules, now = Date.now(), limit = 100) {
   if (events.length <= limit) return events;
-  const kept = new Set(), pin = event => { if (event) kept.add(event); };
+  const kept = new Set(), groups = new Map();
+  const key = event => JSON.stringify([event.time, event.time ? '' : event.timeText, event.description, event.location || '']);
+  for (const event of events) { const id = key(event), group = groups.get(id) || []; group.push(event); groups.set(id, group); }
+  const pin = event => {
+    if (!event) return true;
+    const group = groups.get(key(event)).filter(item => !kept.has(item));
+    if (kept.size + group.length > limit) return false;
+    for (const item of group) kept.add(item);
+    return true;
+  };
+  // Saved completion evidence can outlive a truncated timeline; its latest counterevidence must survive too.
+  pin(events.find(event => event.provider === 'pdd' && event.providerStatus === 'IN_CABINET' && validTime(event.time)));
+  pin(events.find(event => event.provider === 'pdd' && event.providerStatus === 'IN_CABINET' && !validTime(event.time)));
+  const conflicts = events.filter(event => completionConflict(event.description) || logistics.eventTimeIssue(event, now) === 'timeConflict');
+  pin(conflicts.find(event => validTime(event.time)));
+  pin(conflicts.find(event => !validTime(event.time)));
   const reset = events.find(event => validTime(event.time) && event.time <= now && logistics.pickupCycleReset(event.description || ''));
   pin(reset);
   pin(events.find(event => validTime(event.time) && event.time > now && logistics.pickupCycleReset(event.description || '')));
@@ -42,6 +58,6 @@ export function retainMilestoneEvents(events, rules, now = Date.now(), limit = 1
   pin(events.find(event => arrival.arrivalAt && event.time === arrival.arrivalAt
     && logistics.pickupArrivalEvent(event.description, arrival.station, rules)));
   // Keep the bounded timeline useful while retaining evidence needed for later imports and rule edits.
-  for (const event of events) { if (kept.size >= limit) break; kept.add(event); }
+  for (const event of events) { if (kept.size >= limit || !pin(event)) break; }
   return events.filter(event => kept.has(event));
 }

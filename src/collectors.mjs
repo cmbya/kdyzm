@@ -2,8 +2,8 @@
 // Copyright (c) 2026. Non-commercial license: ../licenses/Pickup-Code-Display-LICENSE.txt.
 // This adapter intentionally does not inherit upstream's automatic "picked" transitions.
 import { createHash } from 'node:crypto';
-import { discoverPddSplit, fetchPddSplitTrack } from './pdd-split.mjs';
-import { activeKnownOrders, activeKnownParcels, eventStatus, homeDeliveryCompleted, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, orderTimePrecision, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDateEvidence, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
+import { discoverPddSplit, fetchPddSplitTrack, fetchPddSplitCabinet, pddOrderMatches, pddWaybillMatches } from './pdd-split.mjs';
+import { activeKnownOrders, activeKnownParcels, corroborateTaobaoEventTimes, eventStatus, homeDeliveryCompleted, logisticsEventTimeIssue, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, orderTimePrecision, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDateEvidence, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
@@ -145,7 +145,8 @@ export function extractSsrFields(html) {
 }
 function stageText(stage) {
   const label = stage.labelDesc;
-  return Array.isArray(label?.richContent) ? label.richContent.map(r => r.text || '').join('') : typeof label === 'string' ? label : label?.text || stage.text || '';
+  return (Array.isArray(label?.richContent) ? label.richContent.map(r => asText(r?.text)).join('') : '')
+    || (typeof label === 'string' ? label : asText(label?.text || stage.text));
 }
 function codeOf(value) { return value.match(/(?:取件码|取货码|提货码|自提码)\s*(?:是|为)?\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9-]{3,15})/)?.[1] || ''; }
 function arrivalEvidence(value, rules) { return eventStatus(value, 'unknown', rules) === 'arrived'; }
@@ -187,15 +188,19 @@ function taobaoOrderKind({ tradeStatus, orderStatus }) {
   return 'skip';
 }
 
-export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules, checkedAt) {
-  const packages = fields.multiPackages?.packages || [];
-  const baseNo = asText(fields.mailNo || fields.logisticCompany?.mailNo);
-  const sources = packages.length ? packages.filter(p => p?.mailNo).map(p => ({ ...p, mailNo: asText(p.mailNo) })) : baseNo ? [{ mailNo: baseNo }] : [];
+export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules, checkedAt = Date.now()) {
+  const packages = Array.isArray(fields.multiPackages?.packages) ? fields.multiPackages.packages : [];
+  const baseNo = asText(fields.mailNo || fields.logisticCompany?.mailNo).trim();
+  const sources = [...new Map(packages.filter(p => asText(p?.mailNo).trim()).map(p => [asText(p.mailNo).trim(), { ...p, mailNo: asText(p.mailNo).trim() }])).values()];
+  if (baseNo && !sources.some(parcel => parcel.mailNo === baseNo)) sources.push({ mailNo: baseNo });
   return sources.map(parcel => {
     // A parent-level code is unsafe to copy onto every split shipment.
-    const specific = parcel.fields || (parcel.multiStage ? parcel : null);
-    const selected = specific || (sources.length === 1 || parcel.mailNo === baseNo ? fields : {});
-    const stages = Array.isArray(selected.multiStage) ? selected.multiStage : [];
+    const detail = parcel.fields || (parcel.multiStage ? parcel : null);
+    const matches = value => [value?.mailNo, value?.logisticCompany?.mailNo].every(no => !asText(no).trim() || asText(no).trim() === parcel.mailNo);
+    const specific = detail && matches(detail) ? detail : null;
+    const selected = specific || ((!baseNo && sources.length === 1 || parcel.mailNo === baseNo) && matches(fields) ? fields : {});
+    const allStages = Array.isArray(selected.multiStage) ? selected.multiStage.filter(stage => stage && typeof stage === 'object') : [];
+    const stages = allStages.filter(stage => logisticsTimestamp(stage.time || stage.date || stage.occurTime || stage.subtitle, timestamp) <= checkedAt);
     let pickupCode = '', arrived = false;
     for (const stage of stages) {
       const content = stageText(stage);
@@ -224,7 +229,7 @@ export function taobaoParcels(fields, platformOrderId, fallbackCode = '', rules,
       && !/(?:未|待|拒绝?|请|等待|当面)[^，,。；;！？!?]{0,8}(?:已完成签收|签收成功|已签收)/.test(latestBody);
     const latestSigned = homeDeliveryCompleted(latest) || (!latestTransitTitle && /^(?:签收|已签收|签收成功)$/.test(latestTitle)) || (!latestTransitTitle && latestBodySigned);
     const status = latestAtPickupPoint ? 'arrived' : latestSigned ? 'signed' : latestTransit ? 'transit' : arrived ? 'arrived' : 'unknown';
-    const { events: logisticsEvents, truncated: logisticsTruncated } = taobaoStageEvents(stages, timestamp, stageText, rules, checkedAt);
+    const { events: logisticsEvents, truncated: logisticsTruncated } = taobaoStageEvents(allStages, timestamp, stageText, rules, checkedAt);
     const evidence = pickupEvidence(stages.filter(stage => stage && !/^送至/.test(asText(stage.title))).map(stage => {
       const rawTime = stage.time || stage.date || stage.occurTime || stage.subtitle;
       const description = `${stage.title || ''}：${stageText(stage)}`;
@@ -253,7 +258,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
   async function enrichDate(metadata) {
     const previous = known.get(metadata.platformOrderId);
     const verifiedDetail = previous?.orderDateOrigin === 'detail' && ['second', 'minute', 'day'].includes(previous.orderDatePrecision);
-    if (dateBudget <= 0 || dateAttempted.has(metadata.platformOrderId) || (!targetOrder && (verifiedDetail || (!previous && metadata.orderDate)))) return;
+    if (dateBudget <= 0 || dateAttempted.has(metadata.platformOrderId) || (verifiedDetail && (!targetOrder || previous.orderDate > 0)) || (!targetOrder && !previous && metadata.orderDate)) return;
     const checkedAt = now();
     if (!targetOrder && previous?.dateCheckedAt && checkedAt - previous.dateCheckedAt < 24 * 60 * 60 * 1000) return;
     dateBudget--; dateAttempted.add(metadata.platformOrderId);
@@ -280,6 +285,29 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       const fields = extractSsrFields(result.text);
       if (!fields) warnings.push('部分订单暂无可解析物流，订单仍保留');
       const parcels = taobaoParcels(fields || {}, platformOrderId, pickupCodes[platformOrderId], rules, checkedAt);
+      // The official package switch supplies these selectors; fetch only siblings without their own detail.
+      for (const parcel of parcels.filter(item => item.logisticsState === 'unavailable')) {
+        const selector = fields?.multiPackages?.packages?.find(item => asText(item?.mailNo).trim() === parcel.waybillNo);
+        if (!selector || !asText(selector.cpCode || selector.orderCode)) continue;
+        try {
+          const query = new URLSearchParams({ 'x-ssr': 'true', bizOrderId: platformOrderId, mailNo: parcel.waybillNo });
+          for (const key of ['cpCode', 'orderCode']) if (asText(selector[key])) query.set(key, asText(selector[key]));
+          const detail = await platformRequest(`https://pages-g.m.taobao.com/wow/z/app/mtb/logisticsV2/h5-detail?${query}`, session.cookie, { fetchImpl });
+          const selectedFields = extractSsrFields(detail.text);
+          const selectedParcel = taobaoParcels(selectedFields || {}, platformOrderId, '', rules, checkedAt)
+            .find(item => item.waybillNo === parcel.waybillNo && item.logisticsState !== 'unavailable');
+          if (selectedParcel) Object.assign(parcel, selectedParcel);
+          else parcel.logisticsError = '平台未返回该分包的独立物流';
+        } catch (error) {
+          if (mustStopLogistics(error, durableLogistics)) {
+            const ready = parcels.filter(item => item.logisticsState === 'ok').map(item => ({ ...structuredClone(item), logisticsCheckedAt: checkedAt, logisticsUpdatedAt: checkedAt }));
+            if (ready.length) await onProgress?.({ orders: [], orderUpdates: [], shipments: ready, logisticsFailures: [], warnings: [] });
+            stopped = error; interruption++; throw error;
+          }
+          parcel.logisticsError = '分包物流查询失败，已保留其余运单';
+          warnings.push('部分分包物流查询失败，已保留其余运单');
+        }
+      }
       // A partial split response must also record the attempt for known active
       // waybills it omits, without copying another parcel's events or pickup code.
       for (const parcel of knownParcels(platformOrderId)) {
@@ -379,8 +407,14 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
       }
       if (parcel) {
         const transit = taobaoTransitEvents(data, timestamp, rules, checkedAt);
+        const metadata = [orders.find(order => order.platformOrderId === platformOrderId), orderUpdates.find(order => order.platformOrderId === platformOrderId), known.get(platformOrderId)]
+          .find(order => order?.orderDateOrigin === 'detail' && order.orderDate > 0);
+        const notBefore = metadata?.orderDate || 0;
+        parcel.logisticsEvents = corroborateTaobaoEventTimes(parcel.logisticsEvents, transit.events, checkedAt, { notBefore });
+        const usableSummary = parcel.logisticsEvents.filter(event => logisticsEventTimeIssue(event, checkedAt) !== 'timeConflict');
+        const latestTransit = transit.events.find(event => logisticsEventTimeIssue(event, checkedAt) !== 'timeConflict');
         const canUpdateStatus = parcel.status === 'unknown' || !parcel.logisticsEvents.length
-          || (parcel.logisticsEvents.every(event => event.time > 0) && transit.events[0]?.time >= parcel.logisticsEvents[0].time);
+          || (usableSummary.length && usableSummary.every(event => event.time > 0) && latestTransit?.time >= usableSummary[0].time);
         const combined = normalizeLogisticsEvents([...transit.events, ...parcel.logisticsEvents], timestamp, rules, checkedAt);
         const events = combined.events;
         if (events.length) {
@@ -390,9 +424,10 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, trackedOrderIds
           parcel.logisticsError = '';
           // An undated SSR pickup notice can be newer than a dated PC event.
           // Only replace its current state when the two sources can be ordered.
-          if (canUpdateStatus) parcel.status = eventStatus(events[0].description, parcel.status, rules);
+          const usable = events.filter(event => logisticsEventTimeIssue(event, checkedAt) !== 'timeConflict');
+          if (canUpdateStatus && usable.length) parcel.status = eventStatus(usable[0].description, parcel.status, rules);
           parcel.carrier ||= asText(data.expressName);
-          if (canUpdateStatus) applyTrackEvidence(parcel, events, rules);
+          if (canUpdateStatus) applyTrackEvidence(parcel, usable, rules);
         }
         parcel.logisticsUpdatedAt = checkedAt;
         if (!events.length) { parcel.logisticsState = 'empty'; parcel.logisticsError = '平台本次未返回物流轨迹'; }
@@ -474,7 +509,8 @@ export function pddParcels(order, cabinet, rules) {
   const parcels = Array.isArray(listed) && listed.length ? listed : order.tracking_number ? [order] : [];
   return parcels.filter(parcel => validPddWaybill(parcel.tracking_number || parcel.mail_no)).map(parcel => {
     const waybillNo = pddWaybill(parcel.tracking_number || parcel.mail_no);
-    const cabinetMatches = parcels.length === 1 || pddWaybill(cabinet.tracking_number) === waybillNo;
+    const cabinetMatches = pddOrderMatches(cabinet, platformOrderId) && pddWaybillMatches(cabinet, waybillNo)
+      && (parcels.length === 1 || pddWaybill(cabinet.tracking_number || cabinet.trackingNumber) === waybillNo);
     const code = cabinetMatches ? asText(cabinet.code).trim() : '';
     const statusText = asText(parcel.shipping_status_text || order.order_status_text || order.status_text);
     const status = eventStatus(statusText, /交易成功|交易完成/.test(statusText) ? 'signed' : code || (cabinetMatches && cabinet.arrival_time) ? 'arrived' : 'transit', rules);
@@ -500,7 +536,8 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     Object.assign(parcel, { logisticsEvents: events, logisticsTruncated: truncated,
       logisticsState: events.length ? 'ok' : 'empty', logisticsError: events.length ? '' : '平台本次未返回物流轨迹',
       logisticsCheckedAt: checkedAt, logisticsUpdatedAt: checkedAt });
-    if (events.length) { parcel.status = eventStatus(events[0].description, parcel.status, rules); applyTrackEvidence(parcel, events, rules); }
+    const usable = events.filter(event => logisticsEventTimeIssue(event, checkedAt) !== 'timeConflict');
+    if (usable.length) { parcel.status = eventStatus(usable[0].description, parcel.status, rules); applyTrackEvidence(parcel, usable, rules); }
   };
   async function collectLogistics({ platformOrderId, parcels: inputParcels, missingFromList }) {
     const parcels = structuredClone(inputParcels), logisticsFailures = [], warnings = [], splitParcels = [];
@@ -508,25 +545,35 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     try {
       const query = new URLSearchParams({ query_type: '2', entry_source: '2', ts: String(checkedAt) });
       const response = await platformRequest(`https://mobile.yangkeduo.com/proxy/api/order/${encodeURIComponent(platformOrderId)}/shipping?${query}`, cookie, { fetchImpl, headers });
-      const shipping = pddCheck(json(response.text)).shipping;
+      const payload = pddCheck(json(response.text)), shipping = payload.shipping;
       if (!shipping || !Array.isArray(shipping.traces)) throw new CollectorError('UPSTREAM_FORMAT', '拼多多物流轨迹字段已变化');
-      if (shipping.order_sn != null && asText(shipping.order_sn) !== platformOrderId) throw new CollectorError('UPSTREAM_FORMAT', '拼多多物流订单标识不匹配');
       const waybillNo = pddWaybill(shipping.tracking_number || shipping.trackingNumber);
+      if (!pddOrderMatches(payload, platformOrderId) || !pddOrderMatches(shipping, platformOrderId) || !pddWaybillMatches(shipping, waybillNo)) {
+        throw new CollectorError('UPSTREAM_FORMAT', '拼多多物流订单或运单标识不匹配');
+      }
       if (targetOrder && !parcels.length && validPddWaybill(waybillNo)) parcels.push({ platformOrderId, waybillNo: pddWaybill(waybillNo), carrier: '', status: 'unknown' });
       const target = waybillNo ? parcels.find(parcel => parcel.waybillNo === waybillNo) : parcels.length === 1 ? parcels[0] : null;
-      const discovered = await discoverPddSplit(shipping, splitOptions(platformOrderId));
+      if (target) {
+        if (waybillNo === target.waybillNo) target.carrier = asText(shipping.shipping_name || shipping.shippingName) || target.carrier;
+        applyShipping(target, shipping, checkedAt);
+      }
+      let discovered = { parcels: [], failures: [] };
+      try { discovered = await discoverPddSplit(shipping, splitOptions(platformOrderId)); }
+      catch (error) {
+        if (mustStopLogistics(error, durableLogistics)) {
+          // A retryable sibling query must not discard the independently verified main track.
+          if (target) await onProgress?.({ orders: [], orderUpdates: [], shipments: [structuredClone(target)], logisticsFailures: [], warnings: [] });
+          throw error;
+        }
+        warnings.push('分包列表查询失败，已保留主运单轨迹');
+      }
       splitParcels.push(...discovered.parcels.filter(parcel => parcel.waybillNo !== target?.waybillNo)
         .map(parcel => ({ ...parcel, platformOrderId })));
       logisticsFailures.push(...discovered.failures.filter(failure => failure.waybillNo).map(failure => ({ platformOrderId, ...failure, logisticsCheckedAt: checkedAt })));
       if (discovered.failures.some(failure => !failure.waybillNo)) warnings.push('部分分包缺少有效运单标识，已保留其余已验证运单');
       if (!parcels.length && !splitParcels.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
       for (const parcel of parcels) {
-        if (parcel !== target) {
-          if (!splitParcels.some(split => split.waybillNo === parcel.waybillNo)) logisticsFailures.push({ platformOrderId, waybillNo: parcel.waybillNo, state: 'unavailable', logisticsCheckedAt: checkedAt });
-          continue;
-        }
-        if (waybillNo === parcel.waybillNo) parcel.carrier = asText(shipping.shipping_name || shipping.shippingName) || parcel.carrier;
-        applyShipping(parcel, shipping, checkedAt);
+        if (parcel !== target && !splitParcels.some(split => split.waybillNo === parcel.waybillNo)) logisticsFailures.push({ platformOrderId, waybillNo: parcel.waybillNo, state: 'unavailable', logisticsCheckedAt: checkedAt });
       }
     } catch (error) {
       if (mustStopLogistics(error, durableLogistics)) throw error;
@@ -551,6 +598,21 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
         if (detail.failure) result.logisticsFailures.push({ platformOrderId, ...detail.failure, logisticsCheckedAt: checkedAt });
         else {
           const parcel = { platformOrderId, waybillNo: candidate.waybillNo, carrier: candidate.carrier, status: 'unknown' };
+          if (candidate.external === '1') {
+            try {
+              const resultCabinet = await fetchPddSplitCabinet(candidate, splitOptions(platformOrderId));
+              if (resultCabinet.cabinet) Object.assign(parcel, pddParcels({ order_sn: platformOrderId, tracking_number: candidate.waybillNo,
+                shipping_name: candidate.carrier }, resultCabinet.cabinet, rules)[0]);
+              else result.warnings.push('部分分包柜码信息未通过运单核对，已保留物流轨迹');
+            } catch (error) {
+              if (mustStopLogistics(error, durableLogistics)) {
+                applyShipping(parcel, detail.shipping, checkedAt);
+                await onProgress?.({ orders: [], orderUpdates: [], shipments: [parcel], logisticsFailures: [], warnings: [] });
+                throw error;
+              }
+              result.warnings.push('部分分包取件码查询失败，已保留物流轨迹');
+            }
+          }
           applyShipping(parcel, detail.shipping, checkedAt); result.shipments.push(parcel);
         }
       } catch (error) {
@@ -571,7 +633,11 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
       dateError: hasDate ? '拼多多暂不支持单单日期详情查询，已保留平台列表日期' : '拼多多暂未提供可验证的单单日期查询，日期仍待确认' };
     await onProgress?.({ orders: [], orderUpdates: [metadata], shipments: [], logisticsFailures: [], warnings: [] });
     const results = parcels.length || !TO_SHIP_STATUS_TEXT.test(asText(targetOrder.orderStatus))
-      ? await runLogistics([{ platformOrderId, parcels }], collectLogistics, { stage: 'pdd-logistics', concurrency: 2, key: item => item.platformOrderId, onResult: applyResult }) : [];
+      ? await runLogistics([{ platformOrderId, parcels }], async candidate => {
+        const cabinet = await enrichCabinet({ ...candidate, orderStatus: targetOrder.orderStatus });
+        const result = await collectLogistics({ ...candidate, parcels: cabinet.shipments });
+        result.warnings.push(...cabinet.warnings); return result;
+      }, { stage: 'pdd-logistics', concurrency: 2, key: item => item.platformOrderId, onResult: applyResult }) : [];
     const splits = await collectSplits(results);
     const combined = new Map([...(results[0]?.shipments || parcels), ...splits].map(parcel => [parcel.waybillNo, parcel]));
     return { orders: [], orderUpdates: [metadata], shipments: [...combined.values()], logisticsFailures, warnings };
@@ -629,7 +695,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     listed.push({ platformOrderId, orderStatus, parcels });
   }
   await onProgress?.({ orders, shipments: [], orderUpdates, logisticsFailures: [], warnings: [...new Set(warnings)] });
-  const enrichCabinet = async ({ platformOrderId, orderStatus, parcels: inputParcels }) => {
+  async function enrichCabinet({ platformOrderId, orderStatus, parcels: inputParcels }) {
     const parcels = structuredClone(inputParcels), warnings = [];
     if (parcels.length) {
       try {
@@ -645,20 +711,20 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
       }
     }
     for (const parcel of activeKnownParcels(knownOrders.find(item => asText(item.platformOrderId) === platformOrderId))) {
-      if (parcels.some(item => item.waybillNo === asText(parcel.waybillNo))) continue;
-      parcels.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
+      if (parcels.some(item => item.waybillNo === pddWaybill(parcel.waybillNo))) continue;
+      parcels.push({ platformOrderId, waybillNo: pddWaybill(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
     }
     return { shipments: parcels, logisticsFailures: [], warnings };
-  };
+  }
   const candidates = listed.map(item => ({ ...item, parcels: [...item.parcels] }));
   for (const candidate of candidates) for (const parcel of activeKnownParcels(knownOrders.find(order => asText(order.platformOrderId) === candidate.platformOrderId))) {
-    if (!candidate.parcels.some(item => item.waybillNo === asText(parcel.waybillNo))) candidate.parcels.push({
-      platformOrderId: candidate.platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
+    if (!candidate.parcels.some(item => item.waybillNo === pddWaybill(parcel.waybillNo))) candidate.parcels.push({
+      platformOrderId: candidate.platformOrderId, waybillNo: pddWaybill(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status });
   }
   for (const order of activeKnownOrders(knownOrders, seen, knownOrders.length)) {
     const platformOrderId = asText(order.platformOrderId);
     const parcels = activeKnownParcels(order).map(parcel => ({
-      platformOrderId, waybillNo: asText(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
+      platformOrderId, waybillNo: pddWaybill(parcel.waybillNo), carrier: asText(parcel.carrier), status: parcel.status,
     }));
     candidates.push({ platformOrderId, parcels, missingFromList: true });
   }
@@ -719,12 +785,19 @@ export function jdParcels(data, platformOrderId, checkedAt, rules) {
     if (!waybillNo) return [];
     if (!Array.isArray(group.orderTrackShowList)) throw new CollectorError('UPSTREAM_FORMAT', '京东物流节点字段已变化，已保留原轨迹');
     const { events, truncated } = normalizeLogisticsEvents(group.orderTrackShowList.map(step => ({
-      time: step.CreationTime, description: [asText(step.StatusName), asText(step.Content)].filter(Boolean).join('：'),
+      time: step?.CreationTime, description: [asText(step?.StatusName), asText(step?.Content)].filter(Boolean).join('：'),
     })), timestamp, rules, checkedAt);
-    const latest = events[0];
-    const pickupCode = pickupCycleReset(latest?.description || '') ? '' : asText(group.checkCode).trim() || codeOf(latest?.description || '');
+    const usable = events.filter(event => logisticsEventTimeIssue(event, checkedAt) !== 'timeConflict');
+    const latest = usable[0];
+    let pickupCode = pickupCycleReset(latest?.description || '') ? '' : asText(group.checkCode).trim() || codeOf(latest?.description || '');
     const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'transit', rules);
-    const evidence = status === 'signed' ? pickupEvidence([], rules) : pickupEvidence(events, rules);
+    if (!pickupCode && status === 'arrived') {
+      for (const event of usable) {
+        if (pickupCycleReset(event.description) || eventStatus(event.description, 'unknown', rules) === 'signed') break;
+        if (event.time > 0 && event.time <= checkedAt && (pickupCode = codeOf(event.description))) break;
+      }
+    }
+    const evidence = status === 'signed' ? pickupEvidence([], rules) : pickupEvidence(usable, rules);
     return [{ platformOrderId, waybillNo, carrier: asText(carriage.carrier), status, pickupCode,
       ...evidence,
       logisticsEvents: events, logisticsTruncated: truncated, logisticsState: events.length ? 'ok' : 'empty',
@@ -767,13 +840,13 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
       // The PC API formats its submit time with a literal HTML line break.
       const submitDate = asText(data.processTimeInfo?.submitDate).replace(/\s*<br\s*\/?>\s*/gi, ' ');
       const orderDate = logisticsTimestamp(submitDate, timestamp);
-      const terminal = returnedParcels.length && returnedParcels.every(parcel => parcel.status === 'signed');
+      const returned = new Set(returnedParcels.map(parcel => parcel.waybillNo));
+      const missing = activeKnownParcels(known).filter(parcel => !returned.has(asText(parcel.waybillNo)));
+      const terminal = returnedParcels.length && !missing.length && returnedParcels.every(parcel => parcel.status === 'signed');
       const update = { platformOrderId, ...(orderDate ? { orderDate, orderDatePrecision: orderTimePrecision(submitDate), orderDateOrigin: 'detail' } : {}), dateCheckedAt: checkedAt,
         dateState: orderDate ? 'ok' : 'empty', ...(terminal ? { orderStatus: '已签收' } : {}) };
       orderUpdates.push(update);
       shipments.push(...parcels);
-      const returned = new Set(returnedParcels.map(parcel => parcel.waybillNo));
-      const missing = activeKnownParcels(known).filter(parcel => !returned.has(asText(parcel.waybillNo)));
       for (const parcel of missing) logisticsFailures.push({ platformOrderId, waybillNo: asText(parcel.waybillNo), state: 'unavailable', logisticsCheckedAt: checkedAt });
       if (!returnedParcels.length && !missing.length) logisticsFailures.push({ platformOrderId, state: 'unavailable', logisticsCheckedAt: checkedAt });
     } catch (error) {

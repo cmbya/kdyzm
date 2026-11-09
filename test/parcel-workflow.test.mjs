@@ -191,15 +191,16 @@ test('Taobao targeted date errors and empty creation labels remain explicit with
   }
 });
 
-test('PDD targeted refresh queries only the stored order shipping, reports unsupported dates and retains failures for orders without waybills', async () => {
+test('PDD targeted refresh queries the stored order cabinet and shipping, reports unsupported dates and retains failures for orders without waybills', async () => {
   const paths = [];
   const targetOrder = { platformOrderId: 'one', shipments: [{ waybillNo: 'A', status: 'arrived' }, { waybillNo: 'B', status: 'transit' }] };
   const result = await createCollector({ now: () => NOW, fetchImpl: async url => {
     const target = new URL(url); paths.push(target.pathname);
+    if (target.pathname.includes('/cabinet/')) return response({ result: {} });
     assert.equal(target.searchParams.get('query_type'), '2');
     return response({ shipping: { tracking_number: 'A', traces: [{ info: '运输中', timestamp: NOW / 1000 }] } });
   } })({ platform: 'pdd' }, 'pdd_user_id=synthetic', { targetOrder });
-  assert.deepEqual(paths, ['/proxy/api/order/one/shipping']);
+  assert.deepEqual(paths, ['/proxy/api/api/express/cabinet/one', '/proxy/api/order/one/shipping']);
   assert.equal(result.orderUpdates[0].dateState, 'unavailable'); assert.ok(result.orderUpdates[0].dateError);
   assert.equal(result.shipments[0].logisticsEvents.length, 1); assert.equal(result.shipments[1].logisticsEvents, undefined);
   assert.equal(result.logisticsFailures[0].waybillNo, 'B');

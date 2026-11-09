@@ -95,6 +95,7 @@ test('取件自动监测 appends distinct optimized literal groups without dupli
   assert.deepEqual(learned.map(rule => rule.keywords).sort(), phrases.map(phrase => [phrase]).sort());
   assert.equal(learned.every(rule => rule.origin === 'ai' && rule.enabled && rule.version === 1 && rule.label === 'AI 追加词组'), true);
   assert.ok(status.monitorRules.some(rule => rule.isExample && rule.origin === 'builtin' && rule.keywords[0] === '本人已签收'));
+  assert.deepEqual(status.monitorRules.filter(rule => rule.id.startsWith('builtin-taobao-')).map(rule => rule.keywords), [['淘宝节点：包裹已从代收点取出']]);
   for (const candidate of status.candidates) assert.deepEqual(candidate.appliedRule.keywords, candidate.rule.keywords);
   f.store.pickupCompletion.saveRule({ ...rules[0], enabled: false });
   assert.equal(f.jobs.status().monitorRules.find(rule => rule.id === rules[0].id).enabled, false);

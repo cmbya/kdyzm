@@ -27,6 +27,31 @@ test('verified PDD out-cabinet event is completion even when carrier prose remai
   }
 });
 
+test('verified Taobao pickup-point exit requires the exact current-stage evidence and safe chronology', () => {
+  const collected = { ...event('已签收：包裹已从代收点取出'), provider: 'taobao', providerStatus: 'doing',
+    providerStatusTag: '已签收', providerStatusText: '包裹已从代收点取出' };
+  const result = detect(collected, event('到达驿站，等待领取', NOW - 5000));
+  assert.equal(result?.kind, 'user_collected');
+  assert.equal(result.ruleId, 'builtin-taobao-pickup-point-exit-v1');
+  assert.equal(result.provider, 'taobao');
+  assert.equal(result.providerStatusText, collected.providerStatusText);
+  for (const override of [{ provider: '' }, { provider: 'other' }, { provider: 'pdd' }, { providerStatus: 'done' },
+    { providerStatus: '' }, { providerStatusTag: '签收' }, { providerStatusTag: '待取件' }, { providerStatusText: '' },
+    { providerStatusText: '已签收' }, { providerStatusText: '包裹已放入代收点' }, { providerStatusText: '包裹已从代收点取出？' },
+    { time: 0 }, { time: NOW + 1 }]) {
+    assert.equal(detect({ ...collected, ...override }), null, JSON.stringify(override));
+  }
+  for (const description of ['已签收', '签收', collected.description]) assert.equal(detect(event(description)), null, description);
+  for (const description of ['包裹已从代收点取出，实际未取件', '包裹已从代收点取出，已退回商家',
+    '包裹已从代收点取出？', '快递员已从代收点取出包裹', '用户取件失败']) {
+    assert.equal(detect({ ...collected, description }), null, description);
+  }
+  for (const later of [event('待取件', collected.time), event('退回商家'), event('重新入库', 0)]) {
+    assert.equal(detect(collected, later), null, later.description);
+  }
+  assert.equal(detectPickupCompletion({ arrivalAt: collected.time, logisticsEvents: [collected] }, { now: NOW }), null);
+});
+
 test('completed recipient actions survive separate courier contact boilerplate', () => {
   for (const description of [
     '您的快件已由本人签收，如有疑问请联系快递员：测试员（10000000000）',

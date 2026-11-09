@@ -33,7 +33,7 @@ test('采集器派生的到货时间不能绕过原始显示时间冲突，保�
   const result = await createCollector({ now: () => NOW, fetchImpl: async () => new Response(JSON.stringify({ shipping: {
     tracking_number: 'SYNTHETIC-TASK083', traces: [{ timestamp: AT, displayTime: '2026-11-09 16:59:37', info: DESCRIPTION }]
   } })) })({ platform: 'pdd' }, 'pdd_user_id=SYNTHETIC', { targetOrder: { platformOrderId: 'o', shipments: [{ waybillNo: 'SYNTHETIC-TASK083', status: 'transit' }] } });
-  assert.equal(result.shipments[0].arrivalAt, AT);
+  assert.equal(result.shipments[0].arrivalAt, 0);
   assert.equal(engine.eventTimeIssue(result.shipments[0].logisticsEvents[0], NOW), 'timeConflict');
   for (const trusted of [0, AT - 60000]) {
     const { store, read } = fixture(t, { arrivalAt: trusted, arrivalAtSource: trusted ? 'platform_event' : 'unknown',

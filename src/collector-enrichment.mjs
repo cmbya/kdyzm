@@ -68,8 +68,8 @@ export function logisticsEventTimeIssue(event, now) {
 }
 
 export function providerEventFields(event) {
-  if (event?.provider !== 'pdd') return {};
-  const fields = { provider: 'pdd' };
+  if (!['pdd', 'taobao'].includes(event?.provider)) return {};
+  const fields = { provider: event.provider };
   for (const [key, limit] of [['providerStatus', 64], ['providerStatusTag', 120], ['providerSubStatus', 64], ['providerStatusText', 120]]) {
     if (typeof event[key] === 'string' && event[key].trim()) fields[key] = event[key].trim().slice(0, limit);
   }
@@ -78,14 +78,16 @@ export function providerEventFields(event) {
 
 export function mergeProviderEventFields(target, source) {
   const fields = providerEventFields(source);
-  // Incoming records come first; never splice conflicting historical status fields into their evidence.
-  if (Object.keys(fields).some(key => target[key] && target[key] !== fields[key])) return;
+  // Conflicting platform facts must remain separate so completion can see both sides.
+  if (Object.keys(fields).some(key => target[key] && target[key] !== fields[key])) return false;
   Object.assign(target, fields);
+  return true;
 }
 
 export function normalizeLogisticsEvents(events, timestamp, rules, now) {
   const seen = new Map(), output = [];
   for (const event of events.slice(0, 2000)) {
+    if (!event || typeof event !== 'object') continue;
     const normalized = {
       time: logisticsTimestamp(event.time, timestamp),
       timeText: shortText(event.timeText ?? event.time, 100),
@@ -95,9 +97,11 @@ export function normalizeLogisticsEvents(events, timestamp, rules, now) {
       ...providerEventFields(event),
     };
     if (!normalized.description) continue;
-    const key = JSON.stringify([normalized.time, normalized.time ? '' : normalized.timeText, normalized.description, normalized.location]);
-    if (seen.has(key)) { mergeProviderEventFields(seen.get(key), normalized); continue; }
-    seen.set(key, normalized); output.push(normalized);
+    const key = JSON.stringify([normalized.time, normalized.time ? '' : normalized.timeText, normalized.description, normalized.location,
+      logisticsEventTimeIssue(normalized, now ?? Date.now()) === 'timeConflict']);
+    const matches = seen.get(key) || [];
+    if (matches.some(prior => mergeProviderEventFields(prior, normalized))) continue;
+    matches.push(normalized); seen.set(key, matches); output.push(normalized);
   }
   // Stable sorting keeps unknown timestamps in their original relative order.
   output.sort((a, b) => b.time - a.time);
@@ -109,25 +113,39 @@ export function taobaoStageEvents(stages, timestamp, stageText, rules, now) {
     time: stage.time || stage.date || stage.occurTime || stage.subtitle,
     timeText: stage.time || stage.date || stage.occurTime || stage.subtitle,
     description: [text(stage.title), stageText(stage)].filter(Boolean).join('：'),
+    provider: 'taobao', providerStatus: stage.status, providerStatusTag: stage.title, providerStatusText: stageText(stage),
   })), timestamp, rules, now);
   result.truncated ||= stages.length > 2000;
   return result;
 }
 
+export function corroborateTaobaoEventTimes(events, fullTrack, now = Date.now(), { notBefore = 0, allowLegacy = false } = {}) {
+  return events.map(event => {
+    if (event.provider !== 'taobao' && !(allowLegacy && !event.provider) || event.time || !/^\d{2}-\d{2} \d{2}:\d{2}$/.test(event.timeText)) return event;
+    // Use only a unique full timestamp returned for this waybill, never the server's current year.
+    const matches = new Set(fullTrack.filter(other => Number.isSafeInteger(other.time) && other.time > 0 && other.time >= notBefore && other.time <= now
+      && other.time < 8640000000000000 - 8 * 3600000
+      && new Date(other.time + 8 * 3600000).toISOString().slice(5, 16).replace('T', ' ') === event.timeText).map(other => other.time));
+    if ((event.providerStatusTag === '已签收' || /^(?:已签收|签收)[：:]/.test(event.description)) && !fullTrack.some(other => matches.has(other.time)
+      && (/^(?:签收|已签收|签收成功)$/.test(other.description.trim()) || eventStatus(other.description, 'unknown') === 'signed'))) return event;
+    return matches.size === 1 ? { ...event, provider: 'taobao', time: [...matches][0], timePrecision: 'minute' } : event;
+  });
+}
+
 export function taobaoTransitEvents(data, timestamp, rules, now) {
-  return normalizeLogisticsEvents(data.address.slice(0, 2001).map(step => ({ time: step.time, description: step.place })), timestamp, rules, now);
+  return normalizeLogisticsEvents(data.address.slice(0, 2001).map(step => ({ time: step?.time, description: step?.place })), timestamp, rules, now);
 }
 
 export function pddShippingEvents(shipping, timestamp, rules, now) {
   return normalizeLogisticsEvents(shipping.traces.slice(0, 2001).map(trace => ({
-    time: trace.timestamp || trace.time_stamp || trace.timeStamp || trace.time,
-    timeText: trace.display_time || trace.displayTime || trace.time || trace.timestamp || trace.time_stamp || trace.timeStamp,
-    description: trace.info,
+    time: trace?.timestamp || trace?.time_stamp || trace?.timeStamp || trace?.time,
+    timeText: trace?.display_time || trace?.displayTime || trace?.time || trace?.timestamp || trace?.time_stamp || trace?.timeStamp,
+    description: trace?.info,
     provider: 'pdd',
-    providerStatus: trace.status,
-    providerStatusTag: trace.status_tag ?? trace.statusTag,
-    providerSubStatus: trace.sub_status ?? trace.subStatus,
-    providerStatusText: trace.trace_status_tip ?? trace.traceStatusTip,
+    providerStatus: trace?.status,
+    providerStatusTag: trace?.status_tag ?? trace?.statusTag,
+    providerSubStatus: trace?.sub_status ?? trace?.subStatus,
+    providerStatusText: trace?.trace_status_tip ?? trace?.traceStatusTip,
   })), timestamp, rules, now);
 }
 

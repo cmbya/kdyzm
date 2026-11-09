@@ -4,7 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { encryptCookie, decryptCookie, hash, secret, fail, text, onlyKeys } from './security.mjs';
 import { serverVersion, capabilities } from './version.mjs';
-import { genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, providerEventFields, mergeProviderEventFields, logisticsEventTimeIssue } from './collector-enrichment.mjs';
+import { corroborateTaobaoEventTimes, genericPickupStation, pickupCycleReset, pickupEvidence, eventStatus, providerEventFields, mergeProviderEventFields, logisticsEventTimeIssue } from './collector-enrichment.mjs';
 import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
@@ -19,15 +19,25 @@ function logisticsData(input, old = {}, reuseEvents = false, rules, now) {
   const checkedAt = validTime(input.logisticsCheckedAt);
   if (checkedAt && checkedAt < (old.logisticsCheckedAt || 0)) return logisticsData({}, old, false, rules, now);
   const supplied = Array.isArray(input.logisticsEvents) ? input.logisticsEvents : [];
+  const datedTaobao = new Map();
+  for (const event of supplied) {
+    if (event?.provider !== 'taobao' || !validTime(event.time) || event.time > now || !event.timeText) continue;
+    const key = JSON.stringify([event.timeText, event.description, event.location || '']), prior = datedTaobao.get(key);
+    datedTaobao.set(key, prior === undefined ? event : prior && prior.time === event.time ? prior : null);
+  }
   const seen = new Map();
   const events = reuseEvents ? old.logisticsEvents || [] : [...supplied, ...(old.logisticsEvents || [])].filter(e => e && typeof e === 'object').map(e => ({
     time: validTime(e.time), timeText: shortText(e.timeText, 100), description: shortText(e.description, 600), location: shortText(e.location, 120),
     ...(['second', 'minute', 'unknown'].includes(e.timePrecision) ? { timePrecision: e.timePrecision } : {}), ...providerEventFields(e)
   })).filter(e => {
-    const key = JSON.stringify([e.time, e.time ? '' : e.timeText, e.description, e.location]);
+    // A corroborated Taobao stage replaces its exact legacy undated copy, including pre-provider records.
+    const dated = !e.time && datedTaobao.get(JSON.stringify([e.timeText, e.description, e.location]));
+    if (dated && Object.entries(providerEventFields(e)).every(([key, value]) => dated[key] === value)) return false;
+    const key = JSON.stringify([e.time, e.time ? '' : e.timeText, e.description, e.location, logisticsEventTimeIssue(e, now) === 'timeConflict']);
     if (!e.description) return false;
-    if (seen.has(key)) { mergeProviderEventFields(seen.get(key), e); return false; }
-    seen.set(key, e); return true;
+    const matches = seen.get(key) || [];
+    if (matches.some(prior => mergeProviderEventFields(prior, e))) return false;
+    matches.push(e); seen.set(key, matches); return true;
   }).sort((a, b) => b.time - a.time);
   const state = ['ok', 'empty', 'error', 'unavailable'].includes(input.logisticsState) ? input.logisticsState : old.logisticsState || '';
   return { logisticsEvents: retainMilestoneEvents(events, rules, now), logisticsState: state,
@@ -64,7 +74,8 @@ function pickupData(input = {}, old = {}, events = [], rules, now = Date.now()) 
   }
   else if (reset || (!explicitArrival && stationConflict)) result = evidence;
   else if (rules && input.logisticsState === 'ok' && input.logisticsEvents?.length && !explicitArrival
-    && Object.hasOwn(input, 'arrivalAt') && old.arrivalAtSource === 'platform_event' && !input.logisticsTruncated && !old.logisticsTruncated) {
+    && Object.hasOwn(input, 'arrivalAt') && old.arrivalAtSource === 'platform_event' && !input.logisticsTruncated && !old.logisticsTruncated
+    && !events.some(event => logisticsEventTimeIssue(event, now) === 'timeConflict')) {
     // A successful refreshed track supersedes previous template evidence. Structured locker evidence remains valid.
     result = evidence;
   }
@@ -634,7 +645,11 @@ export class Store {
         const staleLogistics = !!old && ((inputCheckedAt > 0 && oldCheckedAt > 0 && inputCheckedAt < oldCheckedAt)
           || (inputCheckedAt === 0 && hasPersistedLogistics && !trustedEvent));
         const status = ['transit', 'arrived', 'signed', 'unknown'].includes(input.status) ? input.status : 'unknown';
-        const logistics = staleLogistics ? logisticsData({}, old, false, rules, this.now()) : logisticsData(input, old, false, rules, this.now());
+        // Old SSR titles change as stages advance; date their preserved prose only from this successful same-waybill PC refresh.
+        const datedOld = !staleLogistics && account.platform === 'taobao' && input.logisticsState === 'ok' && old ? { ...old,
+          logisticsEvents: corroborateTaobaoEventTimes(old.logisticsEvents || [], (input.logisticsEvents || []).filter(event => !event.provider), this.now(),
+            { allowLegacy: true, notBefore: order.orderDateOrigin === 'detail' ? order.orderDate || 0 : 0 }) } : old;
+        const logistics = staleLogistics ? logisticsData({}, old, false, rules, this.now()) : logisticsData(input, datedOld, false, rules, this.now());
         const pickup = staleLogistics ? pickupData({}, old || {}, old?.logisticsEvents || [], rules, this.now()) : pickupData(input, old || {}, logistics.logisticsEvents, rules, this.now());
         const cycleState = staleLogistics ? pickupCycleData(id, input, old || {}, old?.logisticsEvents || [], this.now())
           : pickupCycleData(id, input, old || {}, logistics.logisticsEvents, this.now());
