@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.37",
+  "version": "3.1.38",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "7bcac1e8af2249dc31179e12e20aae3a4b574cb850ea81ea5981752b5d085bd0"
+      "sha256": "7264d7f9cedbffbd9db147f83139d1b2ec5034e60c0268f874550d58eb0a7bb4"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -547,17 +547,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "f465a73b4244fc168cf2e986fce5842bd8dd94aeb704799165a54c40432088a3"
+      "sha256": "8d28d0b1a31a4c71ae8d08a08b0614ab65f8a57c0f4a00162531ebe7c5fe244b"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "e2e01c86986a2b44817d297aca1478950f0e66a867f5560cf361671ae38a8f12"
+      "sha256": "07b1f92af9aa46102673f0c0a7f1e5a8a0bbf4fb9638b26115f705f9cdbdf16a"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "fa63da84c4208065b2bc31a1fe82f4fbe48e543a4a000008dbc12440a4c815cb"
+      "sha256": "6601a350ca0b4ec4cd65060e97afb77da4a83591507cea94345d28ee95951afc"
     },
     {
       "path": "pages.json",
@@ -586,8 +586,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 37416,
-      "sha256": "6019c2a69fcf4c1fd7c80cc771fbf2b526c678698ae39131bf44bc39d0a3821e"
+      "size": 38383,
+      "sha256": "d7f243f3cc87b1b5a8ca9ed89c1d287788579500be1dbb96131b8b66680cc269"
     },
     {
       "path": "pages/my/faq.vue",
@@ -2529,7 +2529,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "c02b4322cfb91601a933120cb1d5eaf7237b616fcc6d9ae4acf2b44b50150922"
+      "sha256": "8084bdcc982a8288610838110019e2bc5096524d3f78b22d489a5d9223aea0f1"
     },
     {
       "path": ".gitignore",

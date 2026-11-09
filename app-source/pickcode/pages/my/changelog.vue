@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.38 · 私人版</text><text class="version-date">2026-11-09</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">卡片</text><text class="content">取件卡片增加公路汽车动效，包裹记录展示下单、发货、到站和取件四个时间及阶段耗时</text></view>
+          <view class="update-item"><text class="tag optimize">详情</text><text class="content">突出货物名称、状态和取件码，货名默认15字可展开；短信原文、物流轨迹和基本信息点击查看</text></view>
+          <view class="update-item"><text class="tag optimize">时间</text><text class="content">配合后台 3.1.34 保留可靠的发货和领取时间，兼容无订单取件码及离线确认；缺失时间保持未知</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.37 · 私人版</text><text class="version-date">2026-11-09</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">显示</text><text class="content">打开“我的”和线上账号时先显示本地已有数据，再连接后台更新；连接中或失败时保留已有内容</text></view>
