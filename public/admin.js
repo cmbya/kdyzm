@@ -11,6 +11,9 @@ let familySearch = '';
 let configurationMode = 'managed';
 let baseUrl = '';
 let settingsDirty = false;
+let diagnosticCredentials = [];
+let displayedDiagnosticCredentialId = '';
+let diagnosticGeneration = 0;
 let refreshRequest = null;
 let pollTimer = null;
 let countdownTimer = null;
@@ -93,6 +96,44 @@ async function api(path, options = {}, authenticated = true) {
 function clearPairResult() {
   $('pair-result').hidden = true; $('pair-code').textContent = ''; $('pair-url').textContent = '';
   $('pair-expires').textContent = ''; $('pair-qr').removeAttribute('src');
+}
+function clearDiagnosticToken() {
+  displayedDiagnosticCredentialId = '';
+  $('diagnostic-token').value = ''; $('diagnostic-token-result').hidden = true;
+}
+function renderDiagnosticCredentials() {
+  const container = $('diagnostic-credentials'); container.replaceChildren();
+  if (displayedDiagnosticCredentialId && !diagnosticCredentials.some(credential => credential.id === displayedDiagnosticCredentialId && !credential.revokedAt)) clearDiagnosticToken();
+  if (!diagnosticCredentials.length) { container.append(node('p', '尚无诊断凭据。', 'hint')); return; }
+  for (const credential of diagnosticCredentials) {
+    const item = node('div', '', 'settings-body');
+    item.append(node('strong', credential.name), node('p', `创建于 ${date(credential.createdAt)} · ${credential.revokedAt ? `已撤销 ${date(credential.revokedAt)}` : '有效 · 不自动过期'}`, 'hint'));
+    if (!credential.revokedAt) {
+      const revoke = action('撤销', async () => {
+        if (!confirm(`撤销“${credential.name}”的只读诊断凭据？使用它的脚本将无法继续访问。`)) return;
+        await api(`/v1/admin/diagnostic-tokens/${encodeURIComponent(credential.id)}`, { method: 'DELETE' });
+        diagnosticGeneration += 1;
+        diagnosticCredentials = diagnosticCredentials.map(value => value.id === credential.id ? { ...value, revokedAt: Date.now() } : value);
+        if (displayedDiagnosticCredentialId === credential.id) clearDiagnosticToken();
+        renderDiagnosticCredentials(); $('diagnostic-status').textContent = ''; $('diagnostic-reload').focus(); notice('诊断凭据已撤销。');
+      }, 'danger secondary');
+      revoke.setAttribute('aria-label', `撤销诊断凭据：${credential.name}`); item.append(revoke);
+    }
+    container.append(item);
+  }
+}
+async function loadDiagnosticCredentials() {
+  if (!token) return;
+  const generation = ++diagnosticGeneration;
+  $('diagnostic-status').textContent = '正在读取诊断凭据…';
+  try {
+    const result = await api('/v1/admin/diagnostic-tokens');
+    if (generation !== diagnosticGeneration) return;
+    diagnosticCredentials = result.credentials; renderDiagnosticCredentials(); $('diagnostic-status').textContent = '';
+  } catch (error) {
+    if (token && generation === diagnosticGeneration) $('diagnostic-status').textContent = error.message;
+    throw error;
+  }
 }
 function clearCookieSync() {
   cookieSyncGeneration += 1; cookieSyncAccountId = ''; cookieSyncPairing = null;
@@ -243,6 +284,8 @@ function showLogin() {
     : '输入初始化时设置的密码。登录凭证只在当前页面内存中保留，刷新页面后需重新登录。';
 }
 function clearSession() {
+  diagnosticGeneration += 1; diagnosticCredentials = []; clearDiagnosticToken();
+  $('diagnostic-credentials').replaceChildren(); $('diagnostic-status').textContent = '尚未读取诊断凭据。';
   clearCookieSync();
   clearFamilyCookieSync();
   logisticsAdmin?.reset();
@@ -295,7 +338,7 @@ function renderSettings(status) {
   $('configured-base-url').textContent = baseUrl || '尚未设置';
   $('configured-lan-url').textContent = status.lanBaseUrl || '未启用';
   $('configuration-hint').textContent = configurationMode === 'environment'
-    ? '当前使用环境变量配置，此处只读。如需修改服务地址或管理员密钥，请更新部署环境变量并重启服务。'
+    ? '服务地址和管理员密钥由环境变量管理，如需修改请更新部署环境变量并重启服务。只读诊断 API 凭据可在下方管理。'
     : '地址和管理员密码可在此修改。未设置服务地址时，仍可管理账号。';
   $('managed-settings').hidden = configurationMode !== 'managed';
   if (!settingsDirty) {
@@ -521,6 +564,7 @@ function showPage(page) {
     $(`nav-${id}`).classList.toggle('active', id === page);
   }
   $('breadcrumb').textContent = { accounts: '账号授权', devices: '设备管理', settings: '服务设置' }[page];
+  if (page === 'settings') run(loadDiagnosticCredentials, $('diagnostic-reload'));
 }
 for (const id of ['accounts', 'devices', 'settings']) $(`nav-${id}`).addEventListener('click', () => showPage(id));
 for (const id of ['account-dialog', 'pair-dialog', 'family-dialog', 'device-dialog', 'family-cookie-sync-dialog', 'cookie-sync-request-dialog']) {
@@ -601,6 +645,21 @@ submit('login-form', async () => {
 });
 $('retry-setup').addEventListener('click', event => run(checkSetup, event.currentTarget));
 $('logout').addEventListener('click', () => { clearSession(); notice('已退出管理。'); });
+$('diagnostic-reload').addEventListener('click', event => run(loadDiagnosticCredentials, event.currentTarget));
+$('diagnostic-token-hide').addEventListener('click', () => { clearDiagnosticToken(); $('diagnostic-name').focus(); });
+submit('diagnostic-token-form', async () => {
+  const name = $('diagnostic-name').value.trim();
+  if (!name) throw new Error('请填写诊断凭据名称。');
+  clearDiagnosticToken();
+  const result = await api('/v1/admin/diagnostic-tokens', { method: 'POST', body: JSON.stringify({ name }) });
+  diagnosticGeneration += 1;
+  diagnosticCredentials = [result.credential, ...diagnosticCredentials];
+  displayedDiagnosticCredentialId = result.credential.id;
+  $('diagnostic-token').value = result.token; $('diagnostic-token-result').hidden = false;
+  $('diagnostic-name').value = ''; $('diagnostic-status').textContent = '';
+  renderDiagnosticCredentials(); $('diagnostic-token').focus();
+  notice('诊断凭据已创建，请立即保存；完整凭据仅显示这一次。');
+});
 $('settings-base-url').addEventListener('input', () => { settingsDirty = true; });
 $('settings-lan-url').addEventListener('input', () => { settingsDirty = true; });
 submit('settings-form', async () => {

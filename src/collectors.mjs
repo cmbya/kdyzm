@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeProductImageUrl } from './product-image.mjs';
 import { discoverPddSplit, fetchPddSplitTrack, fetchPddSplitCabinet, pddOrderMatches, pddWaybillMatches } from './pdd-split.mjs';
-import { activeKnownOrders, activeKnownParcels, isActiveKnownOrder, corroborateTaobaoEventTimes, eventStatus, homeDeliveryCompleted, logisticsEventTimeIssue, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, orderTimePrecision, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDateEvidence, taobaoStageEvents, taobaoTransitEvents } from './collector-enrichment.mjs';
+import { activeKnownOrders, activeKnownParcels, isActiveKnownOrder, anchorTaobaoEventTimes, corroborateTaobaoEventTimes, eventStatus, homeDeliveryCompleted, logisticsEventTimeIssue, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, orderTimePrecision, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDateEvidence, taobaoStageEvents, taobaoTimeAnchorCandidate, taobaoTransitEvents } from './collector-enrichment.mjs';
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
@@ -266,10 +266,10 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, knownOrders = [
   let skippedCount = 0;
   const dateAttempted = new Set();
   let pickupCodes = {};
-  async function enrichDate(metadata) {
+  async function enrichDate(metadata, forceDetail = false) {
     const previous = known.get(metadata.platformOrderId);
     const verifiedDetail = previous?.orderDateOrigin === 'detail' && ['second', 'minute', 'day'].includes(previous.orderDatePrecision);
-    if (dateBudget <= 0 || dateAttempted.has(metadata.platformOrderId) || (verifiedDetail && (!targetOrder || previous.orderDate > 0)) || (!targetOrder && !previous && metadata.orderDate)) return;
+    if (dateBudget <= 0 || dateAttempted.has(metadata.platformOrderId) || (verifiedDetail && (!targetOrder || previous.orderDate > 0)) || (!forceDetail && !targetOrder && !previous && metadata.orderDate)) return;
     const checkedAt = now();
     if (!targetOrder && previous?.dateCheckedAt && checkedAt - previous.dateCheckedAt < 24 * 60 * 60 * 1000) return;
     dateBudget--; dateAttempted.add(metadata.platformOrderId);
@@ -398,6 +398,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, knownOrders = [
     if (attempt !== interruption) throw stopped;
     const { parcels, warnings, logisticsFailures } = result;
     const checkedAt = now();
+    const fullTracks = new Map();
     for (const parcel of parcels) Object.assign(parcel, { logisticsCheckedAt: checkedAt, logisticsDetailCheckedAt: checkedAt });
     try {
       const response = await platformRequest(`https://buyertrade.taobao.com/trade/json/transit_step.do?bizOrderId=${encodeURIComponent(platformOrderId)}`, session.cookie,
@@ -413,6 +414,7 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, knownOrders = [
       }
       if (parcel) {
         const transit = taobaoTransitEvents(data, timestamp, rules, checkedAt);
+        fullTracks.set(parcel.waybillNo, transit.events);
         const metadata = [orders.find(order => order.platformOrderId === platformOrderId), orderUpdates.find(order => order.platformOrderId === platformOrderId), known.get(platformOrderId)]
           .find(order => order?.orderDateOrigin === 'detail' && order.orderDate > 0);
         const notBefore = metadata?.orderDate || 0;
@@ -449,7 +451,32 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, knownOrders = [
       }
       warnings.push('部分物流轨迹补查失败，已保留上次轨迹');
     }
-    return { shipments: parcels, warnings, logisticsFailures };
+    if (attempt !== interruption) throw stopped;
+    const updates = [];
+    const detailOrder = () => [orders.find(order => order.platformOrderId === platformOrderId), orderUpdates.find(order => order.platformOrderId === platformOrderId), known.get(platformOrderId)]
+      .find(order => order?.orderDateOrigin === 'detail' && order.orderDate > 0 && ['second', 'minute', 'day'].includes(order.orderDatePrecision));
+    if (!detailOrder() && parcels.some(parcel => parcel.logisticsEvents.some(taobaoTimeAnchorCandidate))) {
+      const metadata = { platformOrderId };
+      try { await enrichDate(metadata, true); }
+      catch (error) {
+        await onProgress?.({ orders: [], orderUpdates: [], shipments: parcels, warnings, logisticsFailures });
+        throw error;
+      }
+      if (attempt !== interruption) throw stopped;
+      if (metadata.dateCheckedAt) {
+        updates.push(metadata);
+        const listed = orders.find(order => order.platformOrderId === platformOrderId);
+        const prior = orderUpdates.find(order => order.platformOrderId === platformOrderId);
+        if (listed) Object.assign(listed, metadata);
+        else if (prior) Object.assign(prior, metadata);
+        else orderUpdates.push(metadata);
+      }
+    }
+    const anchor = detailOrder();
+    for (const parcel of parcels) {
+      parcel.logisticsEvents = anchorTaobaoEventTimes(parcel.logisticsEvents, anchor, checkedAt, fullTracks.get(parcel.waybillNo));
+    }
+    return { shipments: parcels, orderUpdates: updates, warnings, logisticsFailures };
   }
   for (const order of (targetOrder ? [] : knownOrders).filter(item => isActiveKnownOrder(item) && !seen.has(asText(item.platformOrderId))).sort((a, b) => (a.dateCheckedAt || 0) - (b.dateCheckedAt || 0))) {
     if (dateBudget <= 0) break;

@@ -14,7 +14,8 @@
 // payment/shipping/receipt labels and unlabeled dates never qualify as the order date.
 
 import './logistics-rules.js';
-import { retainMilestoneEvents } from './shipment-lifecycle.mjs';
+import { completionKind } from './pickup-completion.mjs';
+import { retainMilestoneEvents, shippingEvent } from './shipment-lifecycle.mjs';
 const logistics = globalThis.PickCodeLogistics;
 const text = value => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 export const shortText = (value, limit) => text(value).slice(0, limit);
@@ -130,6 +131,40 @@ export function corroborateTaobaoEventTimes(events, fullTrack, now = Date.now(),
       && (/^(?:签收|已签收|签收成功)$/.test(other.description.trim()) || eventStatus(other.description, 'unknown') === 'signed'))) return event;
     return matches.size === 1 ? { ...event, provider: 'taobao', time: [...matches][0], timePrecision: 'minute' } : event;
   });
+}
+
+export function taobaoTimeAnchorCandidate(event) {
+  const description = text(event.description).normalize('NFKC').replace(/\s+/gu, '');
+  return event.provider === 'taobao' && !event.time && /^\d{2}-\d{2} \d{2}:\d{2}$/.test(event.timeText)
+    && !/预计|预估|预期|估计|estimated?|expected|签收|取出|领取|取走|取件|提走|到站|到达|入库|入柜|退回|退货|退件|改派|改投|转寄/i.test(description)
+    && !completionKind(event.description)
+    && !pickupCycleReset(event.description)
+    && (shippingEvent(event.description) || ['已下单', '仓库处理中'].includes(event.providerStatusTag));
+}
+
+export function anchorTaobaoEventTimes(events, order, now, fullTrack = []) {
+  const offset = 8 * 3600000, date = order?.orderDate;
+  if (order?.orderDateOrigin !== 'detail' || !['second', 'minute', 'day'].includes(order.orderDatePrecision)
+    || !Number.isSafeInteger(date) || date <= 0 || !Number.isSafeInteger(now) || date > now || now >= 8640000000000000 - offset) return events;
+  // A minute label may describe the same minute as the second-precision order time.
+  const notBefore = order.orderDatePrecision === 'day' ? Math.floor((date + offset) / 86400000) * 86400000 - offset : Math.floor(date / 60000) * 60000;
+  const firstYear = new Date(notBefore + offset).getUTCFullYear(), lastYear = new Date(now + offset).getUTCFullYear();
+  if (lastYear > 9999) return events;
+  return events.map(event => {
+    if (!taobaoTimeAnchorCandidate(event)) return event;
+    // A matching PC minute left unresolved by corroboration is conflicting evidence.
+    if (fullTrack.some(other => Number.isSafeInteger(other.time) && other.time > 0 && other.time < 8640000000000000 - offset
+      && new Date(other.time + offset).toISOString().slice(5, 16).replace('T', ' ') === event.timeText)) return event;
+    let candidate = 0;
+    for (let year = firstYear; year <= lastYear; year++) {
+      const value = `${year}-${event.timeText.replace(' ', 'T')}:00+08:00`, time = Date.parse(value);
+      if (!Number.isFinite(time) || time < notBefore || time > now
+        || new Date(time + offset).toISOString().slice(5, 16).replace('T', ' ') !== event.timeText) continue;
+      if (candidate) return event;
+      candidate = time;
+    }
+    return candidate ? { ...event, time: candidate, timePrecision: 'minute' } : event;
+  }).sort((a, b) => b.time - a.time);
 }
 
 export function taobaoTransitEvents(data, timestamp, rules, now) {

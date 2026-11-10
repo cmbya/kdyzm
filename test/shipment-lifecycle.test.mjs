@@ -49,9 +49,39 @@ test('dispatch requires a completed dispatch or carrier acceptance event, never 
   assert.equal(shippingEvidence([event(-9000, '已揽收', 'unknown')], {}, NOW).shippedAtPrecision, 'unknown');
 });
 
+test('explicit Taobao dispatch remains evidence while carrier collection is pending', () => {
+  const sample = { description: '已发货：包裹正在等待揽收', time: 1794285789000, timeText: '11-10 12:43' };
+  const now = 1794292000000;
+  assert.deepEqual(shippingEvidence([sample], {}, now), {
+    shippedAt: sample.time, shippedAtSource: 'platform_event', shippedAtPrecision: 'unknown',
+  });
+  for (const description of ['商家已发货，等待快递员揽收', '发货成功，待揽收']) {
+    assert.equal(shippingEvidence([{ ...sample, description }], {}, now).shippedAt, sample.time, description);
+  }
+  for (const description of ['包裹正在等待揽收', '未发货：包裹正在等待揽收', '等待发货，等待揽收',
+    '预计明天揽收', '预计已发货，等待揽收', '尚未发货，系统显示已发货', '未揽收，系统显示已发货',
+    '等待揽收后确认已发货', '已发货，等待卖家重新发货', '已发货但发货失败，等待揽收',
+    '已发货是否属实？等待揽收', '已发货：包裹等待揽收，现已撤销', '退货包裹已发货，等待揽收']) {
+    assert.equal(shippingEvidence([{ ...sample, description }], {}, now).shippedAt, 0, description);
+  }
+});
+
+test('pending collection dispatch cannot revive a previous return or redirect cycle', () => {
+  const dispatched = event(-9000, '已发货：包裹正在等待揽收');
+  const old = { shippedAt: dispatched.time, shippedAtSource: 'platform_event' };
+  for (const description of ['包裹已退回发件人', '包裹已改派重新投递']) {
+    const reset = event(-8000, description);
+    assert.equal(shippingEvidence([dispatched, reset], old, NOW).shippedAt, 0, description);
+    assert.equal(shippingEvidence([dispatched, { ...reset, time: 0 }], old, NOW).shippedAt, 0, description);
+    assert.equal(shippingEvidence([dispatched], old, NOW, { evidenceKey: description, startedAt: reset.time }).shippedAt, 0, description);
+    const nextDispatch = event(-7000, dispatched.description);
+    assert.equal(shippingEvidence([dispatched, reset, nextDispatch], old, NOW).shippedAt, nextDispatch.time, description);
+  }
+});
+
 test('all platform adapters retain dispatch and arrival evidence beyond 100 ordinary updates', () => {
   const raw = Array.from({ length: 120 }, (_, i) => event(-i * 1000, '物流更新' + i));
-  raw.push(event(-150000, '已到达幸福菜鸟驿站'), event(-180000, '商家已发货'));
+  raw.push(event(-150000, '已到达幸福菜鸟驿站'), event(-180000, '已发货：包裹正在等待揽收'));
   const outputs = [
     normalizeLogisticsEvents(raw, timestamp, undefined, NOW),
     taobaoStageEvents(raw.map(e => ({ title: e.description, time: e.time })), timestamp, () => '', undefined, NOW),
@@ -79,7 +109,7 @@ test('future anomalies cannot displace a real redelivery boundary or revive a pr
 
 test('dispatch and arrival persist through bounded history, missing refreshes, snapshots and reopening', t => {
   const f = fixture(t);
-  let shipment = f.sync([event(-180000, '已发货', 'minute'), event(-150000, '已到达幸福菜鸟驿站', 'minute')]);
+  let shipment = f.sync([event(-180000, '已发货：包裹正在等待揽收', 'minute'), event(-150000, '已到达幸福菜鸟驿站', 'minute')]);
   assert.equal(shipment.shippedAt, NOW - 180000); assert.equal(shipment.arrivalAt, NOW - 150000);
   f.setTime(NOW + 1);
   shipment = f.sync(Array.from({ length: 140 }, (_, i) => event(-i * 1000, '物流更新' + i)), { arrivalAt: 0, logisticsTruncated: true });

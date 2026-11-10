@@ -301,6 +301,8 @@ App不再保存独立渠道选择，不采用列表第一项或本机旧密钥�
 
 管理员只读：`GET /v1/admin/recognition-tasks` 返回策略、分组、最近任务和日报；`GET /v1/admin/recognition-review?limit=100&after=0` 返回schemaVersion、serverVersion、generatedAt、workflow、当前未收samples、learning、aiReviews、rules版本与AI预算。limit为1到100、after为非负整数，nextCursor继续分页；不返回Cookie、设备/管理员token或AI密钥。GET不启动采集或AI。
 
+独立机器诊断：`/v1/diagnostics/` 使用持久、可撤销的 `Authorization: Bearer pcdiag_…` 凭据，不依赖管理员会话。只读白名单包括 `status`、`accounts`、`orders`、`orders/:id`、`recognition-tasks`、`recognition-review`；其他路径不可访问，写方法返回405。管理员通过 `/v1/admin/diagnostic-tokens` 创建/列出，`DELETE /v1/admin/diagnostic-tokens/:id` 撤销。完整凭据仅创建时返回，最多10个有效凭据，仅摘要入库。订单查询分页、时间证据字段与错误码见 [diagnostic-api.md](docs/diagnostic-api.md)。
+
 后台每日03:00巡检独立于AI开关；AI建议和自动应用继续服从原配置与预算。时间与匹配建议固定格式见 `docs/recognition-workflow.md`，原文校验失败不得应用。规则已保存不代表问题已解决。
 
 ## 3.1.32 连续物流任务（兼容新增）

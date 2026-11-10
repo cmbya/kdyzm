@@ -7,11 +7,15 @@ const precision = value => ['second', 'minute'].includes(value) ? value : 'unkno
 
 export function shippingEvent(description) {
   const text = typeof description === 'string' ? description.normalize('NFKC').replace(/\s+/gu, '') : '';
+  const dispatched = /已(?:经)?(?:成功)?发货|发货(?:完成|成功)/.test(text);
   // Status, waybill assignment, warehouse printing and intermediate departures are not dispatch evidence.
   if (!text || /[?？]|是否|疑似|可能|取消|撤销|虚假|误报|退回|退货|退件|寄回|逆向/.test(text)
-    || /(?:预计|预定|计划|将于|即将|尚未|未|没有|等待|待|准备|预约|申请|请|要求|希望|安排)[^，,。；;]{0,12}(?:发货|揽收)/.test(text)
+    || /(?:预计|预定|计划|将于|即将|尚未|未|没有|准备|预约|申请|请|要求|希望|安排)[^，,。；;]{0,12}(?:发货|揽收)/.test(text)
+    || /(?:等待|待)[^，,。；;]{0,12}发货/.test(text)
+    // A completed merchant dispatch can precede carrier collection.
+    || !dispatched && /(?:等待|待)[^，,。；;]{0,12}揽收/.test(text)
     || /(?:发货|揽收)[^，,。；;]{0,8}(?:失败|未成功|异常|有误)/.test(text)) return false;
-  return /已(?:经)?(?:成功)?(?:发货|揽收)|(?:发货|揽收)(?:完成|成功)|已(?:由|被)[^，,。；;]{1,50}揽收/.test(text);
+  return dispatched || /已(?:经)?(?:成功)?揽收|揽收(?:完成|成功)|已(?:由|被)[^，,。；;]{1,50}揽收/.test(text);
 }
 
 export function shippingEvidence(events = [], old = {}, now = Date.now(), cycle = old.pickupCycle) {

@@ -16,6 +16,8 @@ import { LogisticsDailyLearning } from './logistics-daily-learning.mjs';
 import { RecognitionWorkflow } from './recognition-workflow.mjs';
 import { RecognitionAi } from './recognition-ai.mjs';
 import { createRecognitionApi } from './recognition-api.mjs';
+import { DiagnosticAccess } from './diagnostic-access.mjs';
+import { createDiagnosticApi } from './diagnostic-api.mjs';
 import { stationKey } from './station-text.mjs';
 import { PickupCompletionAi } from './pickup-completion-ai.mjs';
 import { serverVersion } from './version.mjs';
@@ -72,6 +74,8 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const logisticsDaily = new LogisticsDailyLearning({ store, stations, logisticsAi, now, automaticEvents: scheduler });
   recognitionAi = new RecognitionAi({ store, stations, logisticsAi, assistance: aiAssistance, workflow: recognition, now });
   const recognitionApi = createRecognitionApi({ store, workflow: recognition, recognitionAi, stations, logisticsRules, logisticsDaily, now });
+  const diagnosticAccess = new DiagnosticAccess({ store, now });
+  const diagnosticApi = createDiagnosticApi({ store, workflow: recognition });
   const pickupCompletion = store.pickupCompletion;
   const pickupCompletionAi = new PickupCompletionAi({ store, completionStore: pickupCompletion, stations, assistance: aiAssistance, now, automaticEvents: scheduler });
   const enrichCandidates = (accountIds, shipmentIds) => {
@@ -178,6 +182,24 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         send(res, 200, await configuration.setup(body)); return;
       }
       configuration.requireInitialized();
+      if (path.startsWith('/v1/diagnostics/')) {
+        rate.check(`diagnostics:${req.socket.remoteAddress}`, 120);
+        const auth = req.headers.authorization;
+        const credential = typeof auth === 'string' && auth.startsWith('Bearer ') && diagnosticAccess.authenticate(auth.slice(7));
+        if (!credential) fail(401, 'DIAGNOSTIC_UNAUTHORIZED', '请提供有效的只读诊断 API 凭据');
+        rate.check(`diagnostic-token:${credential.id}`, 120);
+        if (req.method !== 'GET') fail(405, 'READ_ONLY', '诊断 API 仅支持读取');
+        if (path === '/v1/diagnostics/status') { send(res, 200, { serverVersion, serverTime: now(), scope: 'diagnostics:read', expiresAt: null }); return; }
+        if (path === '/v1/diagnostics/accounts') { send(res, 200, { accounts: diagnosticApi.accounts() }); return; }
+        if (path === '/v1/diagnostics/orders') { send(res, 200, diagnosticApi.orders(url.searchParams)); return; }
+        const diagnosticOrder = path.match(/^\/v1\/diagnostics\/orders\/([^/]+)$/);
+        if (diagnosticOrder) { send(res, 200, diagnosticApi.order(diagnosticOrder[1])); return; }
+        if (path === '/v1/diagnostics/recognition-tasks') { send(res, 200, recognition.summary()); return; }
+        if (path === '/v1/diagnostics/recognition-review') {
+          send(res, 200, recognitionApi.review({ limit: Number(url.searchParams.get('limit') ?? 100), after: Number(url.searchParams.get('after') ?? 0) })); return;
+        }
+        fail(404, 'NOT_FOUND', '诊断接口不存在');
+      }
       if ((path.startsWith('/v1/cookie-sync/') || path.startsWith('/v1/admin/cookie-sync/')) && await cookieSync(req, res, url)) return;
       if (path === '/v1/admin/login' && req.method === 'POST') {
         credentialLimit(req);
@@ -212,6 +234,13 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
+        if (path === '/v1/admin/diagnostic-tokens' && req.method === 'GET') { send(res, 200, { credentials: diagnosticAccess.list() }); return; }
+        if (path === '/v1/admin/diagnostic-tokens' && req.method === 'POST') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          send(res, 201, diagnosticAccess.create(body)); return;
+        }
+        const diagnosticToken = path.match(/^\/v1\/admin\/diagnostic-tokens\/([^/]+)$/);
+        if (diagnosticToken && req.method === 'DELETE') { send(res, 200, diagnosticAccess.revoke(diagnosticToken[1])); return; }
         if (path === '/v1/admin/recognition-tasks' && req.method === 'GET') { send(res, 200, recognition.summary()); return; }
         if (path === '/v1/admin/recognition-review' && req.method === 'GET') {
           send(res, 200, recognitionApi.review({ limit: Number(url.searchParams.get('limit') ?? 100), after: Number(url.searchParams.get('after') ?? 0) })); return;

@@ -553,7 +553,7 @@ export class Store {
   importResult(accountId, result, { partial = false, reconcile = true } = {}) {
     const rules = result.logisticsRules ?? this.getLogisticsRules?.();
     const completionRules = this.pickupCompletion.rules(), completionConfig = this.pickupCompletion.config();
-    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v2', rules, completionRules, completionConfig]));
+    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v3', rules, completionRules, completionConfig]));
     const changedShipmentIds = [];
     const account = this.account(accountId);
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
