@@ -16,6 +16,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.os.PersistableBundle;
 import android.provider.Settings;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -125,6 +126,7 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setSupportMultipleWindows(false);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         WebViewAssetLoader assets = new WebViewAssetLoader.Builder()
                 .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this)).build();
@@ -150,11 +152,14 @@ public final class MainActivity extends Activity {
             }
             @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                // CSP confines these browser requests to images and checks redirect destinations.
+                if (trustedPage && !request.isForMainFrame() && "GET".equals(request.getMethod()) && TrustedOrigin.productImage(uri.toString())) return null;
                 if (!trustedAsset(uri) || (request.isForMainFrame() && !trustedDocument(uri))) return blocked();
                 WebResourceResponse response = assets.shouldInterceptRequest(uri);
                 if (response == null) return blocked();
                 HashMap<String, String> headers = new HashMap<>();
-                headers.put("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'");
+                headers.put("Content-Security-Policy", "default-src 'self' data: blob:; img-src 'self' data: blob: " + TrustedOrigin.PRODUCT_IMAGE_SOURCES + "; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'");
+                headers.put("Referrer-Policy", "no-referrer");
                 headers.put("X-Content-Type-Options", "nosniff");
                 response.setResponseHeaders(headers);
                 return response;

@@ -13,6 +13,10 @@ import { MatchingFeedbackStore } from './matching-feedback.mjs';
 import { AiAssistance } from './ai-assistance.mjs';
 import { LogisticsAiJobs } from './logistics-ai.mjs';
 import { LogisticsDailyLearning } from './logistics-daily-learning.mjs';
+import { RecognitionWorkflow } from './recognition-workflow.mjs';
+import { RecognitionAi } from './recognition-ai.mjs';
+import { createRecognitionApi } from './recognition-api.mjs';
+import { stationKey } from './station-text.mjs';
 import { PickupCompletionAi } from './pickup-completion-ai.mjs';
 import { serverVersion } from './version.mjs';
 import { orderRetention } from './order-retention.mjs';
@@ -48,17 +52,34 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   logisticsRules = new LogisticsRuleStore(store.db, now, { onRulesChanged: rules => store.refreshLogisticsRules(rules) });
   const stations = new StationStore({ db: store.db, key: configuration.key, now, onRulesChanged: catalog => store.refreshStationRecognition(catalog) });
   const matchingFeedback = new MatchingFeedbackStore({ store, stations, now });
-  const stationAi = new StationAiJobs({ stations, now, automaticEvents: scheduler, ...(aiRequest ? { request: aiRequest } : {}) });
+  let jobs, recognitionAi;
+  const recognition = new RecognitionWorkflow({ store, now, automaticEvents: scheduler,
+    requestOrder: (accountId, orderId) => jobs.request(accountId, orderId), analyze: task => recognitionAi.analyze(task),
+    refreshAnalysis: task => recognitionAi?.refresh(task),
+    authorizeReport: task => {
+      const owner = store.devices().find(device => device.id === task.deviceId && !device.revokedAt);
+      return !!owner && task.candidateShipmentIds.every(id => store.canRead(owner, store.shipment(id)));
+    } });
+  const stationAi = new StationAiJobs({ stations, now, automaticEvents: scheduler,
+    allowAutomatic: candidate => candidate.source === 'manual' || recognition.tasks().some(task => {
+      const shipment = store.shipment(task.shipmentId);
+      return shipment && recognition.allowAutomatic(shipment) && [task.source?.station, shipment.station]
+        .some(name => name && stationKey(name) === stationKey(candidate.stationName));
+    }), ...(aiRequest ? { request: aiRequest } : {}) });
   const aiAssistance = new AiAssistance({ stations, now, ...(aiRequest ? { request: aiRequest } : {}) });
-  const logisticsAi = new LogisticsAiJobs({ stations, rules: logisticsRules, store, assistance: aiAssistance, now, automaticEvents: scheduler });
+  const logisticsAi = new LogisticsAiJobs({ stations, rules: logisticsRules, store, assistance: aiAssistance, now, automaticEvents: scheduler,
+    allowAutomatic: (shipment, target) => recognition.allowAutomatic(shipment, target) });
   const logisticsDaily = new LogisticsDailyLearning({ store, stations, logisticsAi, now, automaticEvents: scheduler });
+  recognitionAi = new RecognitionAi({ store, stations, logisticsAi, assistance: aiAssistance, workflow: recognition, now });
+  const recognitionApi = createRecognitionApi({ store, workflow: recognition, recognitionAi, stations, logisticsRules, logisticsDaily, now });
   const pickupCompletion = store.pickupCompletion;
   const pickupCompletionAi = new PickupCompletionAi({ store, completionStore: pickupCompletion, stations, assistance: aiAssistance, now, automaticEvents: scheduler });
   const enrichCandidates = (accountIds, shipmentIds) => {
     store.refreshStationRecognition(stations.stationRules().stations, shipmentIds);
     const snapshot = shipmentIds ? { shipments: shipmentIds.map(id => store.shipment(id)).filter(shipment => shipment
       && !orderRetention(store.order(shipment.orderId), now()).archived) } : store.snapshot(accountIds);
-    enqueuePlatformCandidates(stations, snapshot, now());
+    recognition.observe(snapshot);
+    enqueuePlatformCandidates(stations, { shipments: snapshot.shipments.filter(shipment => recognition.allowAutomatic(shipment)) }, now());
     logisticsAi.intake(snapshot);
     pickupCompletionAi.intake(snapshot);
   };
@@ -68,8 +89,9 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   if (stations.aiConfig().enabled) enrichCandidates(store.accounts().filter(account => account.enabled).map(account => account.id));
   else store.refreshStationRecognition(stations.stationRules().stations);
   pickupCompletionAi.intake(store.snapshot(store.accounts().filter(account => account.enabled).map(account => account.id)));
+  recognition.observe(store.snapshot(store.accounts().filter(account => account.enabled).map(account => account.id)));
   const rate = new RateLimiter(now);
-  const jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now,
+  jobs = createSyncJobs({ store, collector: collector || createCollector({ now, getLogisticsRules }), now,
     onImported: (accountId, shipmentIds) => enrichCandidates([accountId], shipmentIds),
     onCompleted: () => store.refreshStationRecognition(stations.stationRules().stations) });
   const running = jobs.running;
@@ -97,6 +119,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const cookieSync = createCookieSyncHandler({ store, jobs, configuration, now, rate, fixture, bodyOf, send, admin });
   const timer = scheduler ? setInterval(() => {
     jobs.runDue();
+    recognition.runDue();
     stationAi.runDue();
     logisticsAi.runDue();
     logisticsDaily.runDue();
@@ -189,6 +212,10 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       }
       if (path.startsWith('/v1/admin/')) {
         admin(req);
+        if (path === '/v1/admin/recognition-tasks' && req.method === 'GET') { send(res, 200, recognition.summary()); return; }
+        if (path === '/v1/admin/recognition-review' && req.method === 'GET') {
+          send(res, 200, recognitionApi.review({ limit: Number(url.searchParams.get('limit') ?? 100), after: Number(url.searchParams.get('after') ?? 0) })); return;
+        }
         const completionStatus = () => ({ config: pickupCompletion.config(), ...pickupCompletionAi.status() });
         if (path === '/v1/admin/pickup-completion' && req.method === 'GET') { send(res, 200, completionStatus()); return; }
         if (path === '/v1/admin/pickup-completion' && req.method === 'PUT') {
@@ -373,6 +400,11 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         send(res, 202, enqueueStationProposal(stations, body, authorized.id)); return;
       }
       if (path === '/v1/matching-feedback' && req.method === 'GET') { send(res, 200, matchingFeedback.summary(current)); return; }
+      if (path === '/v1/recognition-issues' && req.method === 'POST') {
+        const body = await bodyOf(req), authorized = device(req);
+        rate.check(`recognition-issues:${authorized.id}`, 60, 3600000);
+        send(res, 200, recognitionApi.submit(authorized, body)); return;
+      }
       if (path === '/v1/matching-feedback' && req.method === 'POST') {
         const body = await bodyOf(req), authorized = device(req);
         rate.check(`matching-feedback:${authorized.id}`, 60, 3600000);
@@ -417,11 +449,12 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         requested.forEach(id => { if (!store.canFilterAccount(current, id)) fail(403, 'SCOPE_FORBIDDEN', '账号不在授权范围内'); });
         const rules = stations.stationRules(), logistics = logisticsRules.read();
         const additional = { stationRulesVersion: rules.revision, stationRules: rules.stations, matchingFeedback: matchingFeedback.summary(current),
+          recognitionIssues: recognitionApi.issues(current, requested),
           serverLogisticsRulesVersion: logistics.revision,
           serverLogisticsRules: logistics.rules.map(({ id, name, enabled, kind, starts, end, keywords, origin }) => ({ id, name, enabled, kind, starts, end, keywords, origin })),
           ...jobs.snapshot(current, requested.length ? requested : undefined) };
         const snapshot = Object.assign(store.snapshot(current, requested.length ? requested : undefined, Buffer.byteLength(JSON.stringify(additional), 'utf8')), additional);
-        snapshot.capabilities = [...new Set([...(snapshot.capabilities || []), 'station_rule_receipts_v1'])];
+        snapshot.capabilities = [...new Set([...(snapshot.capabilities || []), 'station_rule_receipts_v1', 'recognition_workflow_v1'])];
         const etag = `"${hash(JSON.stringify(snapshot))}"`;
         const matches = (req.headers['if-none-match'] || '').split(',').map(t => t.trim().replace(/^W\//, '')).includes(etag);
         send(res, matches ? 304 : 200, matches ? undefined : snapshot, { ETag: etag }); return;
@@ -441,14 +474,18 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   server.requestTimeout = 30000;
   server.headersTimeout = 15000;
   server.maxHeadersCount = 60;
-  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, matchingFeedback, aiAssistance, logisticsRules, logisticsAi, logisticsDaily, pickupCompletion, pickupCompletionAi,
+  return { server, store, requestSync, fixture, running, jobs, stations, stationAi, matchingFeedback, aiAssistance, logisticsRules, logisticsAi, logisticsDaily, recognition, recognitionAi, pickupCompletion, pickupCompletionAi,
     async close() {
       cookieSync.close();
       unsubscribeOptimization();
       const dailyClosing = logisticsDaily.close();
+      const recognitionClosing = recognition.close();
+      const recognitionAiClosing = recognitionAi.close();
       aiAssistance.close();
       if (timer) clearInterval(timer);
       await dailyClosing;
+      await recognitionClosing;
+      await recognitionAiClosing;
       await new Promise(resolve => server.close(resolve));
       await jobs.close();
       await stationAi.close();

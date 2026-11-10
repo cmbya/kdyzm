@@ -6,16 +6,17 @@ import { join } from 'node:path';
 import { createService } from '../src/service.mjs';
 
 const NOW = Date.parse('2026-11-09T03:00:00+08:00');
-const STATION = '合成专项幸福菜鸟驿站', FRAGMENT = `已交付给${STATION}`;
+const STATION = '合成专项幸福菜鸟驿站', FRAGMENT = `已暂存于${STATION}`;
 const ADMIN = 'TASK083_SYNTHETIC_ADMIN_TOKEN_0123456789';
-const reply = input => ({ choices: [{ message: { content: JSON.stringify({ kind: 'arrival', starts: ['已交付给'], ends: [],
+const reply = input => ({ choices: [{ message: { content: JSON.stringify({ kind: 'arrival', starts: ['已暂存于'], ends: [],
   keywords: [input.expectedStation], expectedStation: input.expectedStation, evidence: [input.fragment] }) } }] });
 
 async function fixture(t, { request } = {}) {
-  let sequence = 0, closing;
-  const calls = [];
+  let sequence = 0, closing, now = NOW, collections = 0, prepared = false;
+  const calls = [], orders = new Map(), shipments = [];
   const service = createService({ encryptionKey: Buffer.alloc(32, 8).toString('hex'), adminToken: ADMIN,
-    fixture: true, scheduler: false, now: () => NOW, aiRequest: async outbound => {
+    fixture: true, scheduler: false, now: () => now,
+    collector: async () => { collections++; return { orders: [...orders.values()], shipments, warnings: [] }; }, aiRequest: async outbound => {
       const input = JSON.parse(JSON.parse(outbound.body).messages[1].content);
       calls.push(input);
       return request ? request(input, outbound) : reply(input);
@@ -24,6 +25,8 @@ async function fixture(t, { request } = {}) {
   const close = () => closing ||= service.close();
   t.after(close);
   const { store, stations, logisticsAi, logisticsDaily: daily, logisticsRules: rules } = service;
+  const initialRules = rules.read();
+  rules.save({ revision: initialRules.revision, rules: initialRules.rules.map(rule => rule.id === 'builtin-arrival-storage' ? { ...rule, enabled: false } : rule) });
   const account = store.saveAccount({ platform: 'pdd', label: 'PRIVATE_ACCOUNT', cookie: 'PRIVATE_COOKIE' }, undefined, true);
   const device = store.redeem(store.createPairing({ accountIds: [account.id] }).code, '合成专项设备');
   stations.saveStation('task083-station', { name: STATION });
@@ -37,15 +40,28 @@ async function fixture(t, { request } = {}) {
     return { status: response.status, etag: response.headers.get('etag'), data: raw ? JSON.parse(raw) : null };
   };
   const ingest = ({ description = FRAGMENT, time = NOW - 60000, shipment = {}, order = {} } = {}) => {
-    const id = `SYNTHETIC-${++sequence}`;
-    store.importResult(account.id, { orders: [{ platformOrderId: id, title: 'PRIVATE_PRODUCT', orderDate: NOW - 86400000, ...order }],
-      shipments: [{ platformOrderId: id, waybillNo: id, status: 'transit', logisticsState: 'ok', logisticsCheckedAt: NOW,
-        logisticsEvents: [{ time, description, timePrecision: 'minute' }], ...shipment }] });
+    const id = `SYNTHETIC-${++sequence}`, platformOrderId = Object.keys(order).length ? id : 'SYNTHETIC-ORDER';
+    const orderData = { platformOrderId, title: 'PRIVATE_PRODUCT', orderDate: NOW - 86400000, ...order };
+    const shipmentData = { platformOrderId, waybillNo: id, status: 'transit', logisticsState: 'ok', logisticsCheckedAt: NOW,
+      logisticsEvents: [{ time, description, timePrecision: 'minute' }], ...shipment };
+    orders.set(platformOrderId, orderData); shipments.push(shipmentData);
+    store.importResult(account.id, { orders: [orderData], shipments: [shipmentData] });
     return store.snapshot([account.id]).shipments.find(item => item.waybillNo === id)
       || store.db.prepare('SELECT data FROM shipments').all().map(row => JSON.parse(row.data)).find(item => item.waybillNo === id);
   };
-  const run = async () => { const result = daily.runDue(); if (daily.running) await daily.running; return result; };
-  return { service, store, stations, logisticsAi, daily, rules, account, device, calls, http, ingest, run, close };
+  const prepare = async () => {
+    if (prepared) return;
+    service.recognition.observe(store.snapshot([account.id]));
+    for (const minutes of [5, 10, 15]) {
+      now += minutes * 60000; service.recognition.runDue(); await service.recognition.running;
+      assert.equal(calls.length, 0, 'the three collection rounds must finish before AI is dispatched');
+    }
+    assert.equal(collections, 3);
+    assert.ok(service.recognition.tasks().some(task => task.target === 'arrival_time' && task.retryCount === 3 && task.status === 'ai_pending'));
+    prepared = true;
+  };
+  const run = async () => { await prepare(); const result = daily.runDue(); if (daily.running) await daily.running; return result; };
+  return { service, store, stations, logisticsAi, daily, rules, account, device, calls, http, ingest, run, prepare, close };
 }
 
 test('daily learning publishes exact event time and a new snapshot ETag, then HTTP rollback removes only learned evidence', async t => {
@@ -91,7 +107,7 @@ test('daily scope rejects future, returned and inactive samples without dispatch
   const rejected = [
     f.ingest({ description: `退回后${FRAGMENT}` }),
     f.ingest({ description: `预计${FRAGMENT}` }),
-    f.ingest({ time: NOW + 60000 }),
+    f.ingest({ time: NOW + 60 * 60000 }),
     f.ingest({ description: `已托管至${STATION}` }),
     f.ingest({ description: `已托管至${STATION}` }),
     f.ingest({ description: `已托管至${STATION}`, order: { orderDate: NOW - 46 * 86400000 } }),
@@ -122,6 +138,7 @@ test('service shutdown cancels an in-flight daily request before a late response
   f.ingest(); f.ingest();
   const project = f.rules.onRulesChanged;
   f.rules.onRulesChanged = rules => { projections++; return project(rules); };
+  await f.prepare();
   f.daily.runDue(); await started;
   const closing = f.close(), cancelledBeforeReply = signal.aborted;
   resolveRequest(); await closing;
@@ -135,11 +152,12 @@ test('an account disabled while the daily provider request is in flight cannot s
   const f = await fixture(t, { request: input => new Promise(resolve => { resolveRequest = () => resolve(reply(input)); requestStarted(); }) });
   const first = f.ingest(); f.ingest();
   const rulesBefore = f.rules.read();
+  await f.prepare();
   f.daily.runDue(); await started;
   f.store.saveAccount({ enabled: false }, f.account.id, true);
   resolveRequest(); await f.daily.running;
   const [candidate] = f.logisticsAi.candidates();
-  assert.equal(candidate.status, 'review'); assert.equal(candidate.reason, 'NO_ACTIVE_EVIDENCE');
+  assert.equal(candidate.status, 'review'); assert.equal(candidate.reason, 'LOCAL_RETRIES_REQUIRED');
   assert.equal(candidate.rule, null); assert.deepEqual(f.rules.read(), rulesBefore);
   assert.equal(f.store.shipment(first.id).arrivalAt, 0);
   assert.equal(f.daily.summary().lastRun.backfilledCount, 0);

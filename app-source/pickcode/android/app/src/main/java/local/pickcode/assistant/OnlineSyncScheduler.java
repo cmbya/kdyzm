@@ -41,7 +41,14 @@ public final class OnlineSyncScheduler {
         boolean stationPending = OnlineSyncManager.stationCandidatesEnabled(snapshot) && enhancement != null && enhancement.optInt("pendingCount") > 0;
         boolean feedbackPending = OnlineSyncManager.matchingFeedbackEnabled(snapshot) && feedback != null
                 && (feedback.optInt("pendingCount") > 0 || feedback.optInt("pendingWithdrawalCount") > 0);
-        if (session.isEmpty() || !stationPending && !feedbackPending) return;
+        boolean recognitionPending = false;
+        JSONObject online = snapshot == null ? null : snapshot.optJSONObject("online");
+        org.json.JSONArray issues = online == null ? null : online.optJSONArray("recognitionIssues");
+        if (OnlineSyncManager.recognitionEnabled(snapshot) && issues != null) for (int index = 0; index < issues.length(); index++) {
+            JSONObject issue = issues.optJSONObject(index);
+            if (issue != null && "queued".equals(issue.optString("status"))) { recognitionPending = true; break; }
+        }
+        if (session.isEmpty() || !stationPending && !feedbackPending && !recognitionPending) return;
         WorkManager.getInstance(context).enqueueUniqueWork(ENHANCEMENT, ExistingWorkPolicy.KEEP,
                 new OneTimeWorkRequest.Builder(OnlineSyncWorker.class).setConstraints(network()).setInputData(stationSession(session)).build());
     }

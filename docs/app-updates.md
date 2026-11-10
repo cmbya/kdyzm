@@ -2,7 +2,7 @@
 
 手机优先读取已绑定后台内置的 `app-update.json`，后台缺包、不可用或没有更新版本时读取本仓库Latest Release，下载安装包后交给Android确认。更新不依赖Docker账号或Cookie。App 3.1.4首次需手动覆盖安装，后续使用「我的 → 检查更新」。旧私人版不要卸载；覆盖安装保留绑定、短信和领取记录。
 
-App **3.1.45 / 30145** 与后台 **3.1.43** 支持每平台15分钟、错开约5分钟的后台采集；App打开先读缓存，仅整账号采集超过30分钟才自动补采集，手动刷新仍可触发。插件保持 **1.2.1**。 见[3.1.45更新说明](scheduled-sync-3.1.45.md)。
+App **3.1.46 / 30146** 与后台 **3.1.44** 支持未收包裹商品图片、异常持久追踪、三次真实重采后的AI辅助，以及每天03:00巡检和管理员复盘API。历史订单不补图，原AI配置与15分钟错峰采集保持有效；插件保持 **1.2.1**。 见[3.1.46更新说明](recognition-release-3.1.46.md)。
 
 保留App **3.1.41 / 30141** 的微缩站台物流功能：取件卡片、包裹记录和订单详情使用象牙色站台、蓝色小车及纸箱拖车，首次打开直接定位真实阶段，新事件才播放行程并点亮站牌。三段耗时喷印在路面并保留分钟；确认取件后停靠0.8秒，平滑收拢为四个时间和三段耗时记录。当时配套服务端 **3.1.37** 补查旧订单缺失的下单时间精度，修复已有下单和发货时间却没有发货用时的问题。见 [3.1.41功能说明](miniature-journey-3.1.41.md) 和 [App 3.1.41 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.41)。
 
@@ -14,9 +14,9 @@ App继续保留3.1.37的本地缓存优先、快照复用与同步去重，见 [
 
 `https://github.com/zsdd2/kdyzm/releases/latest/download/app-update.json`
 
-本轮App版本为 `3.1.45` / `30145`，沿用原签名，发布入口为 [App 3.1.45 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.45)。稳定版保持为Latest Release，供旧App检查与下载。
+本轮App版本为 `3.1.46` / `30146`，沿用原签名，发布入口为 [App 3.1.46 Release](https://github.com/zsdd2/kdyzm/releases/tag/app-v3.1.46)。稳定版保持为Latest Release，供旧App检查与下载。
 
-升级顺序：先拉取 `ghcr.io/zsdd2/kdyzm:3.1.43` 或 `ghcr.io/zsdd2/kdyzm:latest`，保留原数据卷和配置重建容器；再覆盖安装App或使用“我的 → 检查更新”。无需清库、重建数据库、卸载App或重新绑定。本轮不代为部署用户NAS。
+升级顺序：先拉取 `ghcr.io/zsdd2/kdyzm:3.1.44` 或 `ghcr.io/zsdd2/kdyzm:latest`，保留原数据卷和配置重建容器；再覆盖安装App或使用“我的 → 检查更新”。无需清库、重建数据库、卸载App或重新绑定。本轮不代为部署用户NAS。
 
 自App3.1.18起优先从已绑定后台检查与下载，后台缺包、不可用或版本不高于已安装App时查询GitHub；内置目录由构建期脚本完整校验。详见 [后台优先升级](backend-app-updates-3.1.15.md)。
 

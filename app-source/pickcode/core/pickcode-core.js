@@ -5,6 +5,13 @@ var PickCodeCore = (function () {
   var stationRecognitionCache={};
   var snapshotIndex=null;
   function text(value, max) { return typeof value === 'string' ? value.slice(0, max || 4096) : ''; }
+  function productImageUrl(value) {
+    if (typeof value !== 'string' || value.length > 2048) return '';
+    var url = value.trim();
+    if (/[\s\u0000-\u001f\u007f\\]/.test(url)) return '';
+    var match = /^(?:https?:)?\/\/((?:[a-z0-9]+(?:-[a-z0-9]+)*\.)*(?:alicdn\.com|360buyimg\.com|pddpic\.com)|img\.yangkeduo\.com)(?::443)?(\/[^#]*)?(?:#.*)?$/i.exec(url);
+    return match ? 'https://' + match[1].toLowerCase() + (match[2] || '/') : '';
+  }
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
   function fail(message) { throw new Error(message); }
   function normalize(value) { return text(value).replace(/[－—–]/g, '-').replace(/\r\n/g, '\n'); }
@@ -438,6 +445,81 @@ var PickCodeCore = (function () {
     return summary;
   }
   function recognizedCarrier(value) { var m=/(中通|圆通|申通|韵达|极兔|顺丰|邮政|京东)/.exec(carrierKey(value));return m?m[1]:''; }
+  function recognitionEnabled(state) { return state.online.bound&&capability(state,'recognition_workflow_v1'); }
+  function recognitionRows(state) { var binding=feedbackBinding(state);return binding?state.recognitionIssues.items.filter(function(row){return row.binding===binding;}):[]; }
+  function recognitionRowActive(state,row) {
+    var source=sourceFor(state,row.localSourceId);
+    return source&&!source.deleted&&!source.ignored&&!source.manualUnlinked&&row.payload.candidateShipmentIds.length>0
+      &&row.payload.candidateShipmentIds.every(function(id){return state.shipments.some(function(ship){return ship.remoteId===id&&recognitionShipment(state,ship);});});
+  }
+  function recognitionShipment(state,shipment) {
+    var disposition=shipment&&shipmentDisposition(shipment);
+    return boundShipment(state,shipment)&&/^[A-Za-z0-9_-]{1,128}$/.test(shipment.remoteId||'')&&!packageHidden(state,shipment)&&!shipmentArchived(state,shipment)&&!shipment.picked
+      &&!deliveredWithoutPickup(state,shipment)&&!(disposition&&['returning','returned'].indexOf(disposition.kind)>=0);
+  }
+  // Refresh on business mutations only. Rendering a snapshot or retrying an upload is not a recognition attempt.
+  function refreshRecognitionIssues(state) {
+    if(!recognitionEnabled(state))return;
+    var binding=feedbackBinding(state),active=state.shipments.filter(function(ship){return recognitionShipment(state,ship);});
+    recognitionRows(state).forEach(function(row){
+      var source=sourceFor(state,row.localSourceId);
+      if(source&&!source.deleted&&!source.ignored&&!source.manualUnlinked||row.payload.state==='withdrawn')return;
+      if(!row.submitted&&!row.acknowledged&&!row.remote){state.recognitionIssues.items=state.recognitionIssues.items.filter(function(value){return value!==row;});return;}
+      row.revision++;row.payload={kind:'unmatched_pickup',state:'withdrawn',sourceId:row.payload.sourceId,
+        source:{station:'',carrier:'',waybillNo:'',pickupCode:'',occurredAt:null,fragment:''},candidateShipmentIds:[],reasonCodes:['source_withdrawn']};
+      row.observedAt=Date.now();row.fingerprint='withdrawn';row.acknowledged=false;delete row.remote;
+    });
+    state.sources.forEach(function(source){
+      var parsed=sourceParsed(state,source),item=sourceItem(state,source),row=recognitionRows(state).filter(function(value){return value.localSourceId===source.id;})[0];
+      if(source.deleted||source.ignored||source.manualUnlinked||parsed.kind!=='pickup'||!item||item.isPicked)return;
+      var links=sourceLinks(state,source).filter(function(id){return active.some(function(ship){return ship.id===id;});}),resolved=links.length>=Math.max(1,Number(parsed.packageCount)||1)&&!source.matchNeedsReview;
+      if(resolved&&!row)return;
+      var recommendations=source.matchCandidates||[],ids=unique(recommendations.concat(source.matchConflicts||[]).map(function(value){return value.shipmentId;}));
+      var candidates=resolved?active.filter(function(ship){return links.indexOf(ship.id)>=0;}):active.filter(function(ship){return ids.indexOf(ship.id)>=0;});
+      // One authorized parcel is useful diagnostic context, never sufficient evidence to link it.
+      if(!resolved&&!candidates.length&&active.length===1)candidates=active;
+      if(!candidates.length)return;
+      candidates=candidates.slice(0,20).sort(function(a,b){return a.remoteId.localeCompare(b.remoteId);});
+      var sourceKey=binding+'|'+state.recognitionIssues.epoch+'|'+source.id,sourceId='source-'+hash(state.clientId+'|'+sourceKey),station=state.settings.stationEnhancement?stationFragment(sourceStation(state,source)):'',times=sourceTimes(source);
+      var carrier=carrierKey(parsed.express),waybill=sourceWaybill(source.body),reasons=resolved?[]:unique(recommendations.filter(function(value){return candidates.some(function(ship){return ship.id===value.shipmentId;});}).map(function(value){return value.decisionReason;}).filter(function(value){return /^[a-z_]{1,80}$/.test(value||'');}));
+      if(!resolved&&(source.matchConflicts||[]).length)reasons.push('evidence_conflict');
+      if(!resolved&&!reasons.length)reasons.push('insufficient_evidence');
+      var payload={kind:'unmatched_pickup',state:resolved?'resolved':'unresolved',sourceId:sourceId,
+        source:{station:station,carrier:/^[\u4e00-\u9fffA-Za-z0-9 ·-]{1,40}$/.test(carrier)?carrier:'',waybillNo:/^[A-Za-z0-9-]{6,32}$/.test(waybill)?waybill:'',pickupCode:validCode(parsed.code)?parsed.code:'',occurredAt:times.sent||times.received||null,fragment:station},
+        candidateShipmentIds:unique(candidates.map(function(ship){return ship.remoteId;})),reasonCodes:unique(reasons).slice(0,20)};
+      var fingerprint=hash(JSON.stringify(resolved?payload:[payload,candidates.map(function(ship){return [ship.remoteId,ship.waybillNo,ship.station,ship.carrier,ship.arrivalAt,ship.arrivalAtSource,ship.arrivalAtPrecision,ship.pickupCode,ship.status];})]));
+      if(row&&row.fingerprint===fingerprint)return;
+      if(!row){if(recognitionRows(state).length>=500)return;row={id:'recognition-'+state.clientId+'-'+hash(sourceKey),revision:0,binding:binding,localSourceId:source.id};state.recognitionIssues.items.push(row);}
+      row.revision++;row.fingerprint=fingerprint;row.payload=payload;row.observedAt=Date.now();row.acknowledged=false;delete row.remote;
+    });
+  }
+  function recognitionIssueBatch(state) {
+    var items=[];
+    if(recognitionEnabled(state))recognitionRows(state).forEach(function(row){
+      if(items.length>=20||row.acknowledged||row.payload.state!=='withdrawn'&&!recognitionRowActive(state,row))return;
+      // A prepared request can reach the service before its ACK; later withdrawal must retire that revision too.
+      row.submitted=true;var value=clone(row.payload);value.id=row.id;value.revision=row.revision;value.observedAt=row.observedAt;items.push(value);
+    });
+    return {schemaVersion:1,items:items};
+  }
+  function importRecognitionIssues(state,value,ack) {
+    if(!value)return;
+    var items=Array.isArray(value)?value:value.issues;
+    if(!Array.isArray(items))return;
+    var rows=recognitionRows(state),accepted=Array.isArray(value.accepted)?value.accepted:[];
+    rows.forEach(function(row){
+      if(ack&&accepted.some(function(item){return item&&item.id===row.id&&item.revision===row.revision;})){row.acknowledged=true;state.recognitionIssues.lastError='';}
+      items.forEach(function(item){
+        if(!item||item.id!==row.id||item.revision!==row.revision||['pending','retrying','ai_pending','ai_running','review','resolved','failed','ignored','blocked'].indexOf(item.status)<0)return;
+        var retry=Number(item.retryCount)||0;if(retry<0||retry>1000||Math.floor(retry)!==retry||row.remote&&retry<row.remote.retryCount)return;
+        var premature=item.status==='resolved'&&row.payload.state!=='resolved';
+        row.remote={id:row.id,revision:row.revision,status:premature?'review':item.status,retryCount:retry,reasonCode:premature?'LOCAL_MATCH_PENDING':/^[A-Za-z0-9_]{0,80}$/.test(item.reasonCode||'')?item.reasonCode||'':'',nextRetryAt:timestamp(item.nextRetryAt)};
+      });
+    });
+  }
+  function recognitionIssueSummary(state,sourceId) {
+    return recognitionRows(state).filter(function(row){return (!sourceId||row.localSourceId===sourceId)&&(row.payload.state==='withdrawn'||recognitionRowActive(state,row));}).map(function(row){return row.remote?clone(row.remote):{id:row.id,revision:row.revision,status:row.acknowledged?'pending':'queued',retryCount:0,reasonCode:row.payload.reasonCodes[0]||'',nextRetryAt:0};});
+  }
   function matchConflict(state,source,shipment) {
     var wb=sourceWaybill(source.body),p=sourceParsed(state,source),a=recognizedCarrier(p.express),b=recognizedCarrier(shipment.carrier);
     if(wb&&shipment.waybillNo.toUpperCase()!==wb)return '短信运单号与该包裹不同';
@@ -448,6 +530,7 @@ var PickCodeCore = (function () {
     if(station==='review')return '短信取件站点存在规则歧义，请后台核对';
     return '';
   }
+  function deliveredWithoutPickup(state,shipment) { return shipment.status==='signed'&&!groupForShipment(state,shipment.id)&&!/驿站|代收点|快递柜|自提柜|丰巢/.test(shipment.station||''); }
   function matchLinkReason(state,shipment,source,ignoreOccupied) {
     if(!boundShipment(state,shipment))return '包裹不在当前授权范围';
     if(packageHidden(state,shipment))return '包裹已隐藏或删除';
@@ -456,7 +539,7 @@ var PickCodeCore = (function () {
     var disposition=shipmentDisposition(shipment);if(disposition&&['returning','returned'].indexOf(disposition.kind)>=0)return '包裹已进入退货流程';
     var own=source&&sourceLinks(state,source).indexOf(shipment.id)>=0;
     if(shipment.picked&&!own)return '包裹已领取';
-    if(shipment.status==='signed'&&!groupForShipment(state,shipment.id)&&!/驿站|代收点|快递柜|自提柜|丰巢/.test(shipment.station||''))return '包裹已送达，无需取件码';
+    if(deliveredWithoutPickup(state,shipment))return '包裹已送达，无需取件码';
     if(!ignoreOccupied&&state.sources.some(function(s){return s!==source&&!s.ignored&&!s.deleted&&sourceLinks(state,s).indexOf(shipment.id)>=0;}))return '包裹已关联其他取件短信';
     return '';
   }
@@ -632,6 +715,8 @@ var PickCodeCore = (function () {
     state.settings=state.settings||{};state.settings.stationEnhancement=state.settings.stationEnhancement===true;state.settings.manualLearning=state.settings.manualLearning!==false;
     state.matchingFeedback=state.matchingFeedback||{items:[],lastError:'',lastUploadAt:0};
     state.matchingFeedback.items=state.matchingFeedback.items||[];
+    state.recognitionIssues=state.recognitionIssues||{items:[],lastError:''};state.recognitionIssues.items=state.recognitionIssues.items||[];
+    state.recognitionIssues.epoch=state.recognitionIssues.epoch||hash(String(Date.now())+String(Math.random()));
     state.correctionEvents=state.correctionEvents||[];
     state.stationRules=state.stationRules||[];state.stationRulesVersion=state.stationRulesVersion||0;
     if(!Array.isArray(state.logisticsRules))state.logisticsRules=logistics.defaults();
@@ -962,7 +1047,7 @@ var PickCodeCore = (function () {
     value.sources=sources.map(function(s){var parsed=sourceParsed(state,s),station=publicStation(state,sourceStation(state,s));return {sourceId:s.id,body:s.body,sender:s.sender,date:s.date,receivedAt:s.receivedAt||s.date,sentAt:s.sentAt||0,ignored:!!s.ignored,kind:s.kind,
       stationCanonical:station.stationCanonical,stationCanonicalId:station.stationCanonicalId,stationSubLocation:station.stationSubLocation,stationDisplayName:station.stationDisplayName,pickupCabinet:station.pickupCabinet,pickupCabinetConflict:station.pickupCabinetConflict,
       packageCount:Math.max(1,Math.min(50,Number(parsed.packageCount)||1)),address:sourceStation(state,s),company:parsed.express||'',linkedShipmentId:s.linkedShipmentId||'',linkedShipmentIds:sourceLinks(state,s),
-      matchCandidates:clone(s.matchCandidates||[]),matchConflicts:clone(s.matchConflicts||[]),matchBasis:s.matchBasis||'',matchNeedsReview:!!s.matchNeedsReview};}).sort(function(a,b){return a.date-b.date;});
+      matchCandidates:clone(s.matchCandidates||[]),matchConflicts:clone(s.matchConflicts||[]),matchBasis:s.matchBasis||'',matchNeedsReview:!!s.matchNeedsReview,recognitionIssues:recognitionIssueSummary(state,s.id)};}).sort(function(a,b){return a.date-b.date;});
     var first=sources.filter(function(s){return !s.ignored&&!s.deleted;})[0];value.sourceBody=first?first.body:'';value.sourceId=first?first.id:'';
     var cabinetValues=[i.address,rawStation(i,'address'),place.pickupCabinet],cabinetConflict=place.pickupCabinetConflict;
     liveSources(state,i).forEach(function(source){var address=sourceStation(state,source),sourcePlace=publicStation(state,address);cabinetValues.push(address,rawSourceStation(state,source),sourcePlace.pickupCabinet);cabinetConflict=cabinetConflict||sourcePlace.pickupCabinetConflict;});
@@ -1137,7 +1222,7 @@ var PickCodeCore = (function () {
       var unpicked=active.filter(function(s){return !s.picked&&!expiredReceived(state,s);});
       var status=waiting?'pending':active.length&&!unpicked.length?'picked':unpicked.some(function(s){return shipmentStatus(state,s)==='arrived'||(s.status==='unknown'&&s.smsArrivalAt);})?'awaiting_code':unpicked.some(function(s){return shipmentStatus(state,s)==='transit';})?'transit':unpicked.some(function(s){return shipmentStatus(state,s)==='signed';})?'signed':unpicked.some(function(s){return shipmentStatus(state,s)==='returning';})?'returning':unpicked.length&&unpicked.every(function(s){return shipmentStatus(state,s)==='returned';})?'returned':o.source==='manual'?'manual':'unknown';
        var retention=orderRetention(o,Date.now());
-       return {id:o.id,source:o.source,familyId:o.familyId||'',familyName:o.familyName||'',platform:o.platform,platformOrderId:o.platformOrderId||'',title:o.title,amount:o.amount,waybillNo:o.waybillNo||'',orderDate:dateOnly(o.dateOverride)||o.orderDate,orderDateSource:o.dateOverride?'manual':o.orderDateSource||(o.source==='manual'?'manual':o.orderDate?'legacy':'unknown'),orderDatePrecision:o.dateOverride?'day':o.orderDatePrecision||'unknown',orderDateOrigin:o.orderDateOrigin||'',dateCheckedAt:o.dateCheckedAt||0,firstSeenAt:o.firstSeenAt||0,tradeStatus:o.tradeStatus||'',status:status,orderStatus:o.orderStatus||'',refundStatus:o.refundStatus||'',archived:retention.archived,retention:retention,archiveRestoredAnchor:o.archiveRestoredAnchor||'',archiveRestoredAt:o.archiveRestoredAt||0,hidden:!!(o.hidden||o.deleted),checked:!!o.checked,shipments:ships.map(function(s){return publicShipment(state,s);}),pickupIds:pickupIds,
+       return {id:o.id,source:o.source,familyId:o.familyId||'',familyName:o.familyName||'',platform:o.platform,platformOrderId:o.platformOrderId||'',title:o.title,imageUrl:productImageUrl(o.imageUrl),amount:o.amount,waybillNo:o.waybillNo||'',orderDate:dateOnly(o.dateOverride)||o.orderDate,orderDateSource:o.dateOverride?'manual':o.orderDateSource||(o.source==='manual'?'manual':o.orderDate?'legacy':'unknown'),orderDatePrecision:o.dateOverride?'day':o.orderDatePrecision||'unknown',orderDateOrigin:o.orderDateOrigin||'',dateCheckedAt:o.dateCheckedAt||0,firstSeenAt:o.firstSeenAt||0,tradeStatus:o.tradeStatus||'',status:status,orderStatus:o.orderStatus||'',refundStatus:o.refundStatus||'',archived:retention.archived,retention:retention,archiveRestoredAnchor:o.archiveRestoredAnchor||'',archiveRestoredAt:o.archiveRestoredAt||0,hidden:!!(o.hidden||o.deleted),checked:!!o.checked,shipments:ships.map(function(s){return publicShipment(state,s);}),pickupIds:pickupIds,
         canRefresh:boundOrder(state,o)&&capability(state,'orderRefresh'),canEditDate:boundOrder(state,o)&&capability(state,'orderDateOverride'),dateOverride:o.dateOverride||null,platformOrderDate:o.orderDate||0,platformOrderDateSource:o.orderDateSource||'unknown',dateState:o.dateState||'',dateError:o.dateError?'平台未返回可用下单日期，可重试或手动修改':''};
     }).sort(function(a,b){return b.orderDate-a.orderDate;});
   }
@@ -1209,6 +1294,7 @@ var PickCodeCore = (function () {
     var importVersion=Number(p.importVersion)||0,serverChanged=!!(snap.serverVersion&&text(snap.serverVersion,40)!==state.online.serverVersion),rulesChanged=snap.stationRulesVersion!==undefined&&snap.stationRulesVersion!==state.stationRulesVersion||snap.serverLogisticsRulesVersion!==undefined&&snap.serverLogisticsRulesVersion!==state.serverLogisticsRulesVersion;
     if(snap.serverRevision<state.online.revision)return;
     importMatchingFeedback(state,snap.matchingFeedback,false);
+    importRecognitionIssues(state,snap.recognitionIssues,false);
     if(snap.serverRevision===state.online.revision&&importVersion<=(state.online.importVersion||0)&&!serverChanged&&!rulesChanged&&!state.online.needsPickupSync){mergeSnapshotJobs(state,snap);return;}
     if(snap.stationRules!==undefined||snap.stationRulesVersion!==undefined){
       if(typeof snap.stationRulesVersion!=='number'||!isFinite(snap.stationRulesVersion)||snap.stationRulesVersion<0||Math.floor(snap.stationRulesVersion)!==snap.stationRulesVersion)fail('站点规则版本无效');
@@ -1226,6 +1312,7 @@ var PickCodeCore = (function () {
       if(!o){o={id:id,source:'online',remoteId:text(input.id,200),serviceKey:serviceKey,accountId:text(input.accountId,200)};state.orders.push(o);}
       retainFamily(o,input);
       o.platform=text(input.platform,40)||'其他';o.platformOrderId=text(input.platformOrderId,200);o.title=text(input.title,200)||'线上包裹';
+      o.imageUrl=productImageUrl(input.imageUrl)||productImageUrl(o.imageUrl);
       o.amount=typeof input.amount==='number'&&isFinite(input.amount)&&input.amount>=0?input.amount:null;
       var inputDate=timestamp(input.orderDate);
       if(input.orderDatePrecision!==undefined||(snap.capabilities||[]).indexOf('pickup_confirmed_at_v1')>=0)o.orderDatePrecision=['second','minute','day'].indexOf(input.orderDatePrecision)>=0?input.orderDatePrecision:'unknown';
@@ -1321,7 +1408,7 @@ var PickCodeCore = (function () {
     });
     (snap.deletedIds||[]).forEach(function(id){var o=byId(state.orders,prefix+id),s=byId(state.shipments,prefix+id);if(o)o.deleted=true;if(s)s.deleted=true;});
     (snap.hiddenIds||[]).forEach(function(id){var o=byId(state.orders,prefix+id),s=byId(state.shipments,prefix+id);if(o&&o.manualHidden===undefined)o.hidden=true;if(s&&s.manualHidden===undefined)s.hidden=true;});
-    state.online.accounts=publicAccounts(snap.accounts);state.online.families=publicFamilies(snap.families);state.online.familyIds=scope.familyIds;state.online.legacyAccountIds=scope.legacyAccountIds;state.online.hasFamilyScope=scope.hasFamilyScope;state.online.revision=snap.serverRevision;state.online.importVersion=importVersion;state.online.serverVersion=text(snap.serverVersion,40);state.online.capabilities=(Array.isArray(snap.capabilities)?snap.capabilities:[]).filter(function(c){return ['syncJobs','conditionalSync','orderRefresh','orderDateOverride','station_aliases_v1','pickup_completion_v1','pickup_confirmed_at_v1','matching_feedback_v1','station_rule_receipts_v1','pickup_cycles_v1','order_retention_v1'].indexOf(c)>=0;});state.online.lastSuccessAt=timestamp(p.syncedAt)||Date.now();state.online.error='';state.online.errorCode='';
+    state.online.accounts=publicAccounts(snap.accounts);state.online.families=publicFamilies(snap.families);state.online.familyIds=scope.familyIds;state.online.legacyAccountIds=scope.legacyAccountIds;state.online.hasFamilyScope=scope.hasFamilyScope;state.online.revision=snap.serverRevision;state.online.importVersion=importVersion;state.online.serverVersion=text(snap.serverVersion,40);state.online.capabilities=(Array.isArray(snap.capabilities)?snap.capabilities:[]).filter(function(c){return ['syncJobs','conditionalSync','orderRefresh','orderDateOverride','station_aliases_v1','pickup_completion_v1','pickup_confirmed_at_v1','matching_feedback_v1','station_rule_receipts_v1','recognition_workflow_v1','pickup_cycles_v1','order_retention_v1'].indexOf(c)>=0;});state.online.lastSuccessAt=timestamp(p.syncedAt)||Date.now();state.online.error='';state.online.errorCode='';
     if(capability(state,'pickup_completion_v1')&&snap.pickupCompletion&&snap.pickupCompletion.version===1){
       state.online.pickupCompletion={version:1,enabled:snap.pickupCompletion.enabled===true,aiEnabled:snap.pickupCompletion.aiEnabled===true,aiState:text(snap.pickupCompletion.aiState,80),message:text(snap.pickupCompletion.message,300)};
     } else delete state.online.pickupCompletion;
@@ -1353,7 +1440,7 @@ var PickCodeCore = (function () {
       else if (!s.deleted && s.kind && s.kind !== 'pickup') reminders.push({ sourceId: s.id, body: s.body, date: s.date, kind: s.kind });
     });
     var codes=state.items.filter(function(i){return groupVisible(state,i);}).map(function(i){return publicCode(state,i);}).sort(function(a,b){return b.date-a.date;});
-    var operations=currentOperations(state),online=clone(state.online);online.pendingCount=operations.length;online.serverRevision=state.online.revision;delete online.serviceKey;delete online.revision;delete online.hasFamilyScope;
+    var operations=currentOperations(state),online=clone(state.online);online.pendingCount=operations.length;online.serverRevision=state.online.revision;online.recognitionIssues=recognitionIssueSummary(state);delete online.serviceKey;delete online.revision;delete online.hasFamilyScope;
     return { codes: codes, packages:publicPackages(state,codes), families:clone(online.families),familyIds:clone(online.familyIds),packagesMigrated:!!state.packagesMigrated, online:online,operations:operations,stationRulesVersion:state.stationRulesVersion,stationRules:clone(state.stationRules),stationChoices:stationChoices(state),matchingFeedback:matchingFeedbackSummary(state),stationEnhancement:{enabled:state.settings.stationEnhancement,pendingCount:state.stationEnhancement.pending.filter(function(candidate){return candidateActive(state,candidate);}).length,lastUploadAt:state.stationEnhancement.lastUploadAt||0,lastError:state.stationEnhancement.lastError||''},reminders: reminders.sort(function (a,b) { return b.date-a.date; }), ignored: ignoredList.sort(function (a,b) { return b.date-a.date; }), rules: state.rules, logisticsRules:clone(state.logisticsRules), settings: state.settings, lastScanAt: state.lastScanAt, summary: state.summary, migrated: state.migrated };
     } finally { snapshotIndex=previousIndex; }
   }
@@ -1420,7 +1507,7 @@ var PickCodeCore = (function () {
     var request = JSON.parse(requestJson), action = request.action, p = request.payload || {}, now = Date.now(), item, source, rule;
     if(action==='testLogisticsRule')return JSON.stringify({state:state,result:logistics.test(p.rule,p.sample)});
     if(action==='syncMeta') {
-      if(p.bound===false||(p.baseUrl&&p.deviceId&&(p.baseUrl!==state.online.baseUrl||p.deviceId!==state.online.deviceId))){delete state.matchingFeedback.configured;delete state.matchingFeedback.enabled;delete state.matchingFeedback.autoApply;state.matchingFeedback.lastError='';state.matchingFeedback.lastUploadAt=0;}
+      if(p.bound===false||(p.baseUrl&&p.deviceId&&(p.baseUrl!==state.online.baseUrl||p.deviceId!==state.online.deviceId))){state.recognitionIssues={items:[],lastError:''};delete state.matchingFeedback.configured;delete state.matchingFeedback.enabled;delete state.matchingFeedback.autoApply;state.matchingFeedback.lastError='';state.matchingFeedback.lastUploadAt=0;}
       if(p.bound===false||(p.baseUrl&&p.deviceId&&(p.baseUrl!==state.online.baseUrl||p.deviceId!==state.online.deviceId))){state.online.revision=-1;state.online.importVersion=0;state.online.jobs=[];state.online.capabilities=[];delete state.online.pickupCompletion;delete state.online.ruleReceipt;delete state.online.needsPickupSync;state.online.serverVersion='';state.online.families=[];state.online.familyIds=[];state.online.legacyAccountIds=[];state.online.hasFamilyScope=false;state.stationRules=[];state.stationRulesVersion=0;state.serverLogisticsRules=[];state.serverLogisticsRulesVersion=0;state.stationEnhancement.pending=[];state.stationEnhancement.sentIds=[];state.stationEnhancement.lastUploadAt=0;state.stationEnhancement.lastError='';}
       ['bound','baseUrl','deviceId','accounts','lastSuccessAt','errorCode','error'].forEach(function(k){if(p[k]!==undefined)state.online[k]=clone(p[k]);});
       if(p.accounts!==undefined)state.online.accounts=publicAccounts(p.accounts);
@@ -1435,6 +1522,9 @@ var PickCodeCore = (function () {
     } else if(action==='setStation'||action==='resetStation') {changeStation(state,p,action==='resetStation');
     } else if(action==='matchingFeedbackBatch') {return JSON.stringify({state:state,result:matchingFeedbackBatch(state)});
     } else if(action==='matchingFeedbackAck') {importMatchingFeedback(state,p,true);
+    } else if(action==='recognitionIssueBatch') {return JSON.stringify({state:state,result:recognitionIssueBatch(state)});
+    } else if(action==='recognitionIssueAck') {importRecognitionIssues(state,p,true);
+    } else if(action==='recognitionIssueFailed') {state.recognitionIssues.lastError='识别问题上传未完成，将在下次同步重试';
     } else if(action==='matchingFeedbackAttempt') {feedbackRows(state).forEach(function(row){if((p.items||[]).some(function(sent){return sent.id===row.id&&sent.revision===row.revision;})){row.attempts=(row.attempts||0)+1;row.lastAttemptAt=Date.now();}});
     } else if(action==='stationRuleReceiptBatch') {var receipt=state.online.ruleReceipt;return JSON.stringify({state:state,result:{pending:!!(state.online.bound&&capability(state,'station_rule_receipts_v1')&&(!receipt||receipt.stationRulesVersion!==state.stationRulesVersion||receipt.serverLogisticsRulesVersion!==state.serverLogisticsRulesVersion)),stationRulesVersion:state.stationRulesVersion,serverLogisticsRulesVersion:state.serverLogisticsRulesVersion}});
     } else if(action==='stationRuleReceiptAck') {if(capability(state,'station_rule_receipts_v1')&&p.stationRulesVersion===state.stationRulesVersion&&p.serverLogisticsRulesVersion===state.serverLogisticsRulesVersion)state.online.ruleReceipt={stationRulesVersion:p.stationRulesVersion,serverLogisticsRulesVersion:p.serverLogisticsRulesVersion,acknowledgedAt:Date.now()};
@@ -1600,6 +1690,7 @@ var PickCodeCore = (function () {
     } else if (action === 'clearTag') {state.items.forEach(function(i){i.tags=i.tags.filter(function(t){return t!==p.tag;});});
     } else if (action !== 'snapshot' && action !== 'migrate') fail('不支持的操作');
     extendState(state);restoreStationProjection(state);refreshLocalLogistics(state);applyStationCorrections(state);reconcileOnline(state);applyStationCorrections(state);refreshStationCandidates(state);refreshMatchingFeedback(state);
+    if(['snapshot','migrate','recognitionIssueAck','recognitionIssueFailed','matchingFeedbackAck','matchingFeedbackAttempt','matchingFeedbackFailed','stationCandidateAck','stationCandidateFailed','stationRuleReceiptAck'].indexOf(action)<0)refreshRecognitionIssues(state);
     return JSON.stringify({ state:state, result:publicSnapshot(state) });
   }
   return { dispatch:dispatch, parse:parse, builtins:builtins, validateRule:validateRule, validateCandidate:validateCandidate, validCode:validCode };

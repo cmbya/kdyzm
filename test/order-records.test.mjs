@@ -59,7 +59,7 @@ test('filtered terminal orders only refresh existing history and never create or
   assert.deepEqual(after.deletedIds, []);
 });
 
-test('sync tracks only same-account active unpicked shipments for terminal logistics refresh', async t => {
+test('sync tracks same-account active unpicked shipments and pending orders awaiting a first waybill', async t => {
   let options;
   const service = createService({ encryptionKey: randomBytes(32).toString('hex'), adminToken: randomBytes(32).toString('hex'),
     now: () => now, scheduler: false, collector: async (_account, _cookie, context) => {
@@ -79,5 +79,5 @@ test('sync tracks only same-account active unpicked shipments for terminal logis
     }
   }
   await service.requestSync(a.id);
-  assert.deepEqual(options.trackedOrderIds, ['signed', 'active']);
+  assert.deepEqual(options.trackedOrderIds, ['signed', 'active', 'no-waybill']);
 });

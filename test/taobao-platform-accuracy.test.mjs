@@ -8,7 +8,7 @@ const stage = (code, station = '合成甲驿站') => ({ title: '待取件', stat
 const root = () => ({ mailNo: 'A', logisticCompany: { name: '中通快递', mailNo: 'A' }, multiStage: [stage('1-2-3456')],
   multiPackages: { packages: [{ mailNo: 'A', cpCode: 'ZTO', orderCode: 'P-A' }, { mailNo: 'B', cpCode: 'SF', orderCode: 'P-B' }] } });
 const ssr = fields => new Response(`<script>window['__ICE_SUSPENSE_LOADER__']['undefined'] = ${JSON.stringify({ result: { data: { newLogistics: { fields } } } })};</script>`);
-const target = { platformOrderId: 'SYNTHETIC-TB-ACCURACY', orderDate: NOW - 86400000, orderDateOrigin: 'detail', orderDatePrecision: 'second', shipments: [] };
+const target = { platformOrderId: 'SYNTHETIC-TB-ACCURACY', orderStatus: '待收货', orderDate: NOW - 86400000, orderDateOrigin: 'detail', orderDatePrecision: 'second', shipments: [] };
 
 test('Taobao empty rich content falls back to the visible plain label', () => {
   const fields = root(); fields.multiStage[0].labelDesc.richContent = [];

@@ -20,7 +20,7 @@ import java.util.concurrent.FutureTask;
 
 /** Serializes device sessions, not the SQLite store; every network request occurs outside store transactions. */
 public final class OnlineSyncManager {
-    static final int IMPORT_VERSION = 325;
+    static final int IMPORT_VERSION = 327;
     private static final int MAX_JOBS = 100;
     private static final ExecutorService STATION_UPLOADS = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "pickcode-station-fragments");
@@ -42,6 +42,7 @@ public final class OnlineSyncManager {
     private long passiveSyncGeneration;
     private boolean stationUploadRunning;
     private boolean matchingFeedbackUploadRunning;
+    private boolean recognitionUploadRunning;
     private OnlineSyncManager(Context context) {
         this.context = context.getApplicationContext();
         secrets = SecretStore.online(this.context);
@@ -296,7 +297,7 @@ public final class OnlineSyncManager {
     synchronized JSONObject syncStationEnhancement(String session) throws Exception {
         JSONObject snapshot = store.snapshot();
         if (session == null || session.isEmpty() || !session.equals(aiSessionKey()) || !enhancementEnabled(snapshot)) return snapshot;
-        return synchronize(false, null);
+        return synchronize(false, null, false);
     }
     public synchronized JSONObject refreshOrder(String id) throws Exception {
         if (id == null || id.isEmpty() || id.length() > 200)
@@ -322,6 +323,9 @@ public final class OnlineSyncManager {
         }
     }
     private JSONObject synchronize(boolean force, String localOrderId) throws Exception {
+        return synchronize(force, localOrderId, true);
+    }
+    private JSONObject synchronize(boolean force, String localOrderId, boolean allowCollection) throws Exception {
         if (!secrets.configured()) return localOrderId == null ? store.snapshot()
                 : recordFailure(new OnlineClient.Failure("not_bound", "请先绑定线上账号，再刷新此订单"));
         try {
@@ -348,7 +352,7 @@ public final class OnlineSyncManager {
             }
             JSONObject online = store.snapshot().optJSONObject("online");
             JSONArray jobs = authorizedJobs(safeJobs(online == null ? null : online.optJSONArray("jobs")), latest == null ? online : latest);
-            boolean conditional = !start && needsConditionalSync(online, jobs, System.currentTimeMillis());
+            boolean conditional = allowCollection && !start && needsConditionalSync(online, jobs, System.currentTimeMillis());
             boolean poll = !start && needsJobPolling(jobs, snapshotJobIds);
             if (start || conditional) {
                 if (!hasCapability(online, "syncJobs") || (localOrderId != null && !hasCapability(online, "orderRefresh")))
@@ -388,6 +392,7 @@ public final class OnlineSyncManager {
             OnlineSyncScheduler.configureEnhancement(context, snapshot);
             scheduleStationCandidates();
             scheduleMatchingFeedback();
+            scheduleRecognitionIssues();
             return snapshot;
         } catch (Exception failure) { return recordFailure(failure); }
     }
@@ -624,6 +629,7 @@ public final class OnlineSyncManager {
             safeServerLogisticsRules(data.optJSONArray("serverLogisticsRules"));
         }
         if (data.has("matchingFeedback")) safeMatchingFeedbackSummary(data.optJSONObject("matchingFeedback"));
+        if (data.has("recognitionIssues")) safeRecognitionIssues(data.optJSONArray("recognitionIssues"));
     }
     static boolean matchingFeedbackEnabled(JSONObject snapshot) {
         JSONObject settings = snapshot == null ? null : snapshot.optJSONObject("settings"), online = snapshot == null ? null : snapshot.optJSONObject("online");
@@ -632,7 +638,122 @@ public final class OnlineSyncManager {
         return online != null && online.optBoolean("bound") && hasCapability(online, "matching_feedback_v1")
                 && (enabled || feedback != null && feedback.optInt("pendingWithdrawalCount") > 0);
     }
-    static boolean enhancementEnabled(JSONObject snapshot) { return stationCandidatesEnabled(snapshot) || matchingFeedbackEnabled(snapshot); }
+    static boolean enhancementEnabled(JSONObject snapshot) { return stationCandidatesEnabled(snapshot) || matchingFeedbackEnabled(snapshot) || recognitionEnabled(snapshot); }
+    static boolean recognitionEnabled(JSONObject snapshot) {
+        JSONObject online = snapshot == null ? null : snapshot.optJSONObject("online");
+        return online != null && online.optBoolean("bound") && hasCapability(online, "recognition_workflow_v1");
+    }
+    private void scheduleRecognitionIssues() {
+        try {
+            if (recognitionUploadRunning || !secrets.configured() || !recognitionEnabled(store.snapshot())) return;
+            final long generation = sessionGeneration;
+            final String base = metadata.getString("baseUrl", ""), device = metadata.getString("deviceId", ""), token = secrets.read();
+            final String lan = metadata.getString("lanBaseUrl", ""), identity = metadata.getString("serviceId", "");
+            recognitionUploadRunning = true;
+            STATION_UPLOADS.execute(() -> uploadRecognitionIssues(generation, base, device, token, lan, identity));
+        } catch (Exception unavailable) { recognitionUploadRunning = false; }
+    }
+    private boolean sameRecognitionSession(long generation, String base, String device, String token) throws Exception {
+        return generation == sessionGeneration && secrets.configured() && base.equals(metadata.getString("baseUrl", ""))
+                && device.equals(metadata.getString("deviceId", "")) && token.equals(secrets.read()) && recognitionEnabled(store.snapshot());
+    }
+    private void uploadRecognitionIssues(long generation, String base, String device, String token, String lan, String identity) {
+        try {
+            JSONArray batch;
+            synchronized (this) {
+                if (!sameRecognitionSession(generation, base, device, token)) return;
+                batch = recognitionIssueBatch(store.dispatch("recognitionIssueBatch", new JSONObject()).optJSONArray("items"));
+                if (batch.length() == 0) return;
+            }
+            JSONObject response = bindingWriteClient(base, lan, identity, token).request("POST", "/v1/recognition-issues",
+                    new JSONObject().put("schemaVersion", 1).put("items", batch), null).body;
+            synchronized (this) {
+                if (!sameRecognitionSession(generation, base, device, token)) return;
+                JSONObject acknowledgement = recognitionIssueAcknowledgement(batch, response);
+                store.dispatch("recognitionIssueAck", acknowledgement);
+                if (acknowledgement.getJSONArray("accepted").length() > 0)
+                    OnlineSyncScheduler.followupEnhancement(context, aiSessionKey());
+            }
+        } catch (Exception unavailable) {
+            try {
+                synchronized (this) {
+                    if (sameRecognitionSession(generation, base, device, token)) store.dispatch("recognitionIssueFailed", new JSONObject());
+                }
+            } catch (Exception ignored) { /* Keep the same report revision for the next ordinary synchronization. */ }
+        } finally {
+            synchronized (this) { recognitionUploadRunning = false; }
+        }
+    }
+    private static boolean recognitionTime(JSONObject input, String key) {
+        return input != null && input.opt(key) instanceof Number && input.optDouble(key) == input.optLong(key)
+                && input.optLong(key) >= 0 && input.optLong(key) <= 9007199254740991L;
+    }
+    static JSONArray recognitionIssueBatch(JSONArray items) throws Exception {
+        JSONArray safe = new JSONArray();
+        if (items == null) return safe;
+        for (int index = 0; index < Math.min(items.length(), 20); index++) {
+            JSONObject item = items.optJSONObject(index), source = item == null ? null : item.optJSONObject("source");
+            if (!feedbackRevision(item) || !recognitionTime(item, "observedAt") || source == null || !source.has("occurredAt") || !source.isNull("occurredAt") && !recognitionTime(source, "occurredAt")) throw invalidResponse();
+            String id = boundedText(item, "id", 128, true), sourceId = boundedText(item, "sourceId", 128, true), state = boundedText(item, "state", 20, true);
+            if (!id.matches("[A-Za-z0-9_-]{1,128}") || !sourceId.matches("[A-Za-z0-9_-]{1,128}") || !state.matches("unresolved|resolved|withdrawn") || !"unmatched_pickup".equals(item.optString("kind"))) throw invalidResponse();
+            JSONObject safeSource = new JSONObject().put("occurredAt", source.isNull("occurredAt") ? JSONObject.NULL : source.getLong("occurredAt"));
+            for (String key : new String[]{"station", "carrier", "fragment"}) {
+                String value = boundedText(source, key, "carrier".equals(key) ? 40 : 120, false);
+                if (value.matches("(?is).*(?:https?://|www\\.|[0-9]{6,}|验证码|密码|取件码|取货码|手机号|运单号|订单号|先生|女士|收件人).*")) throw invalidResponse();
+                safeSource.put(key, value);
+            }
+            String waybill = boundedText(source, "waybillNo", 32, false), code = boundedText(source, "pickupCode", 12, false);
+            if (!waybill.isEmpty() && !waybill.matches("[A-Za-z0-9-]{6,32}") || !code.isEmpty() && (!code.matches("[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*") || !code.matches(".*[0-9].*") || code.length() < 3 || code.matches("[0-9]{9,}"))) throw invalidResponse();
+            safeSource.put("waybillNo", waybill).put("pickupCode", code);
+            JSONObject value = new JSONObject().put("id", id).put("revision", item.getLong("revision")).put("kind", "unmatched_pickup")
+                    .put("state", state).put("sourceId", sourceId).put("observedAt", item.getLong("observedAt")).put("source", safeSource);
+            for (String key : new String[]{"candidateShipmentIds", "reasonCodes"}) {
+                JSONArray input = item.optJSONArray(key), values = new JSONArray();
+                if (input == null || input.length() > 20 || "candidateShipmentIds".equals(key) && !"withdrawn".equals(state) && input.length() == 0) throw invalidResponse();
+                Set<String> seen = new HashSet<>();
+                for (int i = 0; i < input.length(); i++) {
+                    Object raw = input.opt(i);
+                    if (!(raw instanceof String) || !((String) raw).matches("reasonCodes".equals(key) ? "[a-z_]{1,80}" : "[A-Za-z0-9_-]{1,128}")) throw invalidResponse();
+                    if (seen.add((String) raw)) values.put(raw);
+                }
+                value.put(key, values);
+            }
+            safe.put(value);
+        }
+        return safe;
+    }
+    static JSONArray safeRecognitionIssues(JSONArray input) throws Exception {
+        if (input == null || input.length() > 500) throw invalidResponse();
+        JSONArray safe = new JSONArray();
+        for (int index = 0; index < input.length(); index++) {
+            JSONObject item = input.optJSONObject(index);
+            if (!feedbackRevision(item) || !recognitionTime(item, "retryCount") || item.optLong("retryCount") > 1000 || !recognitionTime(item, "nextRetryAt")) throw invalidResponse();
+            String id = boundedText(item, "id", 128, true), status = boundedText(item, "status", 30, true), reason = boundedText(item, "reasonCode", 80, false);
+            if (!id.matches("[A-Za-z0-9_-]{1,128}") || !status.matches("pending|retrying|ai_pending|ai_running|review|resolved|failed|ignored|blocked") || !reason.matches("[A-Za-z0-9_]{0,80}")) throw invalidResponse();
+            safe.put(new JSONObject().put("id", id).put("revision", item.getLong("revision")).put("status", status)
+                    .put("retryCount", item.getLong("retryCount")).put("reasonCode", reason).put("nextRetryAt", item.getLong("nextRetryAt")));
+        }
+        return safe;
+    }
+    static JSONObject recognitionIssueAcknowledgement(JSONArray batch, JSONObject response) throws Exception {
+        if (response == null || response.optJSONArray("accepted") == null) throw invalidResponse();
+        Set<String> sent = new HashSet<>(), used = new HashSet<>();
+        for (int index = 0; index < batch.length(); index++) {
+            JSONObject item = batch.getJSONObject(index);sent.add(item.getString("id") + ":" + item.getLong("revision"));
+        }
+        JSONArray accepted = new JSONArray(), issues = new JSONArray(), returned = safeRecognitionIssues(response.optJSONArray("issues"));
+        for (int index = 0; index < response.getJSONArray("accepted").length(); index++) {
+            JSONObject item = response.getJSONArray("accepted").optJSONObject(index);
+            if (!feedbackRevision(item)) continue;
+            String key = item.optString("id") + ":" + item.getLong("revision");
+            if (sent.contains(key) && used.add(key)) accepted.put(new JSONObject().put("id", item.getString("id")).put("revision", item.getLong("revision")));
+        }
+        for (int index = 0; index < returned.length(); index++) {
+            JSONObject item = returned.getJSONObject(index);
+            if (sent.contains(item.getString("id") + ":" + item.getLong("revision"))) issues.put(item);
+        }
+        return new JSONObject().put("accepted", accepted).put("issues", issues);
+    }
     private void scheduleMatchingFeedback() {
         try {
             if (matchingFeedbackUploadRunning || !secrets.configured() || !matchingFeedbackEnabled(store.snapshot())) return;

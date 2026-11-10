@@ -81,7 +81,8 @@ test('large histories are bounded and snapshots expose truncation without alteri
 
 test('history budget includes the complete snapshot and stays under the Android response limit', t => {
   const { store, account, order, shipment } = fixture(t);
-  store.importResult(account.id, { orders: [{ ...order, title: '中文'.repeat(50) }], shipments: [{ ...shipment,
+  const imageUrl = 'https://img.alicdn.com/' + 'a'.repeat(600) + '.jpg';
+  store.importResult(account.id, { orders: [{ ...order, title: '中文'.repeat(50), imageUrl }], shipments: [{ ...shipment,
     logisticsEvents: Array.from({ length: 20 }, (_, n) => event(NOW - n * 1000, '物流'.repeat(80) + n)), logisticsState: 'ok' }] });
   // Seed the remaining large fixture directly: this regression targets serialization,
   // while the import/merge path is covered above, without a quadratic fixture setup.
@@ -102,6 +103,8 @@ test('history budget includes the complete snapshot and stays under the Android 
   const responseBytes = Buffer.byteLength(JSON.stringify({ ...result, ...additional }), 'utf8');
   assert.ok(responseBytes <= 1900000, `snapshot response is ${responseBytes} bytes, limit 1900000`);
   assert.equal(result.orders.length, 1200);
+  assert.ok(result.orders.some(o => !o.imageUrl));
+  assert.equal(store.order(seed.orders[0].id).imageUrl, imageUrl);
   assert.ok(result.orders.every(o => o.retention.version === 1 && o.retention.anchorDate === '2026-10-30' && o.retention.archived === false));
   assert.ok(result.orders.every(o => !Object.hasOwn(o, 'archiveAnchorDate') && !Object.hasOwn(o, 'archiveRestoredAt')));
   const detail = result.orders.find(o => o.platformOrderId === 'large-1');

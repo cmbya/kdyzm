@@ -159,11 +159,26 @@ export const eventStatus = logistics.eventStatus;
 
 export function activeKnownParcels(order) {
   if (order?.archived || order?.hidden || order?.deleted) return [];
-  return (Array.isArray(order?.shipments) ? order.shipments : []).filter(parcel => text(parcel?.waybillNo) && !parcel.picked && !parcel.hidden && !parcel.deleted && !parcel.archived);
+  return (Array.isArray(order?.shipments) ? order.shipments : []).filter(parcel => {
+    const waybill = text(parcel?.waybillNo).normalize('NFKC').trim();
+    return waybill && !['0', '待发货', '暂无', '无', 'WAITING_FOR_CARRIER'].includes(waybill.toUpperCase())
+      && !parcel.picked && !parcel.hidden && !parcel.deleted && !parcel.archived;
+  });
+}
+
+export function isActiveKnownOrder(order) {
+  if (!order || order.archived || order.hidden || order.deleted) return false;
+  if (order.shipments?.length) return activeKnownParcels(order).length > 0;
+  const status = text(order.orderStatus), trade = text(order.tradeStatus);
+  if (/交易成功|交易完成|交易关闭|已完成|已取消|待付款|未付款|全额退款|退款完成|已退款/.test(status)) return false;
+  return ['WAIT_SELLER_SEND_GOODS', 'WAIT_BUYER_CONFIRM_GOODS'].includes(trade)
+    || eventStatus(status, 'unknown') === 'arrived'
+    || /待发货|等待发货|等待卖家发货|待卖家发货|等待出库|正在出库|待收货|等待收货|已发货|等待揽收|运输中|派送中|派件中|待签收|待取件|待自提|已到达/.test(status);
 }
 
 export function activeKnownOrders(orders, seen, limit = 20) {
-  return orders.filter(order => !seen.has(String(order.platformOrderId)) && activeKnownParcels(order).length)
-    .sort((a, b) => Math.min(...activeKnownParcels(a).map(parcel => parcel.logisticsCheckedAt || 0)) - Math.min(...activeKnownParcels(b).map(parcel => parcel.logisticsCheckedAt || 0)))
+  const checkedAt = order => activeKnownParcels(order).length ? Math.min(...activeKnownParcels(order).map(parcel => parcel.logisticsCheckedAt || 0)) : order.dateCheckedAt || 0;
+  return orders.filter(order => !seen.has(String(order.platformOrderId)) && isActiveKnownOrder(order))
+    .sort((a, b) => checkedAt(a) - checkedAt(b))
     .slice(0, limit);
 }

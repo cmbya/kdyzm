@@ -4,7 +4,7 @@ import packageInfo from '../package.json' with { type: 'json' };
 
 const core = globalThis.PickCodeCore;
 const storageKey = 'pickcode.private.state.v1';
-const ONLINE_IMPORT_VERSION = 325;
+const ONLINE_IMPORT_VERSION = 327;
 let initialization;
 let initialized = false;
 let snapshotInFlight;
@@ -31,6 +31,7 @@ let previewSession;
 let previewSync;
 let previewStationUpload;
 let previewFeedbackUpload;
+let previewRecognitionUpload;
 let previewQueue = Promise.resolve();
 function localDispatch(action, payload = {}) {
   const { state, result } = JSON.parse(core.dispatch(uni.getStorageSync(storageKey) || '', JSON.stringify({ action, payload })));
@@ -59,6 +60,67 @@ async function previewFetch(path, options = {}, authenticated = true, session = 
 function matchingFeedbackEnabled(snapshot) {
   return snapshot.online?.bound && snapshot.online.capabilities?.includes('matching_feedback_v1')
     && (snapshot.settings?.manualLearning !== false || snapshot.matchingFeedback?.pendingWithdrawalCount > 0);
+}
+function recognitionEnabled(snapshot) {
+  return snapshot.online?.bound && snapshot.online.capabilities?.includes('recognition_workflow_v1');
+}
+function recognitionBatch(items) {
+  if (!Array.isArray(items)) return [];
+  const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
+  const integer = value => Number.isSafeInteger(value) && value >= 0;
+  const text = (value, max) => {
+    if (typeof value !== 'string' || value.length > max || /[\x00-\x1f\x7f]/u.test(value)) throw new Error('识别问题格式无效');
+    return value;
+  };
+  return items.slice(0, 20).map(item => {
+    if (!item || !id(item.id) || !integer(item.revision) || item.revision < 1 || !id(item.sourceId)
+      || item.kind !== 'unmatched_pickup' || !['unresolved', 'resolved', 'withdrawn'].includes(item.state) || !integer(item.observedAt) || item.source?.occurredAt !== null && !integer(item.source?.occurredAt)
+      || !Array.isArray(item.candidateShipmentIds) || item.state !== 'withdrawn' && !item.candidateShipmentIds.length || item.candidateShipmentIds.length > 20 || !item.candidateShipmentIds.every(id)
+      || !Array.isArray(item.reasonCodes) || item.reasonCodes.length > 20 || !item.reasonCodes.every(reason => typeof reason === 'string' && /^[a-z_]{1,80}$/u.test(reason))) throw new Error('识别问题格式无效');
+    const source = { occurredAt: item.source.occurredAt };
+    for (const [key, max] of [['station', 120], ['carrier', 40], ['waybillNo', 32], ['pickupCode', 12], ['fragment', 120]]) source[key] = text(item.source[key], max);
+    if ([source.station, source.fragment, source.carrier].some(value => /https?:\/\/|www\.|[0-9]{6,}|验证码|密码|取件码|取货码|手机号|运单号|订单号|先生|女士|收件人/iu.test(value))
+      || source.waybillNo && !/^[A-Za-z0-9-]{6,32}$/u.test(source.waybillNo)
+      || source.pickupCode && !core.validCode(source.pickupCode)) throw new Error('识别问题片段须先脱敏');
+    return { id: item.id, revision: item.revision, kind: item.kind, state: item.state, sourceId: item.sourceId, observedAt: item.observedAt, source,
+      candidateShipmentIds: [...new Set(item.candidateShipmentIds)], reasonCodes: [...new Set(item.reasonCodes)] };
+  });
+}
+function recognitionAck(items, data) {
+  if (!Array.isArray(data?.accepted) || !Array.isArray(data?.issues)) throw new Error('识别问题尚未获后台确认');
+  const sent = new Set(items.map(item => item.id + ':' + item.revision)), seen = new Set();
+  const exact = item => item && Number.isSafeInteger(item.revision) && sent.has(item.id + ':' + item.revision);
+  return { accepted: data.accepted.filter(item => {
+    const key = item?.id + ':' + item?.revision;
+    if (!exact(item) || seen.has(key)) return false;
+    seen.add(key); return true;
+  }).map(({ id, revision }) => ({ id, revision })),
+  issues: data.issues.filter(item => exact(item) && ['pending', 'retrying', 'ai_pending', 'ai_running', 'review', 'resolved', 'failed', 'ignored', 'blocked'].includes(item.status))
+    .map(item => ({ id: item.id, revision: item.revision, status: item.status, retryCount: Number.isSafeInteger(item.retryCount) && item.retryCount >= 0 && item.retryCount <= 1000 ? item.retryCount : 0,
+      reasonCode: typeof item.reasonCode === 'string' && /^[A-Za-z0-9_]{0,80}$/u.test(item.reasonCode) ? item.reasonCode : '',
+      nextRetryAt: Number.isSafeInteger(item.nextRetryAt) && item.nextRetryAt > 0 ? item.nextRetryAt : 0 })) };
+}
+function uploadPreviewRecognitionIssues() {
+  const session = previewSession;
+  if (!session?.token || !recognitionEnabled(localDispatch('snapshot'))) return;
+  if (previewRecognitionUpload?.session === session) { previewRecognitionUpload.changed = true; return; }
+  const operation = { session, changed: false };
+  previewRecognitionUpload = operation;
+  operation.promise = (async () => {
+    try {
+      const items = recognitionBatch(localDispatch('recognitionIssueBatch').items);
+      if (!items.length) return;
+      const { data } = await previewFetch('/v1/recognition-issues', { method: 'POST', priority: 'low', body: JSON.stringify({ schemaVersion: 1, items }) }, true, session);
+      if (previewSession !== session || !recognitionEnabled(localDispatch('snapshot'))) return;
+      changed(localDispatch('recognitionIssueAck', recognitionAck(items, data)));
+    } catch (_) {
+      if (previewSession === session && recognitionEnabled(localDispatch('snapshot'))) changed(localDispatch('recognitionIssueFailed'));
+    }
+  })().finally(() => {
+    if (previewRecognitionUpload !== operation) return;
+    previewRecognitionUpload = undefined;
+    if (operation.changed && previewSession === session) uploadPreviewRecognitionIssues();
+  });
 }
 function matchingFeedbackBatch(items) {
   if (!Array.isArray(items)) return [];
@@ -250,6 +312,7 @@ async function previewOnline(action, payload) {
       const result = localDispatch('syncMeta', { lastSuccessAt: Date.now(), error: '', errorCode: '' });
       uploadPreviewStationCandidates();
       uploadPreviewMatchingFeedback();
+      uploadPreviewRecognitionIssues();
       return result;
     } catch (error) {
       if (error.code === 'device_unauthorized') previewSession = undefined;
@@ -407,6 +470,7 @@ export async function mutate(action, payload = {}) {
   await ready();
   const snapshot = changed(await request(action, payload));
   if (!nativeBridge() && ['settings', 'linkSource', 'unlinkSource', 'setStation', 'resetStation', 'remove', 'ignore'].includes(action)) uploadPreviewMatchingFeedback();
+  if (!nativeBridge() && ['settings', 'ingest', 'linkSource', 'unlinkSource', 'setStation', 'resetStation', 'refreshStations', 'ignore', 'remove', 'restore'].includes(action)) uploadPreviewRecognitionIssues();
   return snapshot;
 }
 export async function testLogisticsRule(rule, sample) { await ready(); return request('testLogisticsRule', { rule, sample }); }

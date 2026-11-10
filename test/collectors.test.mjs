@@ -96,12 +96,7 @@ test('Taobao skips completed or unrelated new orders without requesting logistic
   ];
   const result = await createCollector({ fetchImpl: taobaoFetch(orders, {}, calls) })({ platform: 'taobao' }, '_m_h5_tk=TEST_1793350000');
   assert.deepEqual(result.orders, []);
-  assert.deepEqual(result.orderUpdates.map(({ platformOrderId, tradeStatus, orderStatus }) => ({ platformOrderId, tradeStatus, orderStatus })), [
-    { platformOrderId: 'done', tradeStatus: 'TRADE_FINISHED', orderStatus: '交易成功' },
-    { platformOrderId: 'unpaid', tradeStatus: 'WAIT_BUYER_PAY', orderStatus: '待付款' },
-    { platformOrderId: 'unknown', tradeStatus: 'SOMETHING_NEW', orderStatus: '其他' },
-    { platformOrderId: 'conflicting', tradeStatus: 'WAIT_BUYER_CONFIRM_GOODS', orderStatus: '退款成功' },
-  ]);
+  assert.deepEqual(result.orderUpdates, []);
   assert.ok(result.warnings.includes('订单筛选：本轮保留0笔，跳过4笔已结束或非待收货订单'));
   assert.equal(calls.filter(c => c.target.hostname === 'pages-g.m.taobao.com').length, 0);
 });
@@ -126,7 +121,7 @@ test('Taobao refreshes a tracked finished order and reports its metadata without
   const calls = [];
   const order = { id: 'tracked', extra: { tradeStatus: 'WAIT_BUYER_CONFIRM_GOODS' }, statusInfo: { text: '退款成功' }, refundStatus: 'REFUND_SUCCESS', createTime: '2026-10-30 10:00:00' };
   const result = await createCollector({ fetchImpl: taobaoFetch([order], { tracked: { mailNo: 'TRACKED-1', multiStage: [{ title: '已签收', labelDesc: { text: '本人签收' } }] } }, calls) })(
-    { platform: 'taobao' }, '_m_h5_tk=TEST_1793350000', { trackedOrderIds: ['tracked'] });
+    { platform: 'taobao' }, '_m_h5_tk=TEST_1793350000', { knownOrders: [{ platformOrderId: 'tracked', shipments: [{ waybillNo: 'TRACKED-1' }] }] });
   assert.deepEqual(result.orders, []);
   assert.equal(result.orderUpdates[0].tradeStatus, 'WAIT_BUYER_CONFIRM_GOODS');
   assert.equal(result.orderUpdates[0].refundStatus, 'REFUND_SUCCESS');

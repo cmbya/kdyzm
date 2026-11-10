@@ -158,7 +158,7 @@ test('date overrides are authorized, idempotent, calendar-valid and survive plat
 test('Taobao targeted refresh bypasses date cooldown, does not read order lists and recovers PC track when SSR fails', async () => {
   const paths = [];
   const targetOrder = { platformOrderId: 'one', orderDateOrigin: 'detail', dateCheckedAt: NOW - 1,
-    shipments: [{ waybillNo: 'A', status: 'signed', picked: true }] };
+    shipments: [{ waybillNo: 'A', status: 'signed', picked: false }] };
   const collect = createCollector({ now: () => NOW, fetchImpl: async (url, options) => {
     const target = new URL(url); paths.push(target.pathname);
     if (target.hostname === 'pages-g.m.taobao.com') return new Response('unavailable', { status: 503 });
@@ -185,7 +185,7 @@ test('Taobao targeted date errors and empty creation labels remain explicit with
       if (target.hostname === 'pages-g.m.taobao.com') return new Response('empty');
       if (target.hostname === 'buyertrade.taobao.com') return response({ expressId: '', address: [] });
       return response(body);
-    } })({ platform: 'taobao' }, cookie, { targetOrder: { platformOrderId: 'one', orderDateOrigin: 'detail', orderDate: NOW - 86400000, shipments: [] } });
+    } })({ platform: 'taobao' }, cookie, { targetOrder: { platformOrderId: 'one', orderStatus: '待发货', orderDateOrigin: 'detail', orderDate: NOW - 86400000, shipments: [] } });
     assert.equal(result.orderUpdates[0].dateState, expected); assert.equal(result.orderUpdates[0].dateCheckedAt, NOW);
     assert.equal(result.orderUpdates[0].orderDate, undefined); assert.ok(result.orderUpdates[0].dateError);
   }
@@ -205,6 +205,6 @@ test('PDD targeted refresh queries the stored order cabinet and shipping, report
   assert.equal(result.shipments[0].logisticsEvents.length, 1); assert.equal(result.shipments[1].logisticsEvents, undefined);
   assert.equal(result.logisticsFailures[0].waybillNo, 'B');
   const failed = await createCollector({ now: () => NOW, fetchImpl: async () => new Response('unavailable', { status: 503 }) })(
-    { platform: 'pdd' }, 'pdd_user_id=synthetic', { targetOrder: { platformOrderId: 'one', shipments: [] } });
+    { platform: 'pdd' }, 'pdd_user_id=synthetic', { targetOrder: { platformOrderId: 'one', orderStatus: '待发货', shipments: [] } });
   assert.equal(failed.logisticsFailures[0].state, 'error');
 });

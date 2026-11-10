@@ -236,7 +236,7 @@ test('Taobao date supplement uses signed detailv2 and accepts creation labels on
 test('Taobao date supplement corrects known list dates, throttles requests and caps the batch', async () => {
   const calls = [];
   const records = Array.from({ length: 15 }, (_, i) => ({ id: `o${i}`, statusInfo: { text: '待发货' }, createTime: '2026-10-30 10:00:00' }));
-  const knownOrders = records.map(order => ({ platformOrderId: order.id, orderDateOrigin: 'list', dateCheckedAt: 0, shipments: [] }));
+  const knownOrders = records.map(order => ({ platformOrderId: order.id, orderStatus: '待发货', orderDateOrigin: 'list', dateCheckedAt: 0, shipments: [] }));
   knownOrders[0].dateCheckedAt = NOW - 1000;
   knownOrders[1].orderDateOrigin = 'detail';
   knownOrders[1].orderDatePrecision = 'second';
@@ -256,7 +256,7 @@ test('Taobao repairs legacy detail precision within the existing cooldown and bu
   t.after(() => store.close());
   store.saveAccount({ platform: 'taobao', label: 'fixture', cookie: 'SYNTHETIC' }, 'a', true);
   const originalDate = Date.parse('2026-10-28T09:00:00+08:00');
-  const orders = Array.from({ length: 16 }, (_, i) => ({ platformOrderId: `o${i}`, orderDate: originalDate, orderDateOrigin: 'detail',
+  const orders = Array.from({ length: 16 }, (_, i) => ({ platformOrderId: `o${i}`, orderStatus: '待发货', orderDate: originalDate, orderDateOrigin: 'detail',
     dateCheckedAt: i === 0 ? NOW - 1000 : NOW - 2 * 86400000, ...([1, 2, 3].includes(i) ? { orderDatePrecision: ['minute', 'second', 'day'][i - 1] } : {}) }));
   store.importResult('a', { orders, shipments: [] });
   const knownOrders = store.snapshot(['a']).orders;
@@ -300,7 +300,7 @@ test('Taobao empty legacy detail supplements preserve unknown precision and cool
   t.after(() => store.close());
   store.saveAccount({ platform: 'taobao', label: 'fixture', cookie: 'SYNTHETIC' }, 'a', true);
   const originalDate = NOW - 3 * 86400000;
-  store.importResult('a', { orders: [{ platformOrderId: 'old', orderDate: originalDate, orderDateOrigin: 'detail', dateCheckedAt: NOW - 2 * 86400000 }], shipments: [] });
+  store.importResult('a', { orders: [{ platformOrderId: 'old', orderStatus: '待发货', orderDate: originalDate, orderDateOrigin: 'detail', dateCheckedAt: NOW - 2 * 86400000 }], shipments: [] });
   const calls = [];
   const collect = createCollector({ now: () => NOW, fetchImpl: taobaoDateFetch([], {}, calls) });
   store.importResult('a', await collect({ platform: 'taobao' }, cookie, { knownOrders: store.snapshot(['a']).orders }));
@@ -314,9 +314,9 @@ test('Taobao empty legacy detail supplements preserve unknown precision and cool
   assert.equal(calls.length, 1);
 });
 
-test('Taobao date supplement updates known orders outside the list without importing them', async () => {
+test('Taobao date supplement updates active pending orders outside the list without importing them', async () => {
   const result = await createCollector({ now: () => NOW, fetchImpl: taobaoDateFetch([], { known: detail([{ name: '下单时间', value: '2026-10-25 08:00:00' }]) }) })(
-    { platform: 'taobao' }, cookie, { knownOrders: [{ platformOrderId: 'known', shipments: [] }] });
+    { platform: 'taobao' }, cookie, { knownOrders: [{ platformOrderId: 'known', orderStatus: '待发货', shipments: [] }] });
   assert.deepEqual(result.orders, []);
   assert.deepEqual(result.orderUpdates, [{ platformOrderId: 'known', dateCheckedAt: NOW, dateState: 'ok', dateError: '', orderDate: Date.parse('2026-10-25T08:00:00+08:00'), orderDatePrecision: 'second', orderDateOrigin: 'detail' }]);
   assert.ok(!result.warnings.some(warning => warning.includes('订单筛选')));
@@ -332,7 +332,7 @@ test('Taobao detail risk failures preserve list data while explicit session expi
   await assert.rejects(createCollector({ fetchImpl: taobaoDateFetch(orders, { o1: { ret: ['FAIL_SYS_SESSION_EXPIRED::登录过期'] } }) })({ platform: 'taobao' }, cookie), { code: 'ACCOUNT_EXPIRED' });
 });
 
-test('Taobao keeps picked and hidden metadata without polling, and refreshes signed-unpicked logistics', async () => {
+test('Taobao ignores picked and hidden metadata, and refreshes signed-unpicked logistics', async () => {
   const records = ['picked', 'hidden', 'signed', 'active', 'explicit'].map(id => ({ id, statusInfo: { text: '交易成功' } }));
   const calls = [];
   const base = taobaoDateFetch(records, {});
@@ -350,8 +350,8 @@ test('Taobao keeps picked and hidden metadata without polling, and refreshes sig
       { platformOrderId: 'active', orderDateOrigin: 'detail', shipments: [{ waybillNo: 'A', status: 'transit' }] },
     ],
   });
-  assert.deepEqual(calls, ['signed', 'active', 'explicit']);
-  assert.equal(result.orderUpdates.length, 5);
+  assert.deepEqual(calls, ['signed', 'active']);
+  assert.equal(result.orderUpdates.length, 2);
   assert.deepEqual(result.orders, []);
 });
 

@@ -48,7 +48,7 @@ test('PDD pending and received ranges paginate independently, merge overlaps, an
   assert.ok(!calls.some(call => /\/(?:cabinet|order)\/pending(?:\/|$)/.test(call.target.pathname)));
 });
 
-test('PDD ignores explicit unrelated new orders while returning metadata for existing history', async () => {
+test('PDD ignores explicit unrelated new orders and existing completed history', async () => {
   const skipped = [
     { order_sn: 'cancelled', order_status_text: '已取消' },
     { order_sn: 'refund', order_status_text: '待收货', refund_status: '全额退款成功' },
@@ -71,7 +71,7 @@ test('PDD ignores explicit unrelated new orders while returning metadata for exi
   assert.deepEqual(result.orders.map(order => [order.platformOrderId, order.orderStatus]), [
     ['pending', '待发货'], ['unknown-number', '待发货'], ['moving', '待收货'],
   ]);
-  assert.deepEqual(result.orderUpdates.map(order => order.platformOrderId), skipped.map(order => order.order_sn));
+  assert.deepEqual(result.orderUpdates, []);
   assert.deepEqual(result.shipments, []);
   assert.ok(result.warnings.some(warning => warning.includes('订单筛选')));
   assert.ok(!('deletedIds' in result));
@@ -191,10 +191,15 @@ for (const type of ['unshipping', 'unreceived']) {
   }
 }
 
-test('PDD targeted refresh of a known pending order without a waybill does not probe shipping', async () => {
-  const result = await createCollector({ now: () => NOW, fetchImpl: async () => { assert.fail('pending order should not request logistics'); } })(
+test('PDD targeted refresh of an active pending order checks for a newly assigned waybill', async () => {
+  const calls = [];
+  const result = await createCollector({ now: () => NOW, fetchImpl: async url => {
+    calls.push(new URL(url)); return response({ shipping: { traces: [] } });
+  } })(
     account, cookie, { targetOrder: { platformOrderId: 'pending', orderStatus: '待发货', shipments: [] } });
   assert.deepEqual(result.orders, []);
   assert.deepEqual(result.shipments, []);
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].pathname.endsWith('/order/pending/shipping'));
   assert.equal(result.orderUpdates[0].dateState, 'unavailable');
 });

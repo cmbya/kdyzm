@@ -50,9 +50,10 @@ function regression(candidate, rule, current, shipments) {
 }
 
 export class LogisticsAiJobs {
-  constructor({ stations, rules, store, assistance, now = Date.now, automaticEvents = true }) {
+  constructor({ stations, rules, store, assistance, now = Date.now, automaticEvents = true, allowAutomatic = () => true }) {
     this.stations = stations; this.rules = rules; this.store = store; this.db = store.db; this.assistance = assistance;
     this.now = now; this.automaticEvents = automaticEvents; this.running = null; this.closed = false; this.generation = 0;
+    this.allowAutomatic = allowAutomatic;
     this.db.exec(`CREATE TABLE IF NOT EXISTS logistics_ai_candidates (id TEXT PRIMARY KEY, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS logistics_ai_state (id INTEGER PRIMARY KEY CHECK(id=1), last_run_at INTEGER NOT NULL);
       INSERT OR IGNORE INTO logistics_ai_state VALUES(1,0);`);
@@ -99,9 +100,14 @@ export class LogisticsAiJobs {
     return Number.isSafeInteger(date) && date > this.now() - ACTIVE_AGE && date <= this.now();
   }
   eligibleTime(time) { return Number.isSafeInteger(time) && time > this.now() - ACTIVE_AGE && time <= this.now(); }
+  automaticAllowed(shipment) { return this.allowAutomatic(shipment, 'arrival_time') || this.allowAutomatic(shipment, 'logistics_detail'); }
+  candidateAllowed(candidate, shipments = this.cached()) {
+    return shipments.some(shipment => shipment.logisticsEvents?.some(event => event.time === candidate.eventTime && event.description?.includes(candidate.fragment))
+      && this.automaticAllowed(shipment));
+  }
   sourcePresent(candidate, shipments) {
-    return this.eligibleTime(candidate.eventTime) && shipments.some(shipment => this.eligibleShipment(shipment)
-      && shipment.logisticsEvents?.some(event => event.time === candidate.eventTime && event.description.includes(candidate.fragment)));
+    return this.eligibleTime(candidate.eventTime) && shipments.some(shipment => shipment.logisticsEvents?.some(event => event.time === candidate.eventTime && event.description.includes(candidate.fragment))
+      && this.eligibleShipment(shipment) && this.automaticAllowed(shipment));
   }
   backing(station, shipments) {
     if (this.stations.stationRules().stations.some(item => [item.name, ...item.aliases.map(alias => alias.name)].includes(station))) return true;
@@ -116,7 +122,7 @@ export class LogisticsAiJobs {
     const names = this.stations.stationRules().stations.flatMap(item => [item.name, ...item.aliases.map(alias => alias.name)]).filter(specificStation).sort((a, b) => b.length - a.length);
     let count = this.candidates().length, inspected = 0;
     for (const shipment of snapshot?.shipments || []) {
-      if (!this.eligibleShipment(shipment)) continue;
+      if (!this.eligibleShipment(shipment) || !this.automaticAllowed(shipment)) continue;
       for (const event of shipment.logisticsEvents || []) {
         if (++inspected > CORPUS_LIMIT) break;
         if (!this.eligibleTime(event.time) || typeof event.description !== 'string') continue;
@@ -160,9 +166,9 @@ export class LogisticsAiJobs {
   }
   checkKey() { return `${this.rules.read().revision}:${this.stations.revision}:${this.db.prepare('SELECT revision FROM meta WHERE id=1').get().revision}`; }
   work() {
-    const config = this.stations.aiConfig(), key = this.checkKey();
-    return this.candidates().reverse().filter(candidate => candidate.status === 'review' && candidate.rule && config.autoApply && candidate.applyCheckedKey !== key
-      || ['pending', 'failed'].includes(candidate.status) && candidate.attempts < 3 && candidate.retryAt <= this.now())
+    const config = this.stations.aiConfig(), key = this.checkKey(), shipments = this.cached();
+    return this.candidates().reverse().filter(candidate => this.candidateAllowed(candidate, shipments) && (candidate.status === 'review' && candidate.rule && config.autoApply && candidate.applyCheckedKey !== key
+      || ['pending', 'failed'].includes(candidate.status) && candidate.attempts < 3 && candidate.retryAt <= this.now()))
       .sort((a, b) => Number(b.status === 'review') - Number(a.status === 'review'));
   }
   nextRunAt() {
@@ -172,7 +178,7 @@ export class LogisticsAiJobs {
   schedule() {
     clearTimeout(this.scheduled); this.scheduled = null;
     if (!this.automaticEvents || !this.ready() || this.running) return;
-    const config = this.stations.aiConfig(), key = this.checkKey(), all = this.candidates();
+    const config = this.stations.aiConfig(), key = this.checkKey(), shipments = this.cached(), all = this.candidates().filter(candidate => this.candidateAllowed(candidate, shipments));
     const review = config.autoApply && all.some(candidate => candidate.status === 'review' && candidate.rule && candidate.applyCheckedKey !== key);
     const pending = all.filter(candidate => ['pending', 'failed'].includes(candidate.status) && candidate.attempts < 3);
     if (!review && !pending.length) return;
@@ -245,6 +251,10 @@ export class LogisticsAiJobs {
         called = true;
         const response = await this.call(candidate, context);
         if (!this.active(context) || !['pending', 'failed'].includes(this.candidate(candidate.id).status)) continue;
+        if (!this.candidateAllowed(candidate)) {
+          this.update(candidate.id, { status: 'review', reason: 'LOCAL_RETRIES_REQUIRED', attempts: candidate.attempts + 1,
+            retryAt: 0, error: '来源已不符合自动识别条件，未采纳本次建议' }, context); continue;
+        }
         candidate = this.candidate(candidate.id);
         if (!this.sourcePresent(candidate, this.cached())) {
           this.update(candidate.id, { status: 'review', reason: 'NO_ACTIVE_EVIDENCE', error: '原始包裹已不在启用账号的近期未完成记录中，未采纳AI结果' }, context); continue;

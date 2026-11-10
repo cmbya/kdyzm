@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.46 · 私人版</text><text class="version-date">2026-11-10</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">图片</text><text class="content">未收包裹展示平台商品图片，不补采历史订单图片</text></view>
+          <view class="update-item"><text class="tag fix">识别</text><text class="content">缺少时间或匹配失败时持续追踪，三次重采后由AI辅助核对，不猜时间或强行匹配</text></view>
+          <view class="update-item"><text class="tag optimize">后台</text><text class="content">每天巡检未收包裹，分别优化各平台识别，保留最后一次领取状态更新</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.45 · 私人版</text><text class="version-date">2026-11-10</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">采集</text><text class="content">配套后台每个平台15分钟自动采集，京东、拼多多、淘宝错开约5分钟</text></view>

@@ -4,19 +4,15 @@ import { randomBytes } from 'node:crypto';
 import { createService } from '../src/service.mjs';
 
 const ADMIN = randomBytes(24).toString('hex');
-const name = '远洋风景4卡菜鸟驿站', description = `已交付给${name}`;
+const name = '示例花园4卡菜鸟驿站', description = `已交付给${name}`;
 const response = value => ({ choices: [{ message: { content: JSON.stringify(value) } }] });
 const config = { channelName: '合成调优渠道', baseUrl: 'https://api.example.com/v1', model: 'synthetic-model', apiKey: randomBytes(24).toString('hex'), enabled: true, autoApply: true, logisticsEnabled: true };
-async function until(predicate) {
-  for (let i = 0; i < 150; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
-  assert.fail('automatic optimization did not finish');
-}
-async function fixture(t) {
-  const now = Date.now(), calls = [];
-  const service = createService({ encryptionKey: randomBytes(32).toString('hex'), adminToken: ADMIN, fixture: true, now: () => now,
+async function fixture(t, { collector } = {}) {
+  const now = Date.now(), calls = []; let time = now;
+  const service = createService({ encryptionKey: randomBytes(32).toString('hex'), adminToken: ADMIN, fixture: true, scheduler: false, now: () => time, collector,
     aiRequest: async request => {
       const input = JSON.parse(JSON.parse(request.body).messages[1].content); calls.push(input);
-      return response(input.expectedStation ? { kind: 'arrival', starts: ['已交付给'], ends: [], keywords: [input.expectedStation], expectedStation: input.expectedStation, evidence: [input.fragment] }
+      return response(input.expectedStation ? { kind: 'arrival', starts: [input.fragment.slice(0, input.fragment.indexOf(input.expectedStation))], ends: [], keywords: [input.expectedStation], expectedStation: input.expectedStation, evidence: [input.fragment] }
         : { kind: 'locker', targetStationId: 'station-a', alias: input.fragment, subLocation: '2号柜', evidence: [input.fragment] });
     } });
   await new Promise(resolve => service.server.listen(0, '127.0.0.1', resolve)); t.after(() => service.close());
@@ -28,18 +24,29 @@ async function fixture(t) {
   const account = service.store.saveAccount({ platform: 'pdd', label: '合成账号', cookie: 'SYNTHETIC' }, undefined, true);
   const device = service.store.redeem(service.store.createPairing({ accountIds: [account.id] }).code, '合成设备');
   service.stations.saveStation('station-a', { name });
-  return { service, request, account, device, calls, now };
+  return { service, request, account, device, calls, now, advance: duration => { time += duration; } };
 }
 
-test('enabling automatic optimization discovers cached failures and publishes revised evidence and rollback without an analyze click', async t => {
-  const { service, request, account, device, calls, now } = await fixture(t), arrival = now - 60000;
-  service.store.importResult(account.id, { orders: [{ platformOrderId: 'order', title: '合成包裹', orderDate: now - 86400000 }], shipments: [
+test('three unresolved collection retries unlock automatic logistics rule publication and rollback', async t => {
+  let collected, collections = 0;
+  const { service, request, account, device, calls, now, advance } = await fixture(t, { collector: async () => { collections++; return collected; } }), arrival = now - 60000;
+  const rules = service.logisticsRules.read();
+  service.logisticsRules.save({ revision: rules.revision, rules: rules.rules.map(rule => rule.id === 'builtin-arrival-placement' ? { ...rule, enabled: false } : rule) });
+  collected = { orders: [{ platformOrderId: 'order', title: '合成包裹', orderDate: now - 86400000 }], shipments: [
     { platformOrderId: 'order', waybillNo: 'SYNTHETIC12345678', carrier: '中通', status: 'transit', logisticsState: 'ok', logisticsCheckedAt: now,
-      logisticsEvents: [{ time: arrival, timePrecision: 'second', description: `${description}，联系电话13800138000，张三先生取件码357591` }] }], warnings: [] });
+      logisticsEvents: [{ time: arrival, timePrecision: 'second', description: `已放置于${name}，联系电话13800138000，张三先生取件码357591` }] }], warnings: [] };
+  service.store.importResult(account.id, collected);
   const initial = await request('/v1/snapshot', { admin: false, token: device.token });
   assert.equal(initial.data.shipments[0].arrivalAt, 0);
   assert.equal((await request('/v1/admin/station-ai', { method: 'PATCH', body: config })).status, 200);
-  await until(() => service.logisticsAi.candidates().some(candidate => candidate.status === 'applied'));
+  assert.equal(calls.length, 0); assert.equal(service.logisticsAi.candidates().length, 0);
+  for (const minutes of [5, 10, 15]) {
+    advance(minutes * 60000); service.recognition.runDue(); await service.recognition.running;
+    assert.equal(calls.length, 0);
+  }
+  assert.equal(collections, 3); assert.equal(service.recognition.tasks()[0].retryCount, 3);
+  service.recognition.runDue(); await service.recognition.running; await service.logisticsAi.running;
+  assert.ok(service.logisticsAi.candidates().some(candidate => candidate.status === 'applied'));
   const updated = await request('/v1/snapshot', { admin: false, token: device.token, etag: initial.headers.get('etag') });
   assert.equal(updated.status, 200); assert.ok(updated.data.serverRevision > initial.data.serverRevision);
   assert.equal(updated.data.shipments[0].station, name); assert.equal(updated.data.shipments[0].arrivalAt, arrival);
@@ -52,12 +59,15 @@ test('enabling automatic optimization discovers cached failures and publishes re
   assert.equal(restored.data.shipments[0].arrivalAt, 0); assert.ok(restored.data.serverRevision > updated.data.serverRevision);
 });
 
-test('automatic station alias revision reaches device snapshots and history rollback is administrator-only', async t => {
-  const { service, request, device } = await fixture(t), alias = `${name}2号柜`;
+test('an administrator-requested station alias revision reaches device snapshots and history rollback is administrator-only', async t => {
+  const { service, request, device, calls } = await fixture(t), alias = `${name}2号柜`;
   await request('/v1/admin/station-ai', { method: 'PATCH', body: { ...config, logisticsEnabled: false } });
   const upload = await request('/v1/station-candidates', { method: 'POST', admin: false, token: device.token, body: { items: [{ id: 'alias', stationName: alias, fragment: alias, source: 'sms' }] } });
   assert.equal(upload.status, 200);
-  await until(() => service.stations.candidates()[0]?.status === 'approved');
+  assert.equal(service.stationAi.runDue().code, 'AI_NO_PENDING'); assert.equal(calls.length, 0);
+  const started = await request('/v1/admin/station-ai/run', { method: 'POST', body: {} });
+  assert.equal(started.data.code, 'AI_ACCEPTED'); await service.stationAi.running;
+  assert.equal(service.stations.candidates()[0]?.status, 'approved'); assert.equal(calls.length, 1);
   const [change] = (await request('/v1/admin/ai-optimization/history')).data.changes;
   const path = `/v1/admin/ai-optimization/history/station_alias/${change.id}/rollback`;
   assert.equal((await request(path, { method: 'POST', body: {}, admin: false, token: device.token })).status, 401);

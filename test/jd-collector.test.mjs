@@ -43,7 +43,7 @@ test('JD imports active physical orders with amounts in yuan, split waybills and
   assert.deepEqual(result.shipments.map(s => [s.waybillNo, s.pickupCode, s.status]), [['JD-A', '8-2-1234', 'arrived'], ['JD-B', '', 'transit']]);
   assert.ok(result.shipments.every(s => !('picked' in s) && s.logisticsState === 'ok'));
   assert.equal(calls.length, 3); assert.ok(calls.every(c => c.options.headers.Cookie === 'thor=FAKE'));
-  assert.equal(result.orderUpdates.length, 5);
+  assert.equal(result.orderUpdates.length, 0);
 });
 
 test('JD newest signed event overrides old pickup notice without copying a parent code across parcels', () => {
@@ -122,7 +122,7 @@ test('JD an absent detail date cannot erase a valid list date and empty tracks c
 
 test('JD detail budget excludes manual completed parcels and rotates no-waybill orders by their last detail attempt', async () => {
   const list = Array.from({ length: 23 }, (_, i) => order('o' + i, i % 2 ? '正在出库' : '待收货')), calls = [];
-  const knownOrders = list.map((o,i)=>({platformOrderId:o.orderId,dateCheckedAt:i===20?now():0,
+  const knownOrders = list.map((o,i)=>({platformOrderId:o.orderId,orderStatus:o.statusInfo.orderStateName,dateCheckedAt:i===20?now():0,
     shipments:i<20?[{waybillNo:'P'+i,hidden:i%2===0,picked:i%2!==0}]:[]}));
   const result = await createCollector({now,fetchImpl:network(list,{},calls)})({platform:'jd'},'thor=FAKE',{knownOrders});
   const queried=calls.filter(c=>c.target.searchParams.get('functionId')==='pcdetail_traceMultiPackage').map(c=>c.input.orderId);

@@ -127,17 +127,22 @@ test('station rule edits invalidate snapshot ETags and disabled stations disappe
   assert.equal(after.data.orders.length, 1); assert.ok(after.data.orders.every(o => o.accountId === account.id));
 });
 
-test('successful collection queues verified station names once and AI work never blocks or writes parcel data', async t => {
+test('successful collections do not queue AI and an administrator-requested analysis never blocks or writes parcel data', async t => {
   let finish, outbound;
   const { service, request, account, device, advance } = await fixture(t, { aiRequest: value => { outbound = value; return new Promise(resolve => { finish = resolve; }); } });
   const station = (await request('/v1/admin/stations', { method: 'POST', admin: true, body: { name: '四卡驿站' } })).data.station;
   const job = await service.requestSync(account.id);
   assert.equal(job.state, 'completed');
-  assert.equal(service.stations.candidates().length, 1); assert.equal(service.stations.candidates()[0].source, 'platform');
-  assert.equal(service.stations.candidates()[0].fragment, '4卡2号柜');
+  assert.equal(service.stations.candidates().length, 0); assert.equal(service.recognition.tasks().length, 0);
   advance(5 * 60000); await service.requestSync(account.id);
-  assert.equal(service.stations.candidates()[0].occurrences, 1);
+  assert.equal(service.stations.candidates().length, 0); assert.equal(outbound, undefined);
+  const upload = () => request('/v1/station-candidates', { method: 'POST', token: device.token,
+    body: { items: [{ id: 'manual-review', stationName: '4卡2号柜', fragment: '4卡2号柜', source: 'sms' }] } });
+  assert.equal((await upload()).status, 200); assert.equal((await upload()).status, 200);
+  assert.equal(service.stations.candidates().length, 1); assert.equal(service.stations.candidates()[0].occurrences, 1);
+  assert.equal(service.stations.candidates()[0].fragment, '4卡2号柜');
   await request('/v1/admin/station-ai', { method: 'PATCH', admin: true, body: aiConfig });
+  assert.equal(service.stationAi.runDue().code, 'AI_NO_PENDING'); assert.equal(outbound, undefined);
   const started = await request('/v1/admin/station-ai/run', { method: 'POST', admin: true, body: {} });
   assert.equal(started.status, 202); assert.equal(started.data.accepted, true); assert.ok(service.stationAi.running);
   assert.ok(!outbound.body.includes('SYNTHETIC-WAYBILL')); assert.ok(!outbound.body.includes('SYNTHETIC_COOKIE'));

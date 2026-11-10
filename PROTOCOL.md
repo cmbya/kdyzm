@@ -43,6 +43,8 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 
 ## 快照与设备操作
 
+订单可选 `imageUrl` 为本订单商品列表中首张有效商品图。仅接受 `alicdn.com`、`360buyimg.com`、`pddpic.com` 及子域、`img.yangkeduo.com` 的 HTTPS URL（平台 HTTP/无协议地址归一化为 HTTPS），不携设备令牌。缺失或不合法的后续图片不清除已存图片；旧客户端可忽略新字段。超大快照在保留订单与物流数据的前提下省略较早订单的图片地址，数据库不变；客户端缺图或加载失败使用占位图。
+
 快照结构：`{schemaVersion:1,serverRevision,accounts,orders,shipments,hiddenIds,deletedIds}`，可有附加警告字段。订单有`id,accountId,platform,platformOrderId,title,amount,orderDate,orderStatus,refundStatus`；金额缺失为null。运单有`id,orderId,accountId,waybillNo,carrier,status,pickupCode,station,arrivalAt,updatedAt,picked,hidden`。status为`transit/arrived/signed/unknown`，普通signed不派生picked。到站时间是首次已知时间，不随刷新改变。数组缺席不代表删除或已取。
 
 ### 家人归属与持续组授权
@@ -286,6 +288,20 @@ App不再保存独立渠道选择，不采用列表第一项或本机旧密钥�
 首次建立平台账号仅适用于该角色完全没有该平台账号的情况。预览校验同样的平台身份和登录字段，只保存父授权/平台绑定的 Cookie 摘要、确认 token 摘要和五分钟有效期，不创建账号、不保存 Cookie、不发起采集。用户明确确认后，创建接口再次校验父授权、确认摘要、版本 0 及平台仍然缺席；账号、加密 Cookie、已绑定子授权和确认消耗在一个数据库事务中保存，失败整体回滚。账号名称由角色和平台生成，随后按原调度器请求一次采集。确认凭证不能用于其他角色、平台或 Cookie，撤权即清除。
 
 若预览后已有该平台账号、另一请求先完成创建，或原本存在多个账号，返回 `409 COOKIE_PLATFORM_EXISTS`，不选择或覆盖任何已有账号。已有账号必须使用账号 ID 接口。客户端不能自动调用首次创建接口；应在展示角色、平台和脱敏身份并获得本次批量确认后逐个平台提交。后台创建接口不接受 `enabled`、任意名称、角色或内部事务标志。
+
+## 3.1.44：recognition_workflow_v1
+
+快照在 `capabilities` 增加 `recognition_workflow_v1`，新增 `recognitionIssues` 数组。元素仅有 `{id,revision,status,retryCount,reasonCode,nextRetryAt}`，只包含原上报设备且仍可读候选的问题。状态为 `pending/retrying/ai_pending/ai_running/review/blocked/resolved/ignored`。旧客户端忽略新增字段；客户端只在能力存在时调用新接口。
+
+`POST /v1/recognition-issues` 使用设备 Bearer；请求 `{schemaVersion:1,items:[{id,revision,kind:'unmatched_pickup',state,sourceId,observedAt,source,candidateShipmentIds,reasonCodes}]}`，每批1到20项。`id/sourceId` 为1到128位字母数字下划线或连字符，`revision` 为正安全整数，`observedAt` 不超过服务时间5分钟。`source` 白名单为 station/fragment（120字）、carrier（40）、waybillNo（32）、pickupCode（12）、occurredAt（null或时间，旧0归一null）；原因码最多20个小写字母下划线字符串。
+
+`state` 为 unresolved/resolved/withdrawn。未解决报告仅接受1到20个当前授权、未收的规范运单ID；设备+问题ID隔离幂等，低版本不覆盖高版本。resolved必须是既有同来源问题，由客户端完整匹配后的新版本确认；withdrawn用于忽略、删除、手动解除及失效来源，候选可为空，映射ignored而非resolved。首次上传尚在途时可先保存撤回墓碑，阻止低版本复活；恢复后更高版本仍须通过未收和授权验证。
+
+返回 `{accepted:[{id,revision}],issues:[...]}`，只以精确版本回执确认上传。每设备每小时最多60批；整批格式错误回滚。账号/家人授权在接收完整body后重查；源权限变化阻止重试及AI。三次重试仅按真实采集作业完成计数，同订单问题共用请求，排队/冷却/停用/过期不计数。
+
+管理员只读：`GET /v1/admin/recognition-tasks` 返回策略、分组、最近任务和日报；`GET /v1/admin/recognition-review?limit=100&after=0` 返回schemaVersion、serverVersion、generatedAt、workflow、当前未收samples、learning、aiReviews、rules版本与AI预算。limit为1到100、after为非负整数，nextCursor继续分页；不返回Cookie、设备/管理员token或AI密钥。GET不启动采集或AI。
+
+后台每日03:00巡检独立于AI开关；AI建议和自动应用继续服从原配置与预算。时间与匹配建议固定格式见 `docs/recognition-workflow.md`，原文校验失败不得应用。规则已保存不代表问题已解决。
 
 ## 3.1.32 连续物流任务（兼容新增）
 

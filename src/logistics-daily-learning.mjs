@@ -123,7 +123,7 @@ export class LogisticsDailyLearning {
     }
     if (!this.ready()) return;
     const samples = this.db.prepare('SELECT data FROM logistics_daily_samples').all().map(parse)
-      .filter(sample => { const shipment = this.store.shipment(sample.id); return shipment && this.logisticsAi.eligibleShipment(shipment); });
+      .filter(sample => { const shipment = this.store.shipment(sample.id); return shipment && this.logisticsAi.eligibleShipment(shipment) && this.logisticsAi.automaticAllowed(shipment); });
     const groups = new Map();
     for (const sample of samples) {
       if (!Object.keys(sample.issues).length) continue;

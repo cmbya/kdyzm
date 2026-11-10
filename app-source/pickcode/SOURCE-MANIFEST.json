@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.45",
+  "version": "3.1.46",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "adf43a22d4e79f84ddd015047147f3f30b1fbe4dc376c691f8dcaca7a63d69d0"
+      "sha256": "c0af2b6d95663bcd70711d8b111e04a704db979c68babb06c07bfe2d8a12bac1"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -141,8 +141,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/MainActivity.java",
-      "size": 42770,
-      "sha256": "3f3d4a787d782e11aa6842706657baae4bbe5b3eefd3c67624ace46b9d1e7527"
+      "size": 43279,
+      "sha256": "0344c55ebd4eb5490bcdf303bb8621ec107076dd3918cae87190ef6225906d22"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineClient.java",
@@ -156,13 +156,13 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
-      "size": 78852,
-      "sha256": "a25b2bda857f2853c9687d7af43d0cab95b73dfc81208a1a9793865a0b700a28"
+      "size": 88467,
+      "sha256": "6745236c31b8cda0057bfd722eae7f07ec90a1b90434866cfd35b0c3b9069060"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
-      "size": 4759,
-      "sha256": "955d2368b12e17db14cc510fb8e72b0ebd04c5ca48cfcbbf925ae1b58dfed120"
+      "size": 5335,
+      "sha256": "32e0ed28b9696e4d9f38d01971976743193fff60047ea4968f6c4adc0c799e56"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncWorker.java",
@@ -226,8 +226,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/TrustedOrigin.java",
-      "size": 1033,
-      "sha256": "7a72d8c9b486e7aeb8545c8d035db736b1456167d93a8f5227e25510300590f0"
+      "size": 1875,
+      "sha256": "8eef6a4d16111c7f486bfcc93ca63661cd7871bf2d07b836609d7bac43854387"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/WidgetListService.java",
@@ -546,13 +546,13 @@
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 168441,
-      "sha256": "b4dbe0eeb68d2e34f317458ccdf4774907adfd54e1b518a8dd139f647fab956e"
+      "size": 177866,
+      "sha256": "8ec8b51bcd51b89aa316132b5f4dfafe84da8edb02524ba55ec5da8252cab732"
     },
     {
       "path": "index.html",
-      "size": 713,
-      "sha256": "48ec825b81fa4c2ee36547f3f762b59031b53e74aa4706e979e6aad5a63ddb30"
+      "size": 765,
+      "sha256": "09a2b5bb4a29dc92c9d3c21c8d1f706635499aa9aaed0b430444b51fea2f91bb"
     },
     {
       "path": "js_sdk/wa-permission/permission.js",
@@ -567,17 +567,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "035961727cb3f053d73ca20b6892bcefb8ae0f4022dcdc0d3959a898886c773c"
+      "sha256": "5f4b21a3425f4af1340f73abcb4eabc65fb9261af3933b9c40cdb3709f15d5a1"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "1d04282d87d5cb080b09fe64f145b5a130920364ed32aabc8653c5d310be80cd"
+      "sha256": "2c68a5d37bdffaf4ba5a2ea8dc1f54443a1bbc78e34d19926a6603de93725c7e"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "8974f293d349930606fbb580d2af09757f8765d1e8dd32a2135dcb9877a28803"
+      "sha256": "0ed81705de52ae7a5fa33816db8b3af0a6651562d9eb488c0f137815c47a94b4"
     },
     {
       "path": "pages.json",
@@ -606,8 +606,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 44501,
-      "sha256": "82a131024fe6bd54c56fe4ad11cf68b18ebfabef36dd13980408b8ce44ac9b28"
+      "size": 45354,
+      "sha256": "a0ecf6411ac8184e4e667b6f4a8c69693d6ccde921df1160469edfa50fb5371d"
     },
     {
       "path": "pages/my/faq.vue",
@@ -651,8 +651,8 @@
     },
     {
       "path": "pages/packages/index.vue",
-      "size": 77696,
-      "sha256": "2a492aa6141a7e2e822dfdd1271c8619ece32ee35f054e4985968652d7108248"
+      "size": 78236,
+      "sha256": "d8750a4d071cd73747db95ff36a05f459204b4e95e53416550b6da40428c7d44"
     },
     {
       "path": "scripts/ai-context.mjs",
@@ -726,8 +726,8 @@
     },
     {
       "path": "services/assistant.js",
-      "size": 35959,
-      "sha256": "5b374226380bc2a2ce9336ebdcf4b769efb0d62ada9fd4eb5891d2cb5b0dbc55"
+      "size": 41023,
+      "sha256": "7477b06f34dc91ba8f58f7475398d82f19353ae5749c5185e27a72e52ab274f4"
     },
     {
       "path": "services/item-patch.js",
@@ -2609,7 +2609,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "f45deeb22437f608d6fa98320f753bc27cf029b5d473c625e66bc150b2bdb7bb"
+      "sha256": "de4d9612719e54f5f213dca985928eb6b6b2b3138ea5ca433a61553ca10f1c4b"
     },
     {
       "path": ".gitignore",

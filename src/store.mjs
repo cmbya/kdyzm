@@ -11,6 +11,7 @@ import { normalizeRetentionFields, orderRetention, retainedSignedShipment, valid
 import { cookieIdentity } from './cookie-sync.mjs';
 import { COLLECTION_COOLDOWN, scheduledSyncAt } from './collection-schedule.mjs';
 import { retainMilestoneEvents, shippingEvidence } from './shipment-lifecycle.mjs';
+import { normalizeProductImageUrl } from './product-image.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
 const parse = row => row && JSON.parse(row.data);
@@ -578,6 +579,7 @@ export class Store {
         const order = { ...old, id, accountId, platform: account.platform, platformOrderId,
           familyId: old ? old.familyId || '' : account.familyId, familyName: old ? old.familyName || '' : account.familyName,
           title: String(input.title || old?.title || ''), amount: input.amount == null ? old?.amount ?? null : input.amount,
+          imageUrl: normalizeProductImageUrl(input.imageUrl) || normalizeProductImageUrl(old?.imageUrl),
           orderDate: replaceDate ? inputDate : old?.orderDate || 0,
           orderDatePrecision: refreshPrecision ? datePrecision(input.orderDatePrecision) : datePrecision(old?.orderDatePrecision),
           orderDateSource: replaceDate || verifiedDate ? 'platform' : old?.orderDate ? 'legacy' : 'unknown',
@@ -783,8 +785,19 @@ export class Store {
     if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > responseLimit) {
       // Clients treat these absent optional values as empty; retain every non-default fact.
       for (const order of orders) {
-        for (const field of ['dateError', 'tradeStatus', 'orderStatus', 'refundStatus']) if (order[field] === '') delete order[field];
+        for (const field of ['dateError', 'tradeStatus', 'orderStatus', 'refundStatus', 'imageUrl']) if (order[field] === '') delete order[field];
         if (order.dateCheckedAt === 0) delete order.dateCheckedAt;
+      }
+    }
+    let imageBudgetBytes = Buffer.byteLength(JSON.stringify(snapshot), 'utf8');
+    if (imageBudgetBytes > responseLimit) {
+      // Omit older thumbnails before identity/cycle facts; SQLite and existing client images remain intact.
+      for (const order of orders.slice().sort((a, b) => (a.orderDate || 0) - (b.orderDate || 0))) {
+        if (!order.imageUrl) continue;
+        const before = Buffer.byteLength(JSON.stringify(order), 'utf8');
+        delete order.imageUrl;
+        imageBudgetBytes -= before - Buffer.byteLength(JSON.stringify(order), 'utf8');
+        if (imageBudgetBytes <= responseLimit) break;
       }
     }
     if (Buffer.byteLength(JSON.stringify(snapshot), 'utf8') > responseLimit) {
