@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.47",
+  "version": "3.1.48",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "fa8eeeb4e100b062515f1a3ec521b70d4956a81be5180b417425d5add1c02ee2"
+      "sha256": "a9c9bee52bd5a05799733baea25f521f9e84f29ea5792a973b9c275cd9bdfac7"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -146,8 +146,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineClient.java",
-      "size": 11743,
-      "sha256": "d7f6226d05ebb0b8978e792aecaec89bc9f31e523f94bec90a81eda216b3f23e"
+      "size": 11844,
+      "sha256": "566b9305698e2fcc5a685370941022f32cbb9fbd072a0e60e68fedf3131471d8"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineEndpoint.java",
@@ -156,8 +156,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
-      "size": 88467,
-      "sha256": "6745236c31b8cda0057bfd722eae7f07ec90a1b90434866cfd35b0c3b9069060"
+      "size": 88460,
+      "sha256": "4c53d5bdfa8ddfe6be1546b353907cb836844ebbbb19262b53f980c0d4b827af"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
@@ -546,8 +546,8 @@
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 177859,
-      "sha256": "fc87d25ee7bd36fb2524b2cdde46c65562fd8ade87656bff5ae8bcaf86f6b78e"
+      "size": 178679,
+      "sha256": "2ddbef35bc747a4faa2b1741d893ea4777d87bcdf3d1c2d90c410cecf99b939f"
     },
     {
       "path": "index.html",
@@ -567,17 +567,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "1a0fd46fd8a0ce7185e1f35129afc13207caf4fdfa28fa2c925ab8c86396c540"
+      "sha256": "531522c008dced385782f493bc135a3b9a6f73dbb06c6ba752deb0af27898f85"
     },
     {
       "path": "package-lock.json",
-      "size": 259923,
-      "sha256": "e4a18a25692ccdcb47499f94fdf26c027acb8036cfc791c6ce92b2e1ce389dcf"
+      "size": 256609,
+      "sha256": "d0a0a562e77b5e56025fcc5d6e29a659d9b7c5286a99aa549632f60159d53818"
     },
     {
       "path": "package.json",
-      "size": 1203,
-      "sha256": "83892aca8c5689200c9d9b5e5a211a4862539e47cfa492e69035197dc42ea28f"
+      "size": 1728,
+      "sha256": "3857f284e789b442dfe14393131a26da79769a3fc61527f908c8527578288e17"
     },
     {
       "path": "pages.json",
@@ -591,8 +591,8 @@
     },
     {
       "path": "pages/index/index.vue",
-      "size": 72059,
-      "sha256": "1d42ff3e82c687c222a0cbf02228b5a285fc264f2fde0ebfec104558ffeb7b6f"
+      "size": 73459,
+      "sha256": "e990904353df759722fd0071fdc982bb2f5a88e9b56a744756560a3d9bec85cf"
     },
     {
       "path": "pages/my/about.vue",
@@ -611,8 +611,8 @@
     },
     {
       "path": "pages/my/faq.vue",
-      "size": 4450,
-      "sha256": "bc5e587cdf2e45c4e06c3f710627c1b5306f002de0fd2523b0020975a2a7cf1f"
+      "size": 4637,
+      "sha256": "f43219a554a6611502b514b534cfc60f25afdb6b35d6902cb6575f1ce0e4a183"
     },
     {
       "path": "pages/my/ignored.vue",
@@ -641,8 +641,8 @@
     },
     {
       "path": "pages/my/online-accounts.vue",
-      "size": 14884,
-      "sha256": "856b88963d5146af7cfa49e3193f332599458aec9e1ee408a49a19f0fed7bb4e"
+      "size": 15164,
+      "sha256": "4ea53892d2b54ebed8f861851505fd57988dc1b065bfb14af91e711122df4cd5"
     },
     {
       "path": "pages/packages/edit.vue",
@@ -726,8 +726,8 @@
     },
     {
       "path": "services/assistant.js",
-      "size": 41023,
-      "sha256": "7477b06f34dc91ba8f58f7475398d82f19353ae5749c5185e27a72e52ab274f4"
+      "size": 41075,
+      "sha256": "854e8b44f3720616c1ec4b7a0d8bb01b25b2c5c7de94c9e28f76c781f1c1dfa9"
     },
     {
       "path": "services/item-patch.js",
@@ -2596,8 +2596,8 @@
     },
     {
       "path": "vite.config.js",
-      "size": 407,
-      "sha256": "a40d6efe3a1b55f4a895e168c55a1fc4fb0cc648c8b4a4d773bd7af7201989e4"
+      "size": 576,
+      "sha256": "dcbf152c5203ae3d71477fa985344475f4a131d6c725931c7ea4c044060da4d5"
     }
   ],
   "generatedFiles": [
@@ -2609,7 +2609,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "59217cc31066216dd92e252f908d9b957a8669c1c716953c0ab0921faa915726"
+      "sha256": "c8712f4aba90f98f17ac19abac1f01f528c66900553e77c4a007c55502d15f74"
     },
     {
       "path": ".gitignore",

@@ -38,6 +38,15 @@ test('duplicate and conflicting aliases are rejected without changing station ru
   assert.equal(stations.revision, 1);
 });
 
+test('station regions reject private contacts and codes while ordinary regions remain valid', t => {
+  const { stations } = fixture(t);
+  const station = stations.saveStation('safe', { name: '合成服务站', region: '合成地区东区' });
+  for (const region of ['联系电话13812345678', '邮箱test@example.com', '取件码7-6-7042', '运单SF123456789012']) {
+    assert.throws(() => stations.saveStation('safe', { region }), { code: 'INVALID_STATION' }, region);
+    assert.deepEqual(stations.station('safe'), station);
+  }
+});
+
 test('active station ownership uses the same location numbers and punctuation as mobile recognition', t => {
   const { stations } = fixture(t);
   stations.saveStation('s1', { name: '城东总站', region: '地区甲', aliases: [{ name: '远洋风景四卡店' }, { name: '幸福花园二号柜' }] });

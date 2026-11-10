@@ -704,7 +704,7 @@ public final class OnlineSyncManager {
             }
             String waybill = boundedText(source, "waybillNo", 32, false), code = boundedText(source, "pickupCode", 12, false);
             if (!waybill.isEmpty() && !waybill.matches("[A-Za-z0-9-]{6,32}") || !code.isEmpty() && (!code.matches("[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*") || !code.matches(".*[0-9].*") || code.length() < 3 || code.matches("[0-9]{9,}"))) throw invalidResponse();
-            safeSource.put("waybillNo", waybill).put("pickupCode", code);
+            safeSource.put("waybillNo", "").put("pickupCode", "");
             JSONObject value = new JSONObject().put("id", id).put("revision", item.getLong("revision")).put("kind", "unmatched_pickup")
                     .put("state", state).put("sourceId", sourceId).put("observedAt", item.getLong("observedAt")).put("source", safeSource);
             for (String key : new String[]{"candidateShipmentIds", "reasonCodes"}) {

@@ -80,6 +80,51 @@ test('disabling pauses new auto completions, retains existing evidence, and enab
   assert.equal(read().picked, true);
 });
 
+test('nonreceipt retracts automatic state even while paused and never overrides a manual pick', t => {
+  const { store, sync, read, op } = fixture(t);
+  sync(); store.pickupCompletion.saveConfig({ enabled: false });
+  assert.equal(sync(['本人已签收']).picked, true);
+  assert.equal(sync(['本人已签收，如未收到包裹请联系客服']).picked, true);
+  assert.equal(sync(['收件人反馈未收到包裹']).picked, false);
+  assert.equal(read().pickupCompletion.autoPicked, false);
+  op('pick');
+  assert.equal(sync(['收件人反馈未收到包裹']).picked, true);
+  assert.equal(read().pickupCompletion.manualOverride, 'picked');
+});
+
+test('startup repairs persisted false automatic completions once, preserving manual history', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'pickup-nonreceipt-')), filename = join(directory, 'test.sqlite');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let store = new Store({ key, now: () => NOW, filename });
+  store.saveAccount({ platform: 'taobao', label: '测试', cookie: 'FIXTURE' }, 'a', true);
+  store.importResult('a', { orders: [{ platformOrderId: 'o' }], shipments: ['same', 'later', 'manual', 'valid'].map(waybillNo => ({
+    platformOrderId: 'o', waybillNo, logisticsState: 'ok', logisticsEvents: [{ time: NOW - 2000, description: '本人已签收' }] })) });
+  store.pickupCompletion.saveConfig({ enabled: false });
+  for (const row of store.db.prepare('SELECT id,data FROM shipments').all()) {
+    const ship = JSON.parse(row.data);
+    if (ship.waybillNo === 'valid') {
+      ship.logisticsEvents[0].description += '，如未收到包裹请联系客服';
+      ship.pickupCompletion.evidence.description = ship.logisticsEvents[0].description;
+    } else if (ship.waybillNo === 'same') {
+      ship.logisticsEvents[0].description += '，但收件人反馈未收到包裹';
+      ship.pickupCompletion.evidence.description = ship.logisticsEvents[0].description;
+    } else if (ship.waybillNo !== 'valid') ship.logisticsEvents.push({ time: NOW - 1000, description: '收件人反馈未收到包裹' });
+    if (ship.waybillNo === 'manual') {
+      ship.pickupCompletion.manualOverride = 'picked'; ship.pickupManualAction = 'pick'; ship.pickupConfirmedAt = NOW - 100;
+    }
+    store.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(ship), row.id);
+  }
+  store.close();
+  store = new Store({ key, now: () => NOW, filename });
+  const ships = Object.fromEntries(store.snapshot(['a']).shipments.map(s => [s.waybillNo, s]));
+  assert.equal(ships.same.picked, false); assert.equal(ships.later.picked, false);
+  assert.equal(ships.manual.picked, true); assert.equal(ships.manual.pickupCompletion.autoPicked, false);
+  assert.equal(ships.manual.pickupConfirmedAt, NOW - 100); assert.equal(ships.valid.picked, true);
+  const before = store.snapshot(['a']); store.close();
+  store = new Store({ key, now: () => NOW, filename });
+  assert.deepEqual(store.snapshot(['a']), before); store.close();
+});
+
 test('custom rule rollback retracts affected automatic state while preserving manual decisions', t => {
   const { store, sync, read, op } = fixture(t);
   assert.equal(sync(['本人已完成提货']).picked, false);

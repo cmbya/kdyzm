@@ -54,6 +54,24 @@ test('candidate details record the exact latest sanitized input and only a valid
   assert.ok(!JSON.stringify(candidate.analysis).includes('13812345678'));
 });
 
+test('AI output boundary redacts legacy catalog and candidate text without rewriting the catalog', async t => {
+  let actual;
+  const { stations, jobs } = fixture(t, async request => { actual = JSON.parse(JSON.parse(request.body).messages[1].content); return reply(suggestion); });
+  const old = stations.saveStation('old', { name: '合成服务站', region: '合成地区东区', aliases: [{ name: '合成一号柜' }] });
+  const unsafe = { ...old, region: '合成地区 电话13812345678 邮箱test@example.com 取件码7-6-7042', name: old.name + '13812345678' };
+  stations.db.prepare('UPDATE station_catalog SET data=? WHERE id=?').run(JSON.stringify(unsafe), old.id);
+  stations.saveStation('safe', { name: '普通服务站', region: '合成地区西区' });
+  enqueue(stations);
+  const candidate = stations.candidates()[0];
+  stations.updateCandidate(candidate.id, { region: '旧地区13812345678', fragment: candidate.fragment + ' 运单SF123456789012 https://example.com/private' });
+  jobs.request(); await jobs.running;
+  assert.ok(actual);
+  for (const secret of ['13812345678', 'test@example.com', '7-6-7042', 'SF123456789012', 'https://example.com/private']) assert.ok(!JSON.stringify(actual).includes(secret), secret);
+  assert.equal(actual.knownStations.find(s => s.id === 'safe').region, '合成地区西区');
+  assert.deepEqual(stations.station('old'), unsafe);
+  assert.deepEqual(stations.candidate(candidate.id).analysis.input, actual);
+});
+
 test('retry cooldown and daily budget refusals provide actionable reason codes', async t => {
   const { stations, jobs, advance } = fixture(t, async () => reply(suggestion));
   enqueue(stations);

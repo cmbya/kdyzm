@@ -16,6 +16,7 @@
         <view class="input-area">
           <view class="input-wrapper">
             <input
+              ref="codeInput"
               class="code-input"
               v-model="newCode"
               type="text"
@@ -30,11 +31,11 @@
               <uni-icons type="clear" size="14" color="#999" />
             </view>
           </view>
-          <button class="add-btn" :disabled="addingCode" :aria-busy="addingCode" @click="addCode">
+          <button class="add-btn" role="button" :tabindex="addingCode ? -1 : 0" :disabled="addingCode" :aria-disabled="addingCode" :aria-busy="addingCode" @click="addCode">
             <uni-icons type="plusempty" size="18" color="#fff" />
             <text>{{ addingCode ? '添加中' : '添加' }}</text>
           </button>
-          <button class="read-sms-btn" :disabled="scanning" :aria-busy="scanning" :aria-label="scanning ? '正在更新取件记录' : '一键更新取件记录'" @click="readSms">
+          <button class="read-sms-btn" role="button" :tabindex="scanning ? -1 : 0" :disabled="scanning" :aria-disabled="scanning" :aria-busy="scanning" :aria-label="scanning ? '正在更新取件记录' : '一键更新取件记录'" @click="readSms">
             <uni-icons type="refreshempty" size="22" color="#0867ff" />
           </button>
         </view>
@@ -338,12 +339,17 @@ export default {
   deactivated() { this.$refs.pickupShare?.close(false); },
   onBackPress() { if (this.shareOpen) { this.$refs.pickupShare.close(); return true; } if (this.stationChooserOpen) { this.$refs.stationChooser.close(); return true; } if(this.sourceOpen){this.$refs.sourcePopup.close();return true;} if (this.notificationsOpen) { this.closeNotifications(); return true; } },
   mounted() {
+    this.labelCodeInput();
+    this.$el?.addEventListener?.('keydown', this.inputActionKey);
+    this.$el?.addEventListener?.('keyup', this.inputActionKey);
     this.$el?.addEventListener?.('keydown', this.notificationKeyboard);
     this.$el?.addEventListener?.('keyup', this.notificationKeyboard);
     if (typeof window !== 'undefined') window.addEventListener('popstate', this.notificationPopState);
   },
   beforeUnmount() {
     this.clearJourneyCompletions();
+    this.$el?.removeEventListener?.('keydown', this.inputActionKey);
+    this.$el?.removeEventListener?.('keyup', this.inputActionKey);
     this.$el?.removeEventListener?.('keydown', this.notificationKeyboard);
     this.$el?.removeEventListener?.('keyup', this.notificationKeyboard);
     if (typeof window !== 'undefined') window.removeEventListener('popstate', this.notificationPopState);
@@ -352,6 +358,20 @@ export default {
     this._notificationBackResolve?.();
   },
   methods: {
+    labelCodeInput() {
+      const root = this.$refs.codeInput?.$el || this.$refs.codeInput;
+      // uni-input places fallthrough attributes on its wrapper instead of its native input.
+      const input = root?.tagName === 'INPUT' ? root : root?.querySelector?.('input');
+      input?.setAttribute?.('aria-label', '取件码');
+    },
+    inputActionKey(event) {
+      // uni-app's template event wrapper drops the DOM target and KeyboardEvent.repeat.
+      const target = event.target?.closest?.('.add-btn, .read-sms-btn');
+      if (target?.tagName !== 'UNI-BUTTON' || !['Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      if (event.repeat || target.hasAttribute('disabled') || target.getAttribute('aria-disabled') === 'true') return;
+      if (event.type === (event.key === 'Enter' ? 'keydown' : 'keyup')) target.click();
+    },
     clearJourneyCompletions() { clearTimeout(this._journeyCompletionTimer); this._journeyCompletionTimer = null; this.journeyCompletions = {}; },
     scheduleJourneyCompletions() {
       clearTimeout(this._journeyCompletionTimer); this._journeyCompletionTimer = null;
@@ -652,7 +672,7 @@ export default {
 .notification-bell { position:absolute; right:0; display:flex; align-items:center; justify-content:center; width:44px; height:44px; padding:0; margin:0; border:1px solid var(--sf-edge); border-radius:50%; overflow:visible; background:var(--sf-glass); box-shadow:var(--sf-shadow); backdrop-filter:var(--sf-filter); -webkit-backdrop-filter:var(--sf-filter); }
 .notification-badge { position:absolute; top:-3px; right:-2px; min-width:19px; min-height:19px; padding:1px 4px; box-sizing:border-box; border:2px solid #edf2f8; border-radius:12px; background:#df4b44; color:white; font-size:.625rem; line-height:1.3; font-weight:650; }
 button::after { border:0; }
-button:focus-visible, .code-text:focus-visible { outline:3px solid var(--sf-blue); outline-offset:3px; }
+button:focus-visible, .add-btn:focus-visible, .read-sms-btn:focus-visible, .code-text:focus-visible { outline:3px solid var(--sf-blue); outline-offset:3px; }
 button[disabled] { opacity:.55; }
 .input-card { padding:8px; margin-bottom:14px; border-radius:20px; }
 .input-area { display:flex; align-items:center; gap:7px; }

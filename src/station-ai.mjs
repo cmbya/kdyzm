@@ -2,7 +2,7 @@ import { request as httpsRequest } from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { fail } from './security.mjs';
-import { validateStationSuggestion } from './station-text.mjs';
+import { redactStationFragment, validateStationSuggestion } from './station-text.mjs';
 import { testAiCapabilities } from './ai-templates.mjs';
 import { aiCandidateDueAt, nextAiDay } from './ai-policy.mjs';
 
@@ -200,13 +200,14 @@ export class StationAiJobs {
     } finally { clearTimeout(timer); controller.signal.removeEventListener('abort', onAbort); this.controllers.delete(controller); }
   }
   input(candidate) {
-    const input = { fragment: candidate.fragment, region: candidate.region, knownStations: [], knownStationsTruncated: false };
+    const input = { fragment: redactStationFragment(candidate.fragment), region: redactStationFragment(candidate.region || ''), knownStations: [], knownStationsTruncated: false };
     if (candidate.feedback) {
       const { kind, sourceStationName, otherStationName, targetStationId, subLocation, reason } = candidate.feedback;
-      input.confirmedMapping = { kind, sourceStationName, otherStationName, targetStationId, subLocation, reason };
+      input.confirmedMapping = { kind, sourceStationName: redactStationFragment(sourceStationName || ''), otherStationName: redactStationFragment(otherStationName || ''),
+        targetStationId, subLocation: redactStationFragment(subLocation || ''), reason };
     }
     for (const station of this.stations.stationRules().stations) {
-      const entry = { id: station.id, name: station.name, region: station.region, aliases: station.aliases.map(a => a.name) };
+      const entry = { id: station.id, name: redactStationFragment(station.name), region: redactStationFragment(station.region || ''), aliases: station.aliases.map(a => redactStationFragment(a.name)) };
       input.knownStations.push(entry);
       if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 16384) { input.knownStations.pop(); input.knownStationsTruncated = true; }
     }

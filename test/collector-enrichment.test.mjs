@@ -93,7 +93,7 @@ test('PDD tracks signed-unpicked known orders missing from unreceived without us
   const result = await createCollector({ now: () => NOW, fetchImpl: async url => {
     const target = new URL(url); calls.push(target.pathname);
     if (target.pathname.includes('order_list_v4')) return response({ orders: [] });
-    return response({ shipping: { tracking_number: 'ACTIVE', traces: [{ info: '已签收', time: '2026-10-31 09:00:00' }] } });
+    return response({ shipping: { order_sn: 'old', tracking_number: 'ACTIVE', traces: [{ info: '已签收', time: '2026-10-31 09:00:00' }] } });
   } })({ platform: 'pdd' }, 'pdd_user_id=1', { knownOrders: [
     { platformOrderId: 'old', shipments: [{ waybillNo: 'ACTIVE', status: 'arrived' }, { waybillNo: 'PICKED', status: 'arrived', picked: true }] },
     { platformOrderId: 'done', shipments: [{ waybillNo: 'DONE', status: 'signed' }] },
@@ -102,6 +102,7 @@ test('PDD tracks signed-unpicked known orders missing from unreceived without us
   assert.equal(result.shipments.length, 1);
   assert.equal(result.shipments[0].waybillNo, 'ACTIVE');
   assert.equal(result.shipments[0].status, 'signed');
+  assert.deepEqual(result.logisticsFailures, [{ platformOrderId: 'done', waybillNo: 'DONE', state: 'error', logisticsCheckedAt: NOW }]);
   assert.ok(calls.some(path => path.includes('/done/')));
 });
 

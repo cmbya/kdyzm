@@ -1,4 +1,4 @@
-import { builtinPickupCompletionRules, detectPickupCompletion, effectivePicked, pickupCompletionState, validatePickupCompletionRule } from './pickup-completion.mjs';
+import { builtinPickupCompletionRules, detectPickupCompletion, effectivePicked, parcelNotReceived, pickupCompletionState, validatePickupCompletionRule } from './pickup-completion.mjs';
 import { fail, onlyKeys } from './security.mjs';
 
 export class PickupCompletionStore {
@@ -88,7 +88,8 @@ export class PickupCompletionStore {
     const priorValid = prior && enabledRules.some(rule => rule.id === prior.ruleId && rule.version === prior.ruleVersion);
     const projectedEvents = [...(shipment.logisticsEvents || []), ...(prior ? [{ ...prior, time: prior.eventTime }] : [])];
     const evidence = detectPickupCompletion({ ...shipment, logisticsEvents: projectedEvents }, { rules, now: this.now() });
-    if (state.autoPicked && (!priorValid || (!evidence && config.enabled))) {
+    const notReceived = prior && projectedEvents.some(event => parcelNotReceived(event.description) && (!event.time || event.time >= prior.eventTime));
+    if (state.autoPicked && (!priorValid || notReceived || (!evidence && config.enabled))) {
       state.autoPicked = false; state.completedAt = 0; state.evidence = null;
     }
     const eligible = !shipment.hidden && !shipment.deleted && !(startup && shipment.picked && !prior);

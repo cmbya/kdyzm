@@ -29,6 +29,7 @@
       <view v-if="pairingPreview.scope.familyIds.length"><text class="label">授权家人</text><view class="family-tags"><text v-for="family in pairingPreview.scope.families" :key="family.id" class="family-tag">{{ family.name }} · 当前 {{ family.accountCount }} 个账号</text></view><text class="hint">包含这些家人当前及以后新增的平台账号。</text></view>
       <view v-if="pairingPreview.scope.accountIds.length && (!pairingPreview.scope.familyIds.length || !pairingPreview.scope.includeFutureAccounts)"><text class="label">指定账号授权</text><text v-for="account in pairingPreview.scope.accounts" :key="account.id" class="hint">{{ platformName(account.platform) }} · {{ account.label }}</text><text class="hint">指定账号不自动扩大为家人整组授权。</text></view>
       <text class="hint">有效至 {{ time(pairingPreview.expiresAt) }}</text><text v-if="online.bound" class="hint">确认后将更换当前服务，本地历史保留。</text>
+      <text class="hint">绑定后会向此后台同步识别问题的候选包裹 ID、承运商、时间、原因与状态，以及规则回执；不附带原短信、短信中的取件码或运单号。站点片段由站点优化开关控制，AI 输入另行脱敏。</text>
       <view class="buttons"><button class="secondary" :disabled="working" @click="pairingPreview = null">返回修改</button><button class="primary" :disabled="working" @click="confirmBinding">确认绑定</button></view>
     </view>
   </view>

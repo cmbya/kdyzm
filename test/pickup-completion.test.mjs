@@ -9,6 +9,26 @@ const detect = (...logisticsEvents) => detectPickupCompletion({ logisticsEvents 
 const pddCollected = (time = NOW - 1000) => ({ ...event('【代收点】您的快件已投递，收件人凭取件码在【示例菜鸟驿站】领取，如有疑问请电联代收点：10000000000', time),
   provider: 'pdd', providerStatus: 'OUT_CABINET', providerStatusTag: '已取件', providerSubStatus: 'OUT_CABINET_501', providerStatusText: '已签收' });
 
+test('parcel nonreceipt vetoes same-event and newer completion, including verified provider statuses', () => {
+  for (const description of ['收件人反馈未收到包裹', '收件人未收货', '本人没有收到快递', '用户没收到货', '收件人反馈未收到', '买家未收到任何商品']) {
+    assert.equal(detect(event('物流显示本人已签收，但' + description)), null, description);
+    for (const time of [NOW - 2000, NOW - 1000]) {
+      assert.equal(detect(event('本人已签收', NOW - 2000), event(description, time)), null, description);
+      assert.equal(detect(pddCollected(NOW - 2000), event(description, time)), null, description);
+    }
+    assert.equal(detect({ ...pddCollected(), description: '用户已取件，但' + description }), null);
+  }
+  for (const description of ['未收到短信', '未收到验证码', '没有收到取件码', '未收到通知', '未收到退款']) {
+    assert.equal(detect(event('本人已签收，' + description))?.kind, 'recipient_signed', description);
+    assert.equal(detect(event('本人已签收', NOW - 2000), event(description))?.kind, 'recipient_signed', description);
+  }
+  assert.equal(detect(event('未收到包裹', NOW - 2000), event('本人已签收'))?.kind, 'recipient_signed');
+  for (const description of ['本人已签收，如未收到包裹请联系客服', '本人已签收；如未收到，请联系客服', '本人已签收，若您仍未收到快递请联系客服']) {
+    assert.equal(detect(event(description))?.kind, 'recipient_signed', description);
+  }
+  assert.equal(detect(event('本人已签收，如未收到包裹请联系客服但收件人反馈未收到包裹')), null);
+});
+
 test('verified PDD out-cabinet event is completion even when carrier prose remains a pickup instruction', () => {
   const collected = pddCollected(), result = detect(collected, event('已暂存至示例菜鸟驿站，请及时领取', NOW - 5000));
   assert.equal(result?.kind, 'user_collected');

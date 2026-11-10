@@ -61,13 +61,16 @@ test('PDD ignores explicit unrelated new orders and existing completed history',
   const calls = [];
   const result = await createCollector({ fetchImpl: async url => {
     const target = new URL(url); calls.push(target);
-    assert.ok(target.pathname.includes('order_list_v4'));
+    if (!target.pathname.includes('order_list_v4')) {
+      assert.ok(target.pathname.endsWith('/order/moving/shipping'));
+      return response({ shipping: { order_sn: 'moving', traces: [] } });
+    }
     return response({ orders: target.searchParams.get('type') === 'unshipping'
       ? [...skipped.map(order => ({ ...order, tracking_number: 'SHOULD-NOT-IMPORT' })), { order_sn: 'pending', combined_order_status: 2 },
         { order_sn: 'unknown-number', combined_order_status: 999 }]
       : [{ order_sn: 'moving', combined_order_status: 3 }], has_more: false });
   } })(account, cookie, { knownOrders: [{ platformOrderId: 'done', shipments: [{ waybillNo: 'OLD', status: 'signed', picked: true }] }] });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.deepEqual(result.orders.map(order => [order.platformOrderId, order.orderStatus]), [
     ['pending', '待发货'], ['unknown-number', '待发货'], ['moving', '待收货'],
   ]);
@@ -133,15 +136,19 @@ test('PDD pending order becomes a received order on a later sync without duplica
 });
 
 test('PDD repeated pages stop only their own range and do not suppress another range', async () => {
-  const calls = [];
+  const calls = [], details = [];
   const result = await createCollector({ maxPages: 3, fetchImpl: async url => {
     const target = new URL(url), type = target.searchParams.get('type'), page = target.searchParams.get('page');
+    if (!target.pathname.includes('order_list_v4')) {
+      details.push(target.pathname);
+      return response({ shipping: { traces: [] } });
+    }
     calls.push([type, page, target.searchParams.get('offset')]);
-    assert.ok(target.pathname.includes('order_list_v4'));
     return response(type === 'unshipping' ? { orders: [{ order_sn: 'repeat', offset: 'pending' }] }
       : { orders: [{ order_sn: page === '1' ? 'repeat' : 'extra', offset: 'received' }], has_more: page === '1' });
   } })(account, cookie);
   assert.deepEqual(calls, [['unshipping', '1', null], ['unshipping', '2', 'pending'], ['unreceived', '1', null], ['unreceived', '2', 'received']]);
+  assert.deepEqual(details, ['/proxy/api/order/repeat/shipping', '/proxy/api/order/extra/shipping']);
   assert.deepEqual(result.orders.map(order => order.platformOrderId), ['repeat', 'extra']);
   assert.ok(result.warnings.some(warning => warning.includes('待发货分页重复')));
 });
@@ -150,6 +157,10 @@ test('PDD pagination limits apply to both ranges and warn for each incomplete ra
   const calls = [];
   const result = await createCollector({ maxPages: 1, fetchImpl: async url => {
     const target = new URL(url), type = target.searchParams.get('type');
+    if (!target.pathname.includes('order_list_v4')) {
+      assert.ok(target.pathname.endsWith('/order/unreceived/shipping'));
+      return response({ shipping: { traces: [] } });
+    }
     calls.push(type);
     return response({ orders: [{ order_sn: type, offset: `${type}-next` }], has_more: true });
   } })(account, cookie);

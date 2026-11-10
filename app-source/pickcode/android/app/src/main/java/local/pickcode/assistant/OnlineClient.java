@@ -118,7 +118,8 @@ public final class OnlineClient {
         if ("GET".equals(method)) return "/v1/ai/channels".equals(path) || "/v1/connection".equals(path) || "/v1/snapshot".equals(path) || path.matches("/v1/sync-jobs/[A-Za-z0-9_-]{1,100}");
         if ("POST".equals(method)) return "/v1/devices".equals(path) || "/v1/pairing-codes/preview".equals(path) || "/v1/accounts/sync".equals(path)
                 || "/v1/ai/template-proposals".equals(path) || "/v1/operations".equals(path) || "/v1/station-candidates".equals(path) || "/v1/station-proposals".equals(path)
-                || "/v1/matching-feedback".equals(path) || path.matches("/v1/orders/[0-9a-f]{32}/refresh");
+                || "/v1/matching-feedback".equals(path) || "/v1/recognition-issues".equals(path) || "/v1/station-rule-receipts".equals(path)
+                || path.matches("/v1/orders/[0-9a-f]{32}/refresh");
         return "DELETE".equals(method) && "/v1/devices/current".equals(path);
     }
     static Failure aiFailure(int status, String code) {

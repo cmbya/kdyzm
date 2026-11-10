@@ -457,6 +457,19 @@ var PickCodeCore = (function () {
     return boundShipment(state,shipment)&&/^[A-Za-z0-9_-]{1,128}$/.test(shipment.remoteId||'')&&!packageHidden(state,shipment)&&!shipmentArchived(state,shipment)&&!shipment.picked
       &&!deliveredWithoutPickup(state,shipment)&&!(disposition&&['returning','returned'].indexOf(disposition.kind)>=0);
   }
+  function recognitionFingerprint(payload,candidates) {
+    return hash(JSON.stringify(payload.state==='resolved'?payload:[payload,candidates.map(function(ship){return [ship.remoteId,ship.waybillNo,ship.station,ship.carrier,ship.arrivalAt,ship.arrivalAtSource,ship.arrivalAtPrecision,ship.pickupCode,ship.status];})]));
+  }
+  function scrubRecognitionSources(state) {
+    state.recognitionIssues.items.forEach(function(row){
+      var payload=row.payload,source=payload&&payload.source;if(!source||!source.waybillNo&&!source.pickupCode)return;
+      var ids=payload.candidateShipmentIds||[],candidates=state.shipments.filter(function(ship){return ids.indexOf(ship.remoteId)>=0;}).sort(function(a,b){return a.remoteId.localeCompare(b.remoteId);});
+      // Preserve ACKs and revisions only when the legacy fingerprint still describes the current evidence.
+      var unchanged=row.fingerprint===recognitionFingerprint(payload,candidates);
+      source.waybillNo='';source.pickupCode='';
+      if(unchanged)row.fingerprint=recognitionFingerprint(payload,candidates);
+    });
+  }
   // Refresh on business mutations only. Rendering a snapshot or retrying an upload is not a recognition attempt.
   function refreshRecognitionIssues(state) {
     if(!recognitionEnabled(state))return;
@@ -481,13 +494,13 @@ var PickCodeCore = (function () {
       if(!candidates.length)return;
       candidates=candidates.slice(0,20).sort(function(a,b){return a.remoteId.localeCompare(b.remoteId);});
       var sourceKey=binding+'|'+state.recognitionIssues.epoch+'|'+source.id,sourceId='source-'+hash(state.clientId+'|'+sourceKey),station=state.settings.stationEnhancement?stationFragment(sourceStation(state,source)):'',times=sourceTimes(source);
-      var carrier=carrierKey(parsed.express),waybill=sourceWaybill(source.body),reasons=resolved?[]:unique(recommendations.filter(function(value){return candidates.some(function(ship){return ship.id===value.shipmentId;});}).map(function(value){return value.decisionReason;}).filter(function(value){return /^[a-z_]{1,80}$/.test(value||'');}));
+      var carrier=carrierKey(parsed.express),reasons=resolved?[]:unique(recommendations.filter(function(value){return candidates.some(function(ship){return ship.id===value.shipmentId;});}).map(function(value){return value.decisionReason;}).filter(function(value){return /^[a-z_]{1,80}$/.test(value||'');}));
       if(!resolved&&(source.matchConflicts||[]).length)reasons.push('evidence_conflict');
       if(!resolved&&!reasons.length)reasons.push('insufficient_evidence');
       var payload={kind:'unmatched_pickup',state:resolved?'resolved':'unresolved',sourceId:sourceId,
-        source:{station:station,carrier:/^[\u4e00-\u9fffA-Za-z0-9 ·-]{1,40}$/.test(carrier)?carrier:'',waybillNo:/^[A-Za-z0-9-]{6,32}$/.test(waybill)?waybill:'',pickupCode:validCode(parsed.code)?parsed.code:'',occurredAt:times.sent||times.received||null,fragment:station},
+        source:{station:station,carrier:/^[\u4e00-\u9fffA-Za-z0-9 ·-]{1,40}$/.test(carrier)?carrier:'',waybillNo:'',pickupCode:'',occurredAt:times.sent||times.received||null,fragment:station},
         candidateShipmentIds:unique(candidates.map(function(ship){return ship.remoteId;})),reasonCodes:unique(reasons).slice(0,20)};
-      var fingerprint=hash(JSON.stringify(resolved?payload:[payload,candidates.map(function(ship){return [ship.remoteId,ship.waybillNo,ship.station,ship.carrier,ship.arrivalAt,ship.arrivalAtSource,ship.arrivalAtPrecision,ship.pickupCode,ship.status];})]));
+      var fingerprint=recognitionFingerprint(payload,candidates);
       if(row&&row.fingerprint===fingerprint)return;
       if(!row){if(recognitionRows(state).length>=500)return;row={id:'recognition-'+state.clientId+'-'+hash(sourceKey),revision:0,binding:binding,localSourceId:source.id};state.recognitionIssues.items.push(row);}
       row.revision++;row.fingerprint=fingerprint;row.payload=payload;row.observedAt=Date.now();row.acknowledged=false;delete row.remote;
@@ -717,6 +730,7 @@ var PickCodeCore = (function () {
     state.matchingFeedback.items=state.matchingFeedback.items||[];
     state.recognitionIssues=state.recognitionIssues||{items:[],lastError:''};state.recognitionIssues.items=state.recognitionIssues.items||[];
     state.recognitionIssues.epoch=state.recognitionIssues.epoch||hash(String(Date.now())+String(Math.random()));
+    scrubRecognitionSources(state);
     state.correctionEvents=state.correctionEvents||[];
     state.stationRules=state.stationRules||[];state.stationRulesVersion=state.stationRulesVersion||0;
     if(!Array.isArray(state.logisticsRules))state.logisticsRules=logistics.defaults();

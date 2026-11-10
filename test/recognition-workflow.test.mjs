@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../src/store.mjs';
 import { RecognitionWorkflow, recognitionMethod, recognitionProblems } from '../src/recognition-workflow.mjs';
+import { RecognitionAi } from '../src/recognition-ai.mjs';
+import '../app-source/pickcode/core/load-core.mjs';
 
 const NOW = Date.parse('2026-11-10T03:00:00+08:00'), MINUTE = 60000, DAY = 86400000;
 function fixture(t, options = {}) {
@@ -39,6 +41,133 @@ function fixture(t, options = {}) {
 const report = (shipmentIds, revision = 1, state = 'unresolved') => ({ id: 'client-report', revision, kind: 'unmatched_pickup', state,
   sourceId: 'local-source', observedAt: NOW, source: { station: '合成站点', carrier: '', waybillNo: '', pickupCode: '合成', occurredAt: null, fragment: '合成站点待取' },
   candidateShipmentIds: shipmentIds, reasonCodes: ['station_mismatch'] });
+
+test('legacy report privacy migration retains progress, terminal decisions, attempts and AI review identities across retransmission', async t => {
+  for (const status of ['pending', 'ai_running', 'review', 'resolved', 'ignored']) await t.test(status, async t => {
+    const f = fixture(t), shipment = f.add({ logisticsState: 'ok' }), input = report([shipment.id]);
+    const task = f.workflow.submit(input, { deviceId: 'd-one' });
+    const source = { ...task.source, pickupCode: '7-6-7042', waybillNo: 'JD99999999999' };
+    const legacyTask = { ...task, source, sourceFingerprint: f.workflow.reportFingerprint(source, [f.store.shipment(shipment.id)]),
+      status, retryCount: 3, aiAttempts: 1, evidenceVersion: 4, candidateIds: ['review-candidate'], lastJobId: 'job-before', nextRetryAt: 0,
+      reasonCode: status === 'resolved' ? 'CLIENT_MATCH_CONFIRMED' : status === 'ignored' ? 'SOURCE_INACTIVE' : 'AI_REQUIRES_EVIDENCE' };
+    delete legacyTask.reportState;
+    const legacy = f.workflow.save(legacyTask);
+    f.store.db.prepare('INSERT INTO recognition_attempts VALUES(?,?)').run(task.id, 'job-before');
+    const ai = new RecognitionAi({ store: f.store, now: f.now });
+    const review = { id: 'old-review', taskId: task.id, sourceFingerprint: legacy.sourceFingerprint, status: 'review', reasonCode: 'AI_REQUIRES_EVIDENCE', candidateIds: ['review-candidate'] };
+    f.store.db.prepare('INSERT INTO recognition_ai_reviews VALUES(?,?,?)').run(review.id, task.id, JSON.stringify(review));
+    const priorReview = ai.refresh(legacy);
+    await f.restart();
+    const migrated = f.workflow.task(task.id);
+    assert.deepEqual(migrated, { ...legacy, source: { ...source, pickupCode: '', waybillNo: '' }, privacyFingerprint: migrated.privacyFingerprint });
+    assert.ok(migrated.privacyFingerprint); assert.notEqual(migrated.privacyFingerprint, legacy.sourceFingerprint);
+    assert.deepEqual(ai.refresh(migrated), priorReview);
+    const raw = { ...input, source, state: status === 'resolved' ? 'resolved' : 'unresolved' };
+    for (const incoming of [raw, { ...raw, revision: 2 }, { ...raw, revision: 3, source: { ...source, pickupCode: '', waybillNo: '' } }]) {
+      const next = f.workflow.submit(incoming, { deviceId: 'd-one' });
+      for (const key of ['sourceFingerprint', 'privacyFingerprint', 'status', 'retryCount', 'aiAttempts', 'evidenceVersion', 'candidateIds', 'lastJobId', 'nextRetryAt', 'createdAt']) {
+        assert.deepEqual(next[key], migrated[key], key);
+      }
+      assert.equal(next.source.pickupCode, ''); assert.equal(next.source.waybillNo, '');
+      assert.deepEqual(ai.refresh(next), priorReview);
+    }
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) AS count FROM recognition_attempts WHERE task_id=?').get(task.id).count, 1);
+    assert.equal(f.store.db.prepare('SELECT data FROM recognition_ai_reviews WHERE id=?').get(review.id).data, JSON.stringify(review));
+    const once = f.workflow.task(task.id); await f.restart(); assert.deepEqual(f.workflow.task(task.id), once);
+    assert.equal(f.analyses.length, 0); assert.equal(f.requests.length, 0);
+    const changed = f.workflow.submit({ ...input, revision: 4, source: { ...source, station: '新的业务站点' } }, { deviceId: 'd-one' });
+    assert.equal(changed.status, 'pending'); assert.equal(changed.retryCount, 0); assert.equal(changed.aiAttempts, 0);
+    assert.equal(changed.evidenceVersion, 5); assert.equal(changed.privacyFingerprint, undefined);
+    assert.equal(f.store.db.prepare('SELECT COUNT(*) AS count FROM recognition_attempts WHERE task_id=?').get(task.id).count, 0);
+  });
+});
+
+test('privacy cleanup does not alias an obsolete fingerprint after actual shipment evidence changes', async t => {
+  const f = fixture(t), shipment = f.add({ logisticsState: 'ok' }), input = report([shipment.id]);
+  const task = f.workflow.submit(input, { deviceId: 'd-one' }), source = { ...task.source, pickupCode: '7-6-7042' };
+  f.workflow.save({ ...task, source, sourceFingerprint: f.workflow.reportFingerprint(source, [f.store.shipment(shipment.id)]), retryCount: 3, aiAttempts: 1, status: 'resolved' });
+  f.patch(shipment, { station: '新的物流证据' }); await f.restart();
+  assert.equal(f.workflow.task(task.id).source.pickupCode, ''); assert.equal(f.workflow.task(task.id).privacyFingerprint, undefined);
+  const changed = f.workflow.submit({ ...input, revision: 2 }, { deviceId: 'd-one' });
+  assert.equal(changed.status, 'pending'); assert.equal(changed.retryCount, 0); assert.equal(changed.aiAttempts, 0);
+});
+
+test('backend normalizes old client code fields only after validating their schema', t => {
+  const f = fixture(t), shipment = f.add({ logisticsState: 'ok' }), input = report([shipment.id]);
+  const task = f.workflow.submit({ ...input, source: { ...input.source, pickupCode: '7-6-7042', waybillNo: 'JD99999999999' } }, { deviceId: 'd-one' });
+  assert.equal(task.source.pickupCode, ''); assert.equal(task.source.waybillNo, '');
+  assert.doesNotMatch(f.store.db.prepare('SELECT data FROM recognition_tasks WHERE id=?').get(task.id).data, /7042|JD99999999999/);
+  for (const field of ['pickupCode', 'waybillNo']) assert.throws(() => f.workflow.submit({ ...input, revision: 2,
+    source: { ...input.source, [field]: 42 } }, { deviceId: 'd-one' }), /格式无效/);
+});
+
+test('two-parcel core reports reopen after partial unlink without resetting the backend retry budget', async t => {
+  const f = fixture(t); f.advance(Date.now() - f.now() + 1000);
+  const one = f.add({ logisticsState: 'ok', status: 'arrived', station: '合成花园店', arrivalAt: 0 }),
+    two = f.add({ logisticsState: 'ok', status: 'arrived', station: '合成花园店', arrivalAt: 0 });
+  let saved = '';
+  const core = (action, payload = {}) => {
+    const value = JSON.parse(globalThis.PickCodeCore.dispatch(saved, JSON.stringify({ action, payload })));
+    saved = JSON.stringify(value.state); return value.result;
+  };
+  const submit = input => {
+    const task = f.workflow.submit(input, { deviceId: 'd-one' });
+    core('recognitionIssueAck', { accepted: [{ id: input.id, revision: input.revision }],
+      issues: [{ id: input.id, revision: input.revision, status: task.status, retryCount: task.retryCount, reasonCode: task.reasonCode, nextRetryAt: task.nextRetryAt }] });
+    return task;
+  };
+  const snapshot = f.store.snapshot([one.accountId, two.accountId]);
+  core('syncMeta', { bound: true, baseUrl: 'https://fixture.example', deviceId: 'd-one', accounts: snapshot.accounts });
+  core('syncImport', { snapshot: { schemaVersion: 1, serverRevision: 1, ...snapshot, capabilities: ['recognition_workflow_v1'] } });
+  const local = core('ingest', { messages: [{ id: 'two-parcels', date: f.now() - MINUTE,
+    body: '【菜鸟驿站】您有2个包裹已到达合成花园店，取件码3-2-9001' }] });
+  const source = local.codes.flatMap(code => code.sources).find(source => source.packageCount === 2);
+  const shipmentIds = local.packages.flatMap(order => order.shipments.map(shipment => shipment.id));
+  const first = core('recognitionIssueBatch').items[0];
+  assert.equal(first.state, 'unresolved'); assert.equal(first.revision, 1);
+  assert.deepEqual(first.candidateShipmentIds, [one.id, two.id].sort());
+  const initial = submit(first);
+  f.advance(5 * MINUTE); await f.run();
+  const retried = f.workflow.task(initial.id);
+  assert.equal(retried.retryCount, 1);
+  core('linkSource', { sourceId: source.sourceId, shipmentIds, allowConflict: true });
+  const matched = core('recognitionIssueBatch').items[0];
+  assert.equal(matched.state, 'resolved'); assert.equal(matched.revision, 2);
+  assert.deepEqual(matched.candidateShipmentIds, first.candidateShipmentIds); assert.deepEqual(matched.source, first.source);
+  assert.equal(submit(matched).status, 'resolved');
+  await f.restart();
+  core('unlinkSource', { sourceId: source.sourceId, shipmentId: shipmentIds[0] });
+  const partial = core('recognitionIssueBatch').items[0];
+  assert.equal(partial.state, 'unresolved'); assert.equal(partial.revision, 3);
+  assert.deepEqual(partial.candidateShipmentIds, first.candidateShipmentIds); assert.deepEqual(partial.source, first.source);
+  const resumed = submit(partial);
+  assert.equal(resumed.status, 'pending'); assert.equal(resumed.reportState, 'unresolved');
+  for (const key of ['retryCount', 'aiAttempts', 'evidenceVersion', 'sourceFingerprint', 'candidateIds']) assert.deepEqual(resumed[key], retried[key], key);
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) AS count FROM recognition_attempts WHERE task_id=?').get(initial.id).count, 1);
+  assert.equal(core('snapshot').online.recognitionIssues[0].status, 'pending');
+  f.advance(5 * MINUTE); await f.run();
+  assert.equal(f.workflow.task(initial.id).retryCount, 2, 'the same task resumes its next real collection round');
+});
+
+test('only a previous client resolved or withdrawn state reopens equal evidence, including legacy rows', async t => {
+  for (const legacy of [false, true]) for (const retryCount of [1, 3]) await t.test(`${legacy ? 'legacy' : 'current'} retry ${retryCount}`, t => {
+    const f = fixture(t), shipment = f.add({ logisticsState: 'ok' }), input = report([shipment.id]);
+    const initial = f.workflow.submit(input, { deviceId: 'd-one' });
+    const resolved = f.workflow.submit({ ...input, revision: 2, state: 'resolved' }, { deviceId: 'd-one' });
+    const saved = { ...resolved, retryCount, aiAttempts: 1, candidateIds: ['prior-review'] };
+    if (legacy) delete saved.reportState;
+    f.workflow.save(saved);
+    const resumed = f.workflow.submit({ ...input, revision: 3 }, { deviceId: 'd-one' });
+    assert.equal(resumed.status, retryCount === 3 ? 'review' : 'pending');
+    assert.equal(resumed.retryCount, retryCount); assert.equal(resumed.aiAttempts, 1); assert.deepEqual(resumed.candidateIds, ['prior-review']);
+    assert.equal(resumed.evidenceVersion, initial.evidenceVersion); assert.equal(resumed.sourceFingerprint, initial.sourceFingerprint);
+    assert.equal(resumed.reportState, 'unresolved');
+    const deterministic = f.workflow.save({ ...resumed, status: 'resolved', reasonCode: 'DETERMINISTIC_MATCH' });
+    const repeated = f.workflow.submit({ ...input, revision: 4 }, { deviceId: 'd-one' });
+    assert.equal(repeated.status, 'resolved'); assert.equal(repeated.nextRetryAt, deterministic.nextRetryAt);
+    assert.equal(repeated.retryCount, retryCount); assert.equal(repeated.aiAttempts, 1);
+  });
+});
 
 test('methods distinguish platform and target; missing evidence never becomes a guessed timestamp', () => {
   assert.notEqual(recognitionMethod('jd', 'event_time').methodId, recognitionMethod('taobao', 'event_time').methodId);

@@ -1,10 +1,10 @@
 {
   "name": "pickcode-private",
-  "version": "3.1.47",
+  "version": "3.1.48",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
@@ -30,7 +30,25 @@
   "devDependencies": {
     "@dcloudio/vite-plugin-uni": "3.0.0-5030420261029001",
     "sass": "1.77.8",
-    "vite": "5.2.8",
+    "vite": "6.4.6",
     "@vue/compiler-sfc": "3.4.21"
+  },
+  "overrides": {
+    "@dcloudio/vite-plugin-uni": {
+      "vite": "$vite",
+      "@vitejs/plugin-vue-jsx": "4.2.0",
+      "@vitejs/plugin-legacy": "6.1.1",
+      "express": "4.22.3"
+    },
+    "@babel/core": "7.29.6",
+    "esbuild@0.20.2": "0.25.0",
+    "postcss@8.5.6": "8.5.32",
+    "postcss-selector-parser@6.1.2": "6.1.5",
+    "source-map-js@1.2.1": "1.2.2",
+    "adm-zip@0.5.16": "0.6.1",
+    "body-parser@<1.20.9": "1.20.9",
+    "qs@<6.16.2": "6.16.2",
+    "@intlify/core-base@9.1.9": "9.1.11",
+    "@intlify/message-resolver@<9.1.11": "9.1.11"
   }
 }

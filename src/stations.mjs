@@ -59,6 +59,7 @@ export class StationStore {
     id ||= randomUUID();
     const old = this.station(id), name = stationText(body.name ?? old?.name, '站点名称'), region = stationText(body.region ?? old?.region ?? '', '地区', 80, false);
     if (nonPickupPlace(name) || redactStationFragment(name) !== name) fail(400, 'INVALID_STATION', '请输入不含敏感信息的取件站点');
+    if (redactStationFragment(region) !== region) fail(400, 'INVALID_STATION', '地区不能包含联系方式、单号或取件码');
     if (body.enabled !== undefined && typeof body.enabled !== 'boolean') fail(400, 'INVALID_STATION', '启用状态无效');
     const rawAliases = body.aliases ?? old?.aliases ?? [];
     if (!Array.isArray(rawAliases) || rawAliases.length > 100) fail(400, 'INVALID_STATION', '每个站点最多100个别名');

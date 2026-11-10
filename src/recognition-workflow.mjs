@@ -58,6 +58,7 @@ export class RecognitionWorkflow {
       CREATE INDEX IF NOT EXISTS recognition_tasks_status ON recognition_tasks(json_extract(data,'$.status'));
       CREATE TABLE IF NOT EXISTS recognition_attempts(task_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(task_id,job_id));
       CREATE TABLE IF NOT EXISTS recognition_daily_runs(day TEXT PRIMARY KEY,data TEXT NOT NULL);`);
+    this.scrubReportSources();
     this.schedule();
   }
   tasks() { return this.db.prepare('SELECT data FROM recognition_tasks ORDER BY rowid').all().map(parse); }
@@ -80,6 +81,22 @@ export class RecognitionWorkflow {
     const events = (shipment.logisticsEvents || []).map(event => [event.time, event.timeText, event.timePrecision, event.description, event.location,
       event.provider, event.providerStatus, event.providerStatusTag, event.providerSubStatus, event.providerStatusText]);
     return hash(JSON.stringify([events, shipment.status, shipment.logisticsState, shipment.arrivalAt, shipment.arrivalAtSource, shipment.arrivalAtPrecision, shipment.station, shipment.pickupCycle?.id]));
+  }
+  reportFingerprint(source, shipments) {
+    const evidence = shipments.map(shipment => [shipment.id, this.fingerprint(shipment), shipment.carrier, shipment.pickupCode, shipment.waybillNo])
+      .sort(([one], [two]) => one.localeCompare(two));
+    return hash(JSON.stringify([source, evidence]));
+  }
+  scrubReportSources() {
+    for (const task of this.tasks()) {
+      if (!task.source || !task.source.waybillNo && !task.source.pickupCode) continue;
+      const shipments = (task.candidateShipmentIds || []).map(id => this.store.shipment(id));
+      const unchanged = shipments.length && shipments.every(Boolean) && this.reportFingerprint(task.source, shipments) === task.sourceFingerprint;
+      task.source.waybillNo = ''; task.source.pickupCode = '';
+      // The original hash is also the identity used by historical AI reviews and in-flight work.
+      if (unchanged) task.privacyFingerprint = this.reportFingerprint(task.source, shipments);
+      this.db.prepare('UPDATE recognition_tasks SET data=? WHERE id=?').run(JSON.stringify(task), task.id);
+    }
   }
   taskScope(task) {
     if (task.contentKind === 'pickup_match') {
@@ -156,7 +173,7 @@ export class RecognitionWorkflow {
         accountId: '', accountIds: [], orderId: '', shipmentId: '', candidateShipmentIds: [], sourceFingerprint: '', evidenceVersion: 0,
         initialFailures: 0, retryCount: 0, aiAttempts: 0, createdAt: this.now(), lastJobId: '', lastJobIds: [], pendingJobs: [], candidateIds: [],
         problemCode: 'UNMATCHED_PICKUP' };
-      return this.save({ ...base, reportRevision: report.revision, observedAt: report.observedAt, reasonCodes: [...report.reasonCodes],
+      return this.save({ ...base, reportRevision: report.revision, reportState: report.state, observedAt: report.observedAt, reasonCodes: [...report.reasonCodes],
         status: report.state === 'withdrawn' ? 'ignored' : 'resolved', nextRetryAt: 0,
         reasonCode: report.state === 'withdrawn' ? 'SOURCE_WITHDRAWN' : 'CLIENT_MATCH_CONFIRMED' });
     }
@@ -174,11 +191,13 @@ export class RecognitionWorkflow {
     }
     if (report.source.occurredAt != null && report.source.occurredAt !== 0 && !validTime(report.source.occurredAt, this.now() + 5 * MINUTE)) fail(400, 'INVALID_RECOGNITION_REPORT', '来源时间无效');
     source.occurredAt = report.source.occurredAt || null;
-    const evidence = scopes.map(({ shipment }) => [shipment.id, this.fingerprint(shipment), shipment.carrier, shipment.pickupCode, shipment.waybillNo])
-      .sort(([one], [two]) => one.localeCompare(two));
-    const scope = scopes.find(scope => !scope.blocked) || scopes[0], fingerprint = hash(JSON.stringify([source, evidence]));
-    const changed = !!previous && previous.sourceFingerprint !== fingerprint;
+    source.waybillNo = ''; source.pickupCode = '';
+    const scope = scopes.find(scope => !scope.blocked) || scopes[0], fingerprint = this.reportFingerprint(source, scopes.map(({ shipment }) => shipment));
+    const changed = !!previous && (previous.privacyFingerprint || previous.sourceFingerprint) !== fingerprint;
     const fresh = !previous || changed;
+    const previousState = previous?.reportState || (previous?.reasonCode === 'CLIENT_MATCH_CONFIRMED' ? 'resolved'
+      : previous?.reasonCode === 'SOURCE_WITHDRAWN' ? 'withdrawn' : 'unresolved');
+    const restored = !!previous && TERMINAL.has(previous.status) && previousState !== 'unresolved';
     const platforms = [...new Set(scopes.map(scope => scope.account.platform))];
     if (!previous && this.tasks().filter(task => !TERMINAL.has(task.status)).length >= ACTIVE_LIMIT) fail(429, 'RECOGNITION_QUEUE_FULL', '识别问题队列已满');
     const task = this.store.transaction(() => {
@@ -186,11 +205,12 @@ export class RecognitionWorkflow {
       return this.save({ ...previous, ...(fresh ? { initialFailures: 1, retryCount: 0, aiAttempts: 0, evidenceVersion: (previous?.evidenceVersion || 0) + 1,
         lastJobId: '', lastJobIds: [], pendingJobs: [], candidateIds: [], resumeStatus: '' } : {}),
         id, createdAt: previous?.createdAt || this.now(), ...recognitionMethod(platforms.length === 1 ? platforms[0] : 'other', 'station_match'),
-        status: fresh ? scope.blocked ? 'blocked' : 'pending' : !TERMINAL.has(previous.status) ? previous.status : scope.blocked ? 'blocked' : previous.retryCount >= 3 ? 'review' : 'pending',
-        nextRetryAt: !fresh && !TERMINAL.has(previous.status) ? previous.nextRetryAt : this.now() + 5 * MINUTE,
+        status: fresh ? scope.blocked ? 'blocked' : 'pending' : restored ? scope.blocked ? 'blocked' : previous.retryCount >= 3 ? 'review' : 'pending' : previous.status,
+        nextRetryAt: !fresh && !restored ? previous.nextRetryAt : this.now() + 5 * MINUTE,
         accountId: scope.account.id, accountIds: [...new Set(scopes.map(scope => scope.account.id))], orderId: scope.order.id, shipmentId: scope.shipment.id,
-        deviceId, clientId: report.id, reportRevision: report.revision, sourceId: report.sourceId, sourceFingerprint: fingerprint, source, candidateShipmentIds: [...ids],
-        observedAt: report.observedAt, reasonCodes: [...report.reasonCodes], reasonCode: changed ? 'SOURCE_CHANGED' : previous?.reasonCode || 'UNMATCHED_PICKUP', problemCode: 'UNMATCHED_PICKUP' });
+        deviceId, clientId: report.id, reportRevision: report.revision, reportState: report.state, sourceId: report.sourceId,
+        sourceFingerprint: !fresh ? previous.sourceFingerprint : fingerprint, privacyFingerprint: !fresh ? previous.privacyFingerprint : undefined, source, candidateShipmentIds: [...ids],
+        observedAt: report.observedAt, reasonCodes: [...report.reasonCodes], reasonCode: changed ? 'SOURCE_CHANGED' : restored ? 'UNMATCHED_PICKUP' : previous?.reasonCode || 'UNMATCHED_PICKUP', problemCode: 'UNMATCHED_PICKUP' });
     });
     this.schedule(); return task;
   }

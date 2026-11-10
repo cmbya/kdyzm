@@ -14,6 +14,7 @@ function fixture({ capabilities = ['recognition_workflow_v1'], ships = [shipment
     saved = JSON.stringify(value.state); return value.result;
   };
   call.saved = () => JSON.parse(saved);
+  call.replace = value => { saved = JSON.stringify(value); };
   call('syncMeta', { bound: true, baseUrl: 'https://fixture.example', deviceId: 'd', accounts: [account] });
   call.sync = (next = ships, revision = 2, extra = {}) => call('syncImport', { snapshot: {
     schemaVersion: 1, serverRevision: revision, accounts: [account], orders: [order], shipments: next, capabilities,
@@ -36,12 +37,58 @@ test('能力默认启动单候选失败追踪，站点学习关闭不上传片�
   assert.equal(items[0].state, 'unresolved');
   assert.equal(items[0].source.station, '');
   assert.equal(items[0].source.fragment, '');
-  assert.equal(items[0].source.pickupCode, '7-6-7042');
+  assert.equal(items[0].source.pickupCode, '');
+  assert.equal(items[0].source.waybillNo, '');
   assert.ok(items[0].reasonCodes.includes('arrival_time_unknown'));
   assert.equal(source(c()).linkedShipmentIds.length, 0);
   assert.ok(!JSON.stringify(items).includes('13800138000'));
   assert.ok(!JSON.stringify(items).includes('张先生'));
+  assert.ok(!JSON.stringify(items).includes('7042'));
   assert.notEqual(items[0].sourceId, source(c()).sourceId);
+});
+
+// Reproduce the persisted pre-privacy fingerprint, rather than deriving it from the new implementation.
+function legacyFingerprint(payload, ships) {
+  const value = JSON.stringify(payload.state === 'resolved' ? payload : [payload, ships.map(ship => [ship.remoteId, ship.waybillNo, ship.station,
+    ship.carrier, ship.arrivalAt, ship.arrivalAtSource, ship.arrivalAtPrecision, ship.pickupCode, ship.status])]);
+  let a = 5381, b = 0;
+  for (let i = 0; i < value.length; i++) { a = ((a << 5) + a) ^ value.charCodeAt(i); b = value.charCodeAt(i) + (b << 6) + (b << 16) - b; }
+  return (a >>> 0).toString(36) + (b >>> 0).toString(36);
+}
+
+test('存量所有绑定和状态清除短信码，纯隐私迁移保留epoch版本回执且再次同步不重报', () => {
+  const c = fixture(), first = batch(c);
+  c('recognitionIssueAck', ack(first, 'review', 3));
+  const saved = c.saved(), row = saved.recognitionIssues.items[0];
+  Object.assign(row.payload.source, { pickupCode: '7-6-7042', waybillNo: 'JD99999999999' });
+  row.fingerprint = legacyFingerprint(row.payload, saved.shipments);
+  for (const state of ['resolved', 'withdrawn']) {
+    const other = structuredClone(row); other.id += '-' + state; other.binding = 'old-binding'; other.payload.state = state;
+    other.fingerprint = state === 'withdrawn' ? 'withdrawn' : legacyFingerprint(other.payload, saved.shipments);
+    saved.recognitionIssues.items.push(other);
+  }
+  const before = structuredClone(saved.recognitionIssues);
+  c.replace(saved); c();
+  const migrated = c.saved().recognitionIssues;
+  assert.equal(migrated.epoch, before.epoch);
+  migrated.items.forEach((value, index) => {
+    const prior = before.items[index];
+    assert.deepEqual(value.payload.source, { ...prior.payload.source, waybillNo: '', pickupCode: '' });
+    for (const key of ['id', 'binding', 'revision', 'acknowledged', 'submitted', 'remote', 'observedAt']) assert.deepEqual(value[key], prior[key], key);
+  });
+  assert.equal(migrated.items[2].fingerprint, 'withdrawn');
+  c.sync(); assert.equal(batch(c).length, 0);
+  const once = c.saved().recognitionIssues;
+  c(); c.sync([shipment], 3);
+  assert.deepEqual(c.saved().recognitionIssues, once);
+});
+
+test('隐私迁移不能掩盖存量报告之后真实改变的候选证据', () => {
+  const c = fixture(), sent = batch(c); c('recognitionIssueAck', ack(sent));
+  const saved = c.saved(), row = saved.recognitionIssues.items[0];
+  row.payload.source.pickupCode = '7-6-7042'; row.fingerprint = legacyFingerprint(row.payload, saved.shipments);
+  saved.shipments[0].station = '其他站点'; c.replace(saved); c(); c.sync([{ ...shipment, station: '其他站点' }]);
+  assert.equal(batch(c)[0].revision, sent[0].revision + 1);
 });
 
 test('重复快照、同证据同步、上传失败与精确ack幂等且不累计业务重试', () => {
@@ -83,6 +130,7 @@ test('学习开关只决定片段，改变开关刷新版本并保留纯净站�
   assert.equal(learned.source.fragment, '示例花园店');
   c('settings', { stationEnhancement: false, manualLearning: false });
   assert.equal(batch(c)[0].source.fragment, '');
+  assert.equal(batch(c)[0].source.station, '');
   assert.equal(batch(c)[0].revision, learned.revision + 1);
 });
 

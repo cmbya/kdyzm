@@ -587,9 +587,15 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
       if (!pddOrderMatches(payload, platformOrderId) || !pddOrderMatches(shipping, platformOrderId) || !pddWaybillMatches(shipping, waybillNo)) {
         throw new CollectorError('UPSTREAM_FORMAT', '拼多多物流订单或运单标识不匹配');
       }
-      if (!parcels.length && validPddWaybill(waybillNo) && activeParcel(known.get(platformOrderId), waybillNo)) parcels.push({ platformOrderId, waybillNo: pddWaybill(waybillNo), carrier: '', status: 'unknown' });
-      const target = waybillNo ? parcels.find(parcel => parcel.waybillNo === waybillNo) : parcels.length === 1 ? parcels[0] : null;
-      if (target) {
+      let target = waybillNo ? parcels.find(parcel => parcel.waybillNo === waybillNo) : parcels.length === 1 ? parcels[0] : null;
+      if (!target && validPddWaybill(waybillNo) && activeParcel(known.get(platformOrderId), waybillNo)) {
+        const candidate = { platformOrderId, waybillNo, carrier: asText(shipping.shipping_name || shipping.shippingName), status: 'unknown' };
+        applyShipping(candidate, shipping, checkedAt);
+        // A new waybill needs its own usable track; cached sibling events cannot establish it.
+        if (candidate.logisticsEvents.some(event => logisticsEventTimeIssue(event, checkedAt) !== 'timeConflict')) {
+          parcels.push(candidate); target = candidate;
+        }
+      } else if (target) {
         if (waybillNo === target.waybillNo) target.carrier = asText(shipping.shipping_name || shipping.shippingName) || target.carrier;
         applyShipping(target, shipping, checkedAt);
       }
@@ -733,7 +739,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     }
     orders.push({ ...metadata, title: (order.order_goods || []).map(g => g.goods_name || g.goods_title || '').filter(Boolean).join(' / '),
       imageUrl: productImage(order.order_goods, ['thumb_url', 'thumbUrl']) });
-    listed.push({ platformOrderId, orderStatus, parcels });
+    listed.push({ platformOrderId, kind, orderStatus, parcels });
   }
   await onProgress?.({ orders, shipments: [], orderUpdates, logisticsFailures: [], warnings: [...new Set(warnings)] });
   async function enrichCabinet({ platformOrderId, orderStatus, parcels: inputParcels }) {
@@ -773,7 +779,7 @@ async function collectPdd(cookie, { fetchImpl, maxPages, now, knownOrders = [], 
     const parcels = activeKnownParcels(knownOrders.find(order => asText(order.platformOrderId) === id));
     return parcels.length ? Math.min(...parcels.map(parcel => parcel.logisticsCheckedAt || 0)) : 0;
   };
-  const selected = candidates.filter(candidate => candidate.parcels.length || candidate.missingFromList)
+  const selected = candidates.filter(candidate => candidate.parcels.length || candidate.missingFromList || candidate.kind === 'in_transit')
     .sort((a, b) => lastChecked(a.platformOrderId) - lastChecked(b.platformOrderId));
   let interrupted = 0, interruption;
   const results = await runLogistics(selected, async candidate => {

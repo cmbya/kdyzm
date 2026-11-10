@@ -82,6 +82,7 @@ function recognitionBatch(items) {
     if ([source.station, source.fragment, source.carrier].some(value => /https?:\/\/|www\.|[0-9]{6,}|验证码|密码|取件码|取货码|手机号|运单号|订单号|先生|女士|收件人/iu.test(value))
       || source.waybillNo && !/^[A-Za-z0-9-]{6,32}$/u.test(source.waybillNo)
       || source.pickupCode && !core.validCode(source.pickupCode)) throw new Error('识别问题片段须先脱敏');
+    source.waybillNo = ''; source.pickupCode = '';
     return { id: item.id, revision: item.revision, kind: item.kind, state: item.state, sourceId: item.sourceId, observedAt: item.observedAt, source,
       candidateShipmentIds: [...new Set(item.candidateShipmentIds)], reasonCodes: [...new Set(item.reasonCodes)] };
   });

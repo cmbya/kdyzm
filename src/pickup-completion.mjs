@@ -14,6 +14,15 @@ const nonParcel = /(?:领取|提取|取出|收取)(?:了|到|成功)?(?:取件�
 const instruction = /(?:须要?|应当?|务必|要求|指定|仅限|支持|安排|选择|勾选|开通|开启|提供|使用|推荐)(?:由|为)?(?:本人|收件人|用户|客户|您).{0,8}(?:签收|领取|取件|取出|提货|提取|自提|收取)|(?:签收|领取|取件|取出|提货|提取|自提|收取)(?:服务|要求|方式|说明|须知|标准|规则|选项|条款|功能|业务|模式|流程|协议|类型)/u;
 const uncertainty = /[?？]|[吗么呢](?:[。！!，,;；\s]|$)|是否|是不是|有无|核实|核验|询问|待确认|待核|待查|待验证|疑似|疑问|据称|声称|不确定|无法确认|真伪|属实/u;
 
+export function parcelNotReceived(description) {
+  return typeof description === 'string' && description.normalize('NFKC').split(/[，,。；;！!？?\r\n]/u)
+    .some(part => {
+      const value = compact(part);
+      return [...value.matchAll(/(?:未(?:曾|能|有)?|没(?:有|能)?)(?:收货|收到(?:(?:任何|该|此|本)?(?:包裹|快件|快递|货物|货品|货|商品|物品)|$))/gu)]
+        .some(match => !/(?:如果|如若|倘若|假如|假若|若|如)(?:您|用户|客户|收件人|本人|买家|有)?(?:反馈|反映|发现|遇到|出现)?(?:仍然|依然|仍|还)?$/u.test(value.slice(0, match.index)));
+    });
+}
+
 export function completionNarrative(description) {
   if (typeof description !== 'string') return '';
   return description.normalize('NFKC').split(/[，,。；;\r\n]/u).filter(part => {
@@ -28,7 +37,7 @@ export function completionNarrative(description) {
 export function completionKind(description) {
   const narrative = completionNarrative(description), text = compact(narrative);
   // Keep question punctuation until uncertainty is checked; compacting it would turn a question into a fact.
-  if (!text || uncertainty.test(narrative) || uncertainty.test(text) || forbidden.test(text) || incomplete.test(text) || nonParcel.test(text) || instruction.test(text)) return '';
+  if (!text || parcelNotReceived(narrative) || uncertainty.test(narrative) || uncertainty.test(text) || forbidden.test(text) || incomplete.test(text) || nonParcel.test(text) || instruction.test(text)) return '';
   if (signature.test(text)) return 'recipient_signed';
   if (collection.test(text) || collectionExtension.test(text)) return 'user_collected';
   return '';
@@ -49,7 +58,7 @@ function providerCollection(event) {
   if (!ruleId) return '';
   const narrative = completionNarrative(event.description), text = compact(narrative).replace(/代收点/gu, '');
   // The location label is compatible with a confirmed exit; explicit failure/correction still wins.
-  return !uncertainty.test(narrative) && !uncertainty.test(text) && !forbidden.test(text) && !incomplete.test(text)
+  return !parcelNotReceived(narrative) && !uncertainty.test(narrative) && !uncertainty.test(text) && !forbidden.test(text) && !incomplete.test(text)
     && !nonParcel.test(text) && !instruction.test(text) ? ruleId : '';
 }
 
@@ -70,7 +79,7 @@ export function validatePickupCompletionRule(input) {
 // A newer delivery/return/pending event starts a new cycle or contradicts completion.
 export function completionConflict(description) {
   const value = compact(description);
-  return !!value && !completionKind(description) && (uncertainty.test(description) || uncertainty.test(value) || forbidden.test(value) || incomplete.test(value) || nonParcel.test(value) || instruction.test(value) || /运输中|转运|中转|派送|配送中|到达|已到|到站|入库|已放入|已存入|暂存|待取|等待|送达.*(?:柜|驿站|代收点)|离开|发往/u.test(value));
+  return !!value && !completionKind(description) && (parcelNotReceived(description) || uncertainty.test(description) || uncertainty.test(value) || forbidden.test(value) || incomplete.test(value) || nonParcel.test(value) || instruction.test(value) || /运输中|转运|中转|派送|配送中|到达|已到|到站|入库|已放入|已存入|暂存|待取|等待|送达.*(?:柜|驿站|代收点)|离开|发往/u.test(value));
 }
 
 export function detectPickupCompletion(shipment, { rules = [], now = Date.now() } = {}) {

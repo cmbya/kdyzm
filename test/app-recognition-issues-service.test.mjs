@@ -48,13 +48,38 @@ test('能力默认启用异步报告，字段白名单和同版本上传回执�
     assert.deepEqual(sent.items[0].candidateShipmentIds, ['s']);
     assert.equal(sent.items[0].source.fragment, '');
     assert.ok(!call.options.body.includes('13800138000')); assert.ok(!call.options.body.includes('张先生'));
-    assert.equal(sent.items[0].source.pickupCode, '7-6-7042');
+    assert.equal(sent.items[0].source.pickupCode, '');
+    assert.equal(sent.items[0].source.waybillNo, '');
+    assert.ok(!call.options.body.includes('7042'));
     finish(); await flush();
     assert.equal((await api.getSnapshot()).online.recognitionIssues[0].status, 'pending');
     await api.syncOnline(); await flush();
     assert.equal(uploads(calls).length, 1);
     assert.ok(!JSON.stringify([...storage.values()]).includes('fixture-token-'));
     assert.equal(calls.filter(call => call.url.endsWith('/v1/accounts/sync')).length, 0);
+  });
+});
+
+test('H5实际发送边界清空旧队列中的取件码运单号，并继续拒绝无效字段', async () => {
+  await harness(async (api, fixture, calls) => {
+    const dispatch = globalThis.PickCodeCore.dispatch;
+    let invalid = false;
+    globalThis.PickCodeCore.dispatch = (saved, request) => {
+      const value = JSON.parse(dispatch(saved, request));
+      if (JSON.parse(request).action === 'recognitionIssueBatch') value.result.items.forEach(item => {
+        item.source.pickupCode = invalid ? 'not a code' : '7-6-7042'; item.source.waybillNo = 'JD99999999999';
+      });
+      return JSON.stringify(value);
+    };
+    try {
+      fixture.upload = async () => response({}, 503);
+      await ingest(api); await flush();
+      const sent = JSON.parse(uploads(calls)[0].options.body).items[0];
+      assert.equal(sent.source.pickupCode, ''); assert.equal(sent.source.waybillNo, '');
+      assert.doesNotMatch(uploads(calls)[0].options.body, /7042|JD99999999999/);
+      invalid = true; await api.syncOnline(); await flush();
+      assert.equal(uploads(calls).length, 1, 'malformed legacy values still fail validation before normalization');
+    } finally { globalThis.PickCodeCore.dispatch = dispatch; }
   });
 });
 
