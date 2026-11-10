@@ -262,7 +262,8 @@ public final class WidgetModel {
             String refund = order.optString("refundStatus").toLowerCase(java.util.Locale.ROOT);
             if ((trade + " " + refund).matches(".*(refunded|refund_success|refund_completed|refund_finished|退款成功|退款完成|已退款).*")) continue;
             JSONArray shipments = order.optJSONArray("shipments");
-            boolean transit = false, unknown = false;
+            boolean transit = false, unknown = false, waiting = false;
+            String warehouse = ".*(进入.{0,20}仓库|仓库处理中|准备出库|等待出库|正在出库|(?:等待|待)[^，,。；;]{0,12}揽收|正在打包|打包完成|打印完成).*";
             if (shipments != null) for (int j = 0; j < shipments.length(); j++) {
                 JSONObject ship = shipments.optJSONObject(j);
                 if (roadUnavailable(ship) || ship.optBoolean("needsReceiptConfirmation") || "signed".equals(ship.optString("status")) || "picked".equals(ship.optString("status"))) continue;
@@ -273,14 +274,17 @@ public final class WidgetModel {
                 transit |= "transit".equals(status);
                 boolean unknownShipment = (status.isEmpty() || "unknown".equals(status)) && ship.optLong("arrivalAt") <= 0 && ship.optLong("smsArrivalAt") <= 0;
                 unknown |= unknownShipment;
-                transit |= unknownShipment && "jd".equals(order.optString("platform"))
-                        && ship.optString("waybillNo").trim().matches("[A-Za-z0-9-]{6,32}");
+                JSONArray events = ship.optJSONArray("logisticsEvents");
+                if (unknownShipment && "jd".equals(order.optString("platform")) && events != null) for (int k = 0; k < events.length(); k++) {
+                    JSONObject event = events.optJSONObject(k);
+                    if (event != null && event.optString("description").matches(warehouse)) waiting = true;
+                }
             }
-            boolean waiting = false;
             if (!transit && (unknown || shipments == null || shipments.length() == 0)) {
-                waiting = trade.matches(".*(wait_seller_send_goods|待发货|等待发货|等待卖家发货|卖家待发货|等待出库|正在出库).*");
+                waiting |= trade.matches(".*(wait_seller_send_goods|待发货|等待发货|等待卖家发货|卖家待发货|等待出库|正在出库).*")
+                        || "jd".equals(order.optString("platform")) && trade.matches(warehouse);
                 transit = !waiting && ("transit".equals(order.optString("status"))
-                        || trade.matches(".*(wait_buyer_confirm_goods|待收货|等待收货|等待买家收货).*"));
+                        || !"jd".equals(order.optString("platform")) && trade.matches(".*(wait_buyer_confirm_goods|待收货|等待收货|等待买家收货).*"));
             }
             if ((transit || waiting) && seen.add(order.optString("id"))) result.add(new RoadOrder(order, transit ? "运输中" : "待发货", privacy));
         }

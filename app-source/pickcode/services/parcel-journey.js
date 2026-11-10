@@ -117,6 +117,7 @@ function parcelJourney(shipment = {}, order = {}) {
   const segments = parcelJourneySegments({ points, currentIndex, completed });
   const carrier = typeof shipment.carrier === 'string' ? shipment.carrier.trim() : '';
   return { points, segments, currentIndex, completed,
+    parcelId: shipment.id ? 'shipment:' + shipment.id : order.id || shipment.orderId ? 'order:' + (order.id || shipment.orderId) : '',
     carrier: /^(?:unknown|other|未知(?:快递|物流|承运商|快递公司)?|快递公司未知|其他(?:快递|物流)?|暂无|未识别|线上包裹|[-—–]+)$/i.test(carrier) ? '' : carrier };
 }
 

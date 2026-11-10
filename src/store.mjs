@@ -10,7 +10,7 @@ import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs'
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
 import { cookieIdentity } from './cookie-sync.mjs';
 import { COLLECTION_COOLDOWN, scheduledSyncAt } from './collection-schedule.mjs';
-import { retainMilestoneEvents, shippingEvidence } from './shipment-lifecycle.mjs';
+import { jdShipmentStatus, retainMilestoneEvents, shippingEvidence } from './shipment-lifecycle.mjs';
 import { normalizeProductImageUrl } from './product-image.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
@@ -328,7 +328,8 @@ export class Store {
         const evidence = pickupEvidence(events, rules);
         const pickup = evidence.arrivalAt ? pickupData({ logisticsState: 'ok', logisticsEvents: events, arrivalAt: 0 }, old, events, rules, this.now()) : evidence;
         const fallback = old.status === 'arrived' && old.arrivalAtSource === 'platform_event' ? 'unknown' : old.status;
-        const status = eventStatus(events[0].description, fallback, rules);
+        const status = this.account(old.accountId)?.platform === 'jd' ? jdShipmentStatus(events, fallback, rules, this.now(), fallback === 'arrived' && !!old.pickupCode)
+          : eventStatus(events[0].description, fallback, rules);
         if (status === old.status && Object.keys(pickup).every(key => pickup[key] === old[key])) continue;
         const updated = this.pickupCompletion.project({ ...old, ...pickup, status, updatedAt: this.now() });
         this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(updated), old.id);
@@ -553,7 +554,7 @@ export class Store {
   importResult(accountId, result, { partial = false, reconcile = true } = {}) {
     const rules = result.logisticsRules ?? this.getLogisticsRules?.();
     const completionRules = this.pickupCompletion.rules(), completionConfig = this.pickupCompletion.config();
-    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v3', rules, completionRules, completionConfig]));
+    const parserKey = hash(JSON.stringify(['shipment-lifecycle-v4', rules, completionRules, completionConfig]));
     const changedShipmentIds = [];
     const account = this.account(accountId);
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
@@ -675,9 +676,12 @@ export class Store {
         const cycleState = staleLogistics ? pickupCycleData(id, input, old || {}, old?.logisticsEvents || [], this.now())
           : pickupCycleData(id, input, old || {}, logistics.logisticsEvents, this.now());
         const { cycleChanged, ...cycle } = cycleState;
-        const shipping = shippingEvidence(logistics.logisticsEvents, cycleChanged ? {} : old || {}, this.now(), cycle.pickupCycle);
+        const shipping = shippingEvidence(logistics.logisticsEvents, cycleChanged ? {} : old || {}, this.now(), cycle.pickupCycle, account.platform);
+        const projectedStatus = account.platform !== 'jd' || ['arrived', 'signed'].includes(status) ? status
+          : status === 'unknown' && ['arrived', 'signed'].includes(old?.status) ? old.status
+            : jdShipmentStatus(logistics.logisticsEvents, old?.status || status, rules, this.now());
         let shipment = { id, orderId, accountId, familyId: old ? old.familyId || '' : order.familyId || '',
-          familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: old?.waybillNo || String(input.waybillNo), carrier: carrier ? input.carrier : old?.carrier || input.carrier || '', status: staleLogistics ? old.status : status,
+          familyName: old ? old.familyName || '' : order.familyName || '', waybillNo: old?.waybillNo || String(input.waybillNo), carrier: carrier ? input.carrier : old?.carrier || input.carrier || '', status: staleLogistics ? old.status : projectedStatus,
           pickupCode: staleLogistics ? old.pickupCode || '' : input.pickupCode || (!pickup.arrivalAt && (old?.arrivalAt || logistics.logisticsEvents.some(event => pickupCycleReset(event.description) && (!event.time || event.time <= this.now()))) ? '' : old?.pickupCode) || '', ...pickup,
           updatedAt: input.updatedAt || this.now(), picked: cycleChanged ? false : old?.picked || false, hidden: old?.hidden || false,
           deleted: old?.deleted || false, manualAt: old?.manualAt || 0,
@@ -742,7 +746,11 @@ export class Store {
       const { pickupCycleHistory, logisticsEvidenceHash, shippedAt, shippedAtSource, shippedAtPrecision, pickupManualAt, pickupManualOperation, pickupManualAction, pickupConfirmedAt, ...publicShipment } = s;
       // Imports persist both proven timestamps and explicit unknowns; only legacy rows need parsing here.
       let shipping = {};
-      if (!['shippedAt', 'shippedAtSource', 'shippedAtPrecision'].every(field => Object.hasOwn(s, field))) {
+      const jd = orderById.get(s.orderId)?.platform === 'jd';
+      if (jd) {
+        shipping = shippingEvidence(s.logisticsEvents || [], s, this.now(), s.pickupCycle, 'jd');
+        if (!['arrived', 'signed'].includes(s.status)) publicShipment.status = jdShipmentStatus(s.logisticsEvents || [], s.status, this.getLogisticsRules?.(), this.now());
+      } else if (!['shippedAt', 'shippedAtSource', 'shippedAtPrecision'].every(field => Object.hasOwn(s, field))) {
         shipping = shippingEvidence(s.logisticsEvents || [], s, this.now());
       } else if (validTime(shippedAt) && shippedAt <= this.now() && shippedAtSource === 'platform_event'
         && (!s.pickupCycle?.evidenceKey || s.pickupCycle.evidenceKey === 'initial' || shippedAt > validTime(s.pickupCycle.startedAt))) {
@@ -755,7 +763,7 @@ export class Store {
       const archived = !!orderById.get(s.orderId)?.archived;
       const receipt = retainedSignedShipment(s, archived, this.now());
       return { ...publicShipment, ...(archived ? { archived: true } : {}), ...(receipt || {}), ...(compactCycle ? { pickupCycle: compactCycle } : {}), ...(pickupCycleHistory?.length ? { pickupCycleHistory } : {}), ...pickup, pickupCompletion: pickupCompletionState(s), pickupCode: s.arrivalAt && !pickup.arrivalAt ? '' : s.pickupCode,
-        ...(shipping.shippedAt ? shipping : {}), ...manual,
+        ...(jd || shipping.shippedAt ? shipping : {}), ...manual,
         familyId: s.familyId || '', familyName: s.familyName || '' };
     });
     const visibleShipmentIds = new Set(shipments.map(shipment => shipment.id));

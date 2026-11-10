@@ -308,10 +308,13 @@ export default {
       if (shipments.some(shipment => shipment.status === 'transit')) return '运输中';
       if (all.length && !shipments.length) return '';
       const unknown = shipments.filter(shipment => (!shipment.status || shipment.status === 'unknown') && !(shipment.arrivalAt > 0) && !(shipment.smsArrivalAt > 0));
-      if (item.platform === 'jd' && unknown.some(shipment => /^[A-Za-z0-9-]{6,32}$/.test(String(shipment.waybillNo || '').trim()))) return '运输中';
       const status = [item.tradeStatus, item.orderStatus].filter(Boolean).join(' ');
-      const waiting = /WAIT_SELLER_SEND_GOODS|待发货|等待卖家发货|卖家待发货|等待出库|正在出库/i.test(status);
-      if (!waiting && (!all.length || unknown.length) && (item.status === 'transit' || /WAIT_BUYER_CONFIRM_GOODS|待收货|等待收货|等待买家收货/i.test(status))) return '运输中';
+      const warehouse = /进入.{0,20}仓库|仓库处理中|准备出库|等待出库|正在出库|(?:等待|待)[^，,。；;]{0,12}揽收|正在打包|打包完成|打印完成/;
+      const waiting = /WAIT_SELLER_SEND_GOODS|待发货|等待卖家发货|卖家待发货|等待出库|正在出库/i.test(status)
+        || item.platform === 'jd' && (warehouse.test(status)
+          || unknown.some(shipment => Array.isArray(shipment.logisticsEvents) && shipment.logisticsEvents.some(event => warehouse.test(event?.description || ''))));
+      if (!waiting && (!all.length || unknown.length) && (item.status === 'transit' || item.platform !== 'jd' && /WAIT_BUYER_CONFIRM_GOODS|待收货|等待收货|等待买家收货/i.test(status))) return '运输中';
+      if (waiting && unknown.length) return '待发货';
       if (shipments.some(shipment => shipment.status === 'arrived' || shipment.status === 'awaiting_code' || shipment.status === 'pending' || shipment.arrivalAt > 0 || shipment.smsArrivalAt > 0)) return '待取码';
       if (waiting) return '待发货';
       if (item.status === 'awaiting_code') return '待取码';

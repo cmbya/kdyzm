@@ -8,6 +8,13 @@ const shipment = { status: 'arrived', picked: false, shippedAt: at('11-05T10:20:
   arrivalAt: at('11-08T17:57:00'), arrivalAtSource: 'platform_event', arrivalAtPrecision: 'minute' };
 const confirmed = value => ({ picked: true, pickedAt: value, pickedAtSource: 'user_confirmed', pickedAtPrecision: 'second' });
 
+test('同包裹跨页面共用播放身份，拆单和未发货订单互不占用', () => {
+  assert.equal(parcelJourney({ id: 'shipment-a' }, { id: 'order-a' }).parcelId, parcelJourney({ id: 'shipment-a' }).parcelId);
+  assert.notEqual(parcelJourney({ id: 'shipment-a' }).parcelId, parcelJourney({ id: 'shipment-b' }).parcelId);
+  assert.equal(parcelJourney({}, { id: 'order-a' }).parcelId, 'order:order-a');
+  assert.equal(parcelJourney().parcelId, '');
+});
+
 test('四时间用中国时区，等待为已耗时而非未知取货时间', () => {
   const original = Date.now; Date.now = () => at('11-09T02:28:00');
   try {

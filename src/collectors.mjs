@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { normalizeProductImageUrl } from './product-image.mjs';
 import { discoverPddSplit, fetchPddSplitTrack, fetchPddSplitCabinet, pddOrderMatches, pddWaybillMatches } from './pdd-split.mjs';
 import { activeKnownOrders, activeKnownParcels, isActiveKnownOrder, anchorTaobaoEventTimes, corroborateTaobaoEventTimes, eventStatus, homeDeliveryCompleted, logisticsEventTimeIssue, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, orderTimePrecision, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDateEvidence, taobaoStageEvents, taobaoTimeAnchorCandidate, taobaoTransitEvents } from './collector-enrichment.mjs';
+import { jdShipmentStatus } from './shipment-lifecycle.mjs';
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
@@ -832,7 +833,7 @@ export function jdParcels(data, platformOrderId, checkedAt, rules) {
     const usable = events.filter(event => logisticsEventTimeIssue(event, checkedAt) !== 'timeConflict');
     const latest = usable[0];
     let pickupCode = pickupCycleReset(latest?.description || '') ? '' : asText(group.checkCode).trim() || codeOf(latest?.description || '');
-    const status = eventStatus(latest?.description || '', pickupCode ? 'arrived' : 'transit', rules);
+    const status = jdShipmentStatus(usable, pickupCode ? 'arrived' : 'unknown', rules, checkedAt, !!pickupCode);
     if (!pickupCode && status === 'arrived') {
       for (const event of usable) {
         if (pickupCycleReset(event.description) || eventStatus(event.description, 'unknown', rules) === 'signed') break;

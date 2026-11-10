@@ -76,7 +76,7 @@ function packagePlatform(item) {
   return 'other';
 }
 
-function shipmentProgress(shipment) {
+function shipmentProgress(shipment, order) {
   if (!shipment || typeof shipment !== 'object') return 'other';
   if (['returning', 'returned'].includes(shipment.status)) return 'other';
   const picked = shipment.picked === true;
@@ -87,6 +87,7 @@ function shipmentProgress(shipment) {
   const status = normalizedText(shipment.status);
   if (status === 'transit') return 'transit';
   if (['arrived', 'awaiting_code', 'pending', 'signed'].includes(status)) return 'pickup';
+  if ((!status || status === 'unknown') && !(shipment.arrivalAt > 0) && !(shipment.smsArrivalAt > 0) && packagePlatform(order) === 'jd' && hasExplicitWaitingStatus(order, shipment)) return 'waiting';
   return 'other';
 }
 
@@ -96,9 +97,12 @@ function visibleShipments(item) {
     : [];
 }
 
-function hasExplicitWaitingStatus(item) {
+function hasExplicitWaitingStatus(item, shipment) {
   const status = [item?.tradeStatus, item?.orderStatus].filter(Boolean).join(' ');
-  return /WAIT_SELLER_SEND_GOODS|待发货|等待发货|等待卖家发货|卖家待发货|等待出库|正在出库/i.test(status);
+  const warehouse = /进入.{0,20}仓库|仓库处理中|准备出库|等待出库|正在出库|(?:等待|待)[^，,。；;]{0,12}揽收|正在打包|打包完成|打印完成/;
+  return /WAIT_SELLER_SEND_GOODS|待发货|等待发货|等待卖家发货|卖家待发货|等待出库|正在出库/i.test(status)
+    || packagePlatform(item) === 'jd' && (warehouse.test(status)
+      || Array.isArray(shipment?.logisticsEvents) && shipment.logisticsEvents.some(event => warehouse.test(event?.description || '')));
 }
 
 function isProgressKey(value) {
@@ -113,7 +117,7 @@ function packageProgressMatches(item, key = 'all') {
 
   const shipments = visibleShipments(item);
   const matches = value => progress === 'all' ? UNRECEIVED_PROGRESS.includes(value) : value === progress;
-  if (shipments.length) return shipments.some(shipment => matches(shipmentProgress(shipment)));
+  if (shipments.length) return shipments.some(shipment => matches(shipmentProgress(shipment, item)));
   // Hidden shipments are still real shipments: never resurrect them as an order placeholder.
   if (Array.isArray(item.shipments) && item.shipments.some(shipment => shipment && typeof shipment === 'object')) return false;
   const packageStatus = normalizedText(item.status);
@@ -140,9 +144,8 @@ function aggregateFor(items, progress) {
 
 function matchingShipmentsFor(item, progress) {
   const shipments = visibleShipments(item);
-  if (progress === 'all') return shipments.filter(shipment => UNRECEIVED_PROGRESS.includes(shipmentProgress(shipment)));
-  if (progress === 'waiting') return [];
-  return shipments.filter((shipment) => shipmentProgress(shipment) === progress);
+  if (progress === 'all') return shipments.filter(shipment => UNRECEIVED_PROGRESS.includes(shipmentProgress(shipment, item)));
+  return shipments.filter((shipment) => shipmentProgress(shipment, item) === progress);
 }
 
 function summarizePackages(items, progress = 'all') {

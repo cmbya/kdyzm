@@ -2,6 +2,7 @@
   <view class="parcel-journey" :class="{ 'journey-collapsed': collapsed, 'journey-driving': driving, 'journey-reduced': reducedMotion }" role="group" aria-label="包裹时间进度">
     <view class="journey-road-region" :aria-hidden="collapsed ? 'true' : null"><view class="journey-region-inner">
       <view class="journey-road-scene">
+        <view ref="visibilityMarker" class="journey-visibility-marker" aria-hidden="true" />
         <svg class="journey-road-map" viewBox="0 0 2320 1200" fill="none" role="img" :aria-label="roadSegments.map(s => s.label + '：' + s.text).join('，')">
           <defs>
             <path v-for="(path, index) in paintPaths" :id="roadId + '-paint-' + index" :key="index" :d="path" />
@@ -68,6 +69,8 @@ function curvePosition(value) {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * ease(t) + (segment === 1 ? Math.sin(t * Math.PI) * 5 : 0) };
 }
 const clockListeners = new Set();
+// Module memory lasts for this App launch, including page switches and remounts.
+const openedParcels = new Set();
 let clockTimer, nextRoadId = 0;
 function subscribeClock(listener) {
   clockListeners.add(listener);
@@ -79,10 +82,13 @@ export default {
   emits: ['settled'],
   data() {
     const progress = parcelJourneyProgress(this.journey);
+    const visible = typeof window === 'undefined' || !window.IntersectionObserver;
+    const entryPending = !visible && this.journey.parcelId && !openedParcels.has(this.journey.parcelId) && progress > 0 && !this.journey.completed && this.mode !== 'summary';
     return { clockNow: Date.now(), stopClock: null, roadId: `parcel-road-${++nextRoadId}`, progress,
       reached: Math.floor(progress), collapsed: this.mode === 'summary' || !!this.journey.completed,
       driving: false, paintAnimate: false, motionSerial: 0, motionFrom: progress, motionTo: progress, motionStarted: 0,
-      reducedMotion: false, timers: [], motionQuery: null, motionListener: null };
+      reducedMotion: false, timers: [], motionQuery: null, motionListener: null,
+      visible, entryPending, visibilityListener: null };
   },
   mounted() {
     if (typeof window !== 'undefined' && window.matchMedia) {
@@ -91,11 +97,32 @@ export default {
       this.motionListener = event => { this.reducedMotion = event.matches; if (event.matches) this.snap(); };
       this.motionQuery.addEventListener?.('change', this.motionListener);
     }
+    if (typeof window !== 'undefined' && window.IntersectionObserver) {
+      const bottomInset = typeof document === 'undefined' ? 0 : document.querySelector?.('.uni-tabbar')?.getBoundingClientRect().height || 0;
+      const marker = this.$refs.visibilityMarker.$el || this.$refs.visibilityMarker;
+      this._visibilityObserver = new window.IntersectionObserver(entries => {
+        const entry = entries.find(item => item.target === marker);
+        if (!entry) return;
+        this.visible = entry.isIntersecting && entry.intersectionRatio === 1;
+        if (this.visible) { if (!this.playEntry() && this.entryPending) this.snap(); } else if (!this.collapsed) this.snap();
+      }, { threshold: [0, 1], rootMargin: `0px 0px -${bottomInset}px 0px` });
+      this._visibilityObserver.observe(marker);
+    } else this.snap();
+    this.visibilityListener = () => {
+      if (document.hidden) this.snap(); else if (this.visible) this.playEntry();
+    };
+    if (typeof document !== 'undefined') document.addEventListener?.('visibilitychange', this.visibilityListener);
+    if (this.reducedMotion) this.snap();
     this.syncClock();
   },
-  beforeUnmount() { this.cancelMotion(); this.stopClock?.(); this.motionQuery?.removeEventListener?.('change', this.motionListener); },
+  beforeUnmount() {
+    this.cancelMotion(); this.stopClock?.(); this.motionQuery?.removeEventListener?.('change', this.motionListener);
+    this._visibilityObserver?.disconnect();
+    if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', this.visibilityListener);
+  },
   watch: {
     eventStamp() { this.updateJourney(); },
+    'journey.parcelId'() { this.snap(); this.playEntry(); },
     clockNeeded() { this.syncClock(); },
   },
   computed: {
@@ -106,13 +133,13 @@ export default {
     roadSegments() { return parcelJourneySegments(this.journey, this.clockNow).map((segment, index) => ({ ...segment, label: ['发货时间', '运输时间', '取件时间'][index], value: segment.text, text: segment.text === '—' ? '—' : '已用' + segment.text })); },
     motionSamples() { return [0, .2, .4, .6, .8, 1].map(t => curvePosition(this.motionFrom + (this.motionTo - this.motionFrom) * ease(t))); },
     carStyle() {
-      const target = curvePosition(Math.max(0, this.progress)), style = { transform: `translate(${target.x}px,${target.y}px)` };
+      const target = curvePosition(this.entryPending ? 0 : Math.max(0, this.progress)), style = { transform: `translate(${target.x}px,${target.y}px)` };
       this.motionSamples.forEach((point, index) => { style[`--drive-${index}`] = `translate(${point.x}px,${point.y}px)`; });
       return style;
     },
     progressStyle() {
       const scale = point => Math.max(0, point.x - 200) / 2320;
-      const style = { transform: `scaleX(${scale(curvePosition(Math.max(0, this.progress)))})` };
+      const style = { transform: `scaleX(${scale(curvePosition(this.entryPending ? 0 : Math.max(0, this.progress)))})` };
       this.motionSamples.forEach((point, index) => { style[`--trail-${index}`] = `scaleX(${scale(point)})`; });
       return style;
     },
@@ -120,20 +147,40 @@ export default {
   methods: {
     // SVG hrefs bypass uni-app URL rewriting; resolve within the packaged document.
     asset(file) { return './static/images/parcel-journey/' + file; },
-    lit(point, index) { return point.state !== 'pending' && (!this.driving || index <= this.reached); },
+    lit(point, index) { return point.state !== 'pending' && (this.entryPending ? index === 0 : !this.driving || index <= this.reached); },
     pointClass(point, index) { return { 'journey-point-pending': !this.lit(point, index), 'journey-point-teal': this.lit(point, index) && index > 0 }; },
     signTime(point, index) { return point.at && this.lit(point, index) ? String(point.text).split(' ') : ['—']; },
     later(callback, delay) { const timer = setTimeout(callback, delay); this.timers.push(timer); },
     cancelMotion() { this.timers.forEach(clearTimeout); this.timers = []; this.driving = false; this.paintAnimate = false; },
-    snap() { this.cancelMotion(); this.progress = parcelJourneyProgress(this.journey); this.reached = Math.floor(this.progress); this.collapsed = this.mode === 'summary' || !!this.journey.completed; },
+    snap() {
+      this.cancelMotion(); this.progress = parcelJourneyProgress(this.journey); this.reached = Math.floor(this.progress);
+      this.collapsed = this.mode === 'summary' || !!this.journey.completed;
+      this.entryPending = !!(this._visibilityObserver && !this.reducedMotion && !this.collapsed && this.progress > 0
+        && this.journey.parcelId && !openedParcels.has(this.journey.parcelId));
+    },
+    playEntry() {
+      if (!this._visibilityObserver || !this.visible || (typeof document !== 'undefined' && document.hidden)) return false;
+      const id = this.journey.parcelId, target = parcelJourneyProgress(this.journey);
+      if (!id || openedParcels.has(id) || target < 0) return false;
+      openedParcels.add(id);
+      if (this.reducedMotion || this.mode === 'summary' || this.journey.completed || target <= 0) this.snap();
+      else this.drive(0, target);
+      return true;
+    },
     updateJourney() {
       const target = parcelJourneyProgress(this.journey), previous = this.progress;
       this.clockNow = Date.now();
+      if (!this.visible || (typeof document !== 'undefined' && document.hidden)) { this.snap(); return; }
+      if (this.playEntry()) return;
       if (target === previous) return;
       const elapsed = Math.min(1, Math.max(0, (Date.now() - this.motionStarted) / 1000));
       const from = this.driving ? this.motionFrom + (this.motionTo - this.motionFrom) * ease(elapsed) : previous;
       this.cancelMotion(); this.clockNow = Date.now();
       if (this.reducedMotion || (typeof document !== 'undefined' && document.hidden) || from < 0 || target <= previous || (this.mode === 'summary' && !this.journey.completed)) { this.snap(); return; }
+      this.drive(from, target);
+    },
+    drive(from, target) {
+      this.cancelMotion(); this.entryPending = false;
       this.collapsed = false; this.motionFrom = from; this.motionTo = target; this.motionStarted = Date.now();
       this.progress = target; this.reached = Math.floor(from); this.motionSerial++; this.driving = true; this.paintAnimate = true;
       for (let stage = Math.floor(from) + 1; stage <= Math.floor(target); stage++) {
@@ -155,13 +202,18 @@ export default {
 .journey-road-region{grid-template-rows:1fr;opacity:1;}.journey-summary-region{grid-template-rows:0fr;opacity:0;}
 .journey-collapsed .journey-road-region{grid-template-rows:0fr;opacity:0;}.journey-collapsed .journey-summary-region{grid-template-rows:1fr;opacity:1;}
 .journey-region-inner{min-height:0;overflow:hidden;}.journey-road-scene{position:relative;aspect-ratio:2320/1200;width:100%;}.journey-road-map{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;}
+/* Observe the vehicle's vertical band so short viewports need not fit the whole map. */
+.journey-visibility-marker{position:absolute;inset:43% 0 24%;pointer-events:none;}
 .journey-stage-label{fill:#fff;font-size:100px;font-weight:750;}.journey-stage-time{fill:#173c56;font-size:83px;font-weight:750;}
 .journey-station-color{opacity:0;transition:opacity .25s ease;}.journey-station-color.lit{opacity:1;}.journey-point-pending .journey-stage-time{fill:#53636e;}
 .journey-road-duration{fill:#fff5df;font-size:89px;font-weight:850;font-style:italic;letter-spacing:1px;}.journey-road-duration-long{font-size:78px;}
 .journey-road-label{fill:#294a6b;font-size:86px;font-weight:700;}.journey-carrier{fill:#173f65;font-weight:750;}
-.journey-car-position,.journey-progress-window{transform-origin:0 0;}.journey-driving .journey-car-position{animation:journey-drive 1s linear both;}.journey-driving .journey-progress-window{animation:journey-trail 1s linear both;}
+.journey-car-position,.journey-progress-window{transform-origin:0 0;}
+@media(prefers-reduced-motion:no-preference){
+.journey-driving .journey-car-position{animation:journey-drive 1s linear both;}.journey-driving .journey-progress-window{animation:journey-trail 1s linear both;}
 .journey-driving .journey-wheel-spin{animation:journey-wheel .32s linear infinite;transform-origin:0 0;}.journey-driving .journey-trailer{animation:journey-trailer 1s ease-in-out both;transform-origin:200px 156px;}.journey-driving .journey-parcel{animation:journey-parcel 1s ease-out both;transform-origin:98px 114px;}
 .journey-time-reveal{animation:journey-time .3s ease both;}.journey-paint-reveal{animation:journey-paint .3s ease-out both;}
+}
 @keyframes journey-drive{0%{transform:var(--drive-0);}20%{transform:var(--drive-1);}40%{transform:var(--drive-2);}60%{transform:var(--drive-3);}80%{transform:var(--drive-4);}100%{transform:var(--drive-5);}}
 @keyframes journey-trail{0%{transform:var(--trail-0);}20%{transform:var(--trail-1);}40%{transform:var(--trail-2);}60%{transform:var(--trail-3);}80%{transform:var(--trail-4);}100%{transform:var(--trail-5);}}
 @keyframes journey-wheel{to{transform:rotate(360deg);}}@keyframes journey-trailer{0%,100%{transform:translate(0,0) rotate(0);}20%{transform:translate(-5px,1px) rotate(-1deg);}55%{transform:translate(-2px,-1px) rotate(.6deg);}}
@@ -169,6 +221,6 @@ export default {
 @keyframes journey-time{from{opacity:0;}to{opacity:1;}}@keyframes journey-paint{from{transform:scaleX(0);}to{transform:scaleX(1);}}
 .journey-summary{padding-top:7px;border-top:1px solid #c5d6e9;}.journey-time-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;}.journey-time-block{box-sizing:border-box;min-width:0;padding:5px 10px;border:1px solid #d1e1f2;border-radius:8px;background:#f9fbffe0;}.journey-summary-label,.journey-summary-time{display:block;font-size:12px;line-height:17px;white-space:nowrap;}.journey-summary-label{font-weight:700;}.journey-summary-time{color:#526b88;}.journey-point-teal.journey-time-block{border-color:#a1cec3;background:#eaf5ef;}.journey-point-pending .journey-summary-time{color:#8292a6;}.journey-summary-durations{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));padding:6px 0 2px;gap:3px;}.journey-duration{text-align:center;min-width:0;}.journey-duration-label,.journey-duration-value{display:block;font-size:11px;line-height:16px;}.journey-duration-label{font-weight:650;color:#405b77;}.journey-duration-value{color:#546f8e;}
 .journey-reduced .journey-road-region,.journey-reduced .journey-summary-region{transition:none;}
-@media(prefers-reduced-motion:reduce){.journey-road-region,.journey-summary-region,.journey-station-color{transition:none;}.journey-car-position,.journey-progress-window,.journey-wheel-spin,.journey-trailer,.journey-parcel,.journey-time-reveal,.journey-paint-reveal{animation:none!important;}}
+@media(prefers-reduced-motion:reduce){.journey-road-region,.journey-summary-region,.journey-station-color{transition:none;}}
 @media(forced-colors:active){.journey-stage-label{stroke:#000;stroke-width:2px;}.journey-summary,.journey-time-block{border-color:ButtonBorder;color:CanvasText;background:Canvas;}}
 </style>

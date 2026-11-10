@@ -94,7 +94,7 @@ test('JD pending warehouse orders discover preassigned waybills before the list 
       assert.equal(calls.filter(c => c.target.searchParams.get('functionId') === 'pcdetail_traceMultiPackage').length, 1);
       assert.equal(result.orders[0].orderStatus, state);
       assert.equal(result.shipments[0]?.waybillNo, 'SYNTHETIC-JD-WAREHOUSE');
-      assert.equal(result.shipments[0].status, 'transit', 'JD waybills default to transit even while the warehouse is processing');
+      assert.equal(result.shipments[0].status, 'unknown', 'a preassigned JD waybill does not prove carrier acceptance');
       assert.equal(result.shipments[0].logisticsState, 'ok');
       assert.match(result.shipments[0].logisticsEvents[0].description, /仓库处理中.*订单已经打印完成/);
     }

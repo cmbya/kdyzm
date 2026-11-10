@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.47 · 私人版</text><text class="version-date">2026-11-11</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">京东</text><text class="content">仓库准备与等待揽收保持待发货，明确揽收才记录发货时间</text></view>
+          <view class="update-item"><text class="tag optimize">动画</text><text class="content">每次重新启动后，包裹首次滑到可见位置播放一次小车动画，切换页面不重复播放</text></view>
+          <view class="update-item"><text class="tag fix">显示</text><text class="content">避免小车被底部导航遮挡时提前播放，横屏同样支持</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.46 · 私人版</text><text class="version-date">2026-11-10</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag optimize">图片</text><text class="content">未收包裹展示平台商品图片，不补采历史订单图片</text></view>

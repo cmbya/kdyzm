@@ -1128,7 +1128,7 @@ var PickCodeCore = (function () {
   function shipmentStatus(state,s) {
     var disposition=shipmentDisposition(s);if(disposition)return disposition.kind==='doorstep'?'signed':disposition.kind;
     var order=byId(state.orders,s.orderId);
-    if(s.status==='unknown'&&order&&order.platform==='jd'&&text(s.waybillNo,60).trim())return s.arrivalAt||s.smsArrivalAt?'arrived':'transit';
+    if(s.status==='unknown'&&order&&order.platform==='jd'&&text(s.waybillNo,60).trim()&&(s.arrivalAt||s.smsArrivalAt))return 'arrived';
     return s.status;
   }
   // Bump when bundled logistics parsing changes so persisted projections are reevaluated independently of user rules.

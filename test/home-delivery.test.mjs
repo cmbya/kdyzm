@@ -95,12 +95,12 @@ test('Taobao full track and PDD shipping events recognize the latest completed h
   }
 });
 
-test('JD waybill default is transit while current arrival and delivery keep priority', () => {
-  for (const [description, status] of [['仓库处理中：订单已经打印完成', 'transit'], ['待取件', 'arrived'], ['已送达', 'signed']]) {
+test('JD waybill alone is pending while current arrival and delivery keep priority', () => {
+  for (const [description, status] of [['仓库处理中：订单已经打印完成', 'unknown'], ['待取件', 'arrived'], ['已送达', 'signed']]) {
     assert.equal(jdParcels(jdData(description), 'o', NOW)[0].status, status, description);
   }
   const empty = jdData(''); empty.multiPackageTrackInfoList[0].trackGroupInfo.orderTrackShowList = [];
-  assert.equal(jdParcels(empty, 'o', NOW)[0].status, 'transit');
+  assert.equal(jdParcels(empty, 'o', NOW)[0].status, 'unknown');
   const missing = jdData('仓库处理中'); missing.multiPackageTrackInfoList[0].carriageInfo.carriageId = '';
   assert.deepEqual(jdParcels(missing, 'o', NOW), []);
 });

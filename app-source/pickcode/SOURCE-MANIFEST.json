@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.46",
+  "version": "3.1.47",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -82,7 +82,7 @@
     {
       "path": "android/app/build.gradle",
       "size": 3562,
-      "sha256": "c0af2b6d95663bcd70711d8b111e04a704db979c68babb06c07bfe2d8a12bac1"
+      "sha256": "fa8eeeb4e100b062515f1a3ec521b70d4956a81be5180b417425d5add1c02ee2"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -236,8 +236,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/WidgetModel.java",
-      "size": 29655,
-      "sha256": "f1de38ba27e85de93b8d2d7e5f2a64f5c7ececd8a5de696733b22490446c3874"
+      "size": 30202,
+      "sha256": "25d580cf6fd2b0d162d690ea5b42a83e1990dcc14e7de2351469e7709556f405"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/WidgetRenderer.java",
@@ -511,8 +511,8 @@
     },
     {
       "path": "components/ParcelJourney.vue",
-      "size": 18614,
-      "sha256": "93575efe8d7d68e4b4e03012fdeed05a74ac3dd9d22e1aa74b89c106105c6ce9"
+      "size": 21577,
+      "sha256": "ace6befc1b490973280197a7b13d038ad6105113d273d9f77be386e0e0827705"
     },
     {
       "path": "components/PickupDetail.vue",
@@ -541,13 +541,13 @@
     },
     {
       "path": "core/package-presentation.js",
-      "size": 8780,
-      "sha256": "334f381bda9d10eac2c5bdb60b769c1690e6027d2ac38fcdeea5589fc4d71281"
+      "size": 9352,
+      "sha256": "074ba1e14d499bc3e9661a6487557cf5d26547faf06a969de14112924de81bee"
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 177866,
-      "sha256": "8ec8b51bcd51b89aa316132b5f4dfafe84da8edb02524ba55ec5da8252cab732"
+      "size": 177859,
+      "sha256": "fc87d25ee7bd36fb2524b2cdde46c65562fd8ade87656bff5ae8bcaf86f6b78e"
     },
     {
       "path": "index.html",
@@ -567,17 +567,17 @@
     {
       "path": "manifest.json",
       "size": 3242,
-      "sha256": "5f4b21a3425f4af1340f73abcb4eabc65fb9261af3933b9c40cdb3709f15d5a1"
+      "sha256": "1a0fd46fd8a0ce7185e1f35129afc13207caf4fdfa28fa2c925ab8c86396c540"
     },
     {
       "path": "package-lock.json",
       "size": 259923,
-      "sha256": "2c68a5d37bdffaf4ba5a2ea8dc1f54443a1bbc78e34d19926a6603de93725c7e"
+      "sha256": "e4a18a25692ccdcb47499f94fdf26c027acb8036cfc791c6ce92b2e1ce389dcf"
     },
     {
       "path": "package.json",
       "size": 1203,
-      "sha256": "0ed81705de52ae7a5fa33816db8b3af0a6651562d9eb488c0f137815c47a94b4"
+      "sha256": "83892aca8c5689200c9d9b5e5a211a4862539e47cfa492e69035197dc42ea28f"
     },
     {
       "path": "pages.json",
@@ -601,13 +601,13 @@
     },
     {
       "path": "pages/my/auto-settings.vue",
-      "size": 60104,
-      "sha256": "912b2fe7eda0cd0e5b38592ed3af847e66e137f34f75a09eb71d00d158d83f24"
+      "size": 60445,
+      "sha256": "4a20dca260627e130696b60dc47ea2acdd87543dcff86b0758fd9f1d275c40da"
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 45354,
-      "sha256": "a0ecf6411ac8184e4e667b6f4a8c69693d6ccde921df1160469edfa50fb5371d"
+      "size": 46199,
+      "sha256": "415ba8a9f1b5027b74a8a95c7b2ba25378ba4dc6668ff10e1511d5f10877f796"
     },
     {
       "path": "pages/my/faq.vue",
@@ -651,8 +651,8 @@
     },
     {
       "path": "pages/packages/index.vue",
-      "size": 78236,
-      "sha256": "d8750a4d071cd73747db95ff36a05f459204b4e95e53416550b6da40428c7d44"
+      "size": 78097,
+      "sha256": "82ff24d3de5cac3a4fd92a843fff3a9bbb0b948d2a144063cc838e704fde3d73"
     },
     {
       "path": "scripts/ai-context.mjs",
@@ -746,8 +746,8 @@
     },
     {
       "path": "services/parcel-journey.js",
-      "size": 8119,
-      "sha256": "5fc651098659709fcd26f60b34d7bbc7c37f160c54d4fe23ef096df7e5dc3a9a"
+      "size": 8254,
+      "sha256": "9f8d3e81e83a50b5ec04eb841a6997ae14940bb78511d1337726d8cf7f485302"
     },
     {
       "path": "services/pickup-groups.js",
@@ -2609,7 +2609,7 @@
     {
       "path": "README.md",
       "size": 2055,
-      "sha256": "de4d9612719e54f5f213dca985928eb6b6b2b3138ea5ca433a61553ca10f1c4b"
+      "sha256": "59217cc31066216dd92e252f908d9b957a8669c1c716953c0ab0921faa915726"
     },
     {
       "path": ".gitignore",

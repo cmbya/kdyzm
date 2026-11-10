@@ -362,12 +362,12 @@ export default {
     shipmentCount(item) { return (item.shipments || []).filter(s => s && !s.hidden).length; },
     summaryShipment(item) {
       const all = (item.shipments || []).filter(s => s && !s.hidden);
-      const matching = all.filter(s => this.selectedProgress === 'all' ? ['pickup', 'transit'].includes(shipmentProgress(s)) : shipmentProgress(s) === this.selectedProgress);
+      const matching = all.filter(s => this.selectedProgress === 'all' ? ['pickup', 'transit', 'waiting'].includes(shipmentProgress(s, item)) : shipmentProgress(s, item) === this.selectedProgress);
       const shipments = matching.length ? matching : all;
       return shipments.find(s => !s.picked && this.displayPickupCode(s)) || shipments.find(s => !s.picked && s.needsReceiptConfirmation) || shipments.find(s => !s.picked) || shipments[0] || null;
     },
     summaryLogistics(item) { if (item.source === 'manual') return item.waybillNo ? '单号 ' + item.waybillNo : ''; const s = this.summaryShipment(item); if (!s) return ''; const event = (s.logisticsEvents || [])[0]; if (event?.message || event?.description) return event.message || event.description; if (item.status === 'transit' || ['transit', 'arrived', 'signed'].includes(s.status)) return [s.carrier, this.shipmentText(s)].filter(Boolean).join(' · '); return s.waybillNo ? '运单 ' + s.waybillNo : '物流待补全'; },
-    cardProgress(item) { if (item.collected) return 'done'; return this.summaryShipment(item) ? shipmentProgress(this.summaryShipment(item)) : ['pickup', 'transit', 'waiting', 'done'].find(key => packageProgressMatches(item, key)) || 'other'; },
+    cardProgress(item) { if (item.collected) return 'done'; return this.summaryShipment(item) ? shipmentProgress(this.summaryShipment(item), item) : ['pickup', 'transit', 'waiting', 'done'].find(key => packageProgressMatches(item, key)) || 'other'; },
     cardStatus(item) {
       if (this.isExpiredOrder(item)) return this.archiveReceiptText(item);
       if (item.hidden) return '已隐藏';
@@ -379,14 +379,14 @@ export default {
         if (s?.status === 'returning') return '退货 / 退回中';
         if (s?.needsReceiptConfirmation) return '已送达·待确认';
         if (s?.needsPickupAssignment || s?.pickupConflict) return '待确认归属';
-        if (s && shipmentProgress(s) === 'transit') return '运输中';
+        if (s && shipmentProgress(s, item) === 'transit') return '运输中';
         if (s && this.displayPickupCode(s)) return '待取件';
         if (s?.status === 'signed') return '物流已签收 · 未标记领取';
         if (s?.status === 'arrived' || s?.status === 'awaiting_code') return '已到站 · 暂无取件码';
       }
       return this.statusText(item);
     },
-    statusText(item) { if (this.isExpiredOrder(item)) return this.archiveReceiptText(item); if (item.hidden) return '已隐藏'; if (item.source === 'manual') return item.checked ? '旧手工签收' : item.waybillNo ? '仅记录 · 未查询物流' : '手动记录'; const summary = this.summaryShipment(item); if (summary?.status === 'returned') return '已退货 / 退回'; if (summary?.status === 'returning') return '退货 / 退回中'; if (summary?.needsReceiptConfirmation && !summary.picked) return '已送达·待确认'; if (item.collected || item.status === 'picked') return summary && this.isReceiptShipment(summary) ? '已收货' : '已取件'; if (item.status === 'pending') return '待取件'; if (item.status === 'awaiting_code') return '已到站 · 暂无取件码'; if (item.status === 'transit') return '运输中'; if (item.status === 'signed') return '物流已签收 · 未标记领取'; if (!(item.shipments || []).length) return this.isWaitingShipmentStatus(item) ? '待发货' : this.isTerminalStatus(item) ? item.orderStatus || item.tradeStatus || '交易已结束' : '暂无物流'; return '物流待更新'; },
+    statusText(item) { if (this.isExpiredOrder(item)) return this.archiveReceiptText(item); if (item.hidden) return '已隐藏'; if (item.source === 'manual') return item.checked ? '旧手工签收' : item.waybillNo ? '仅记录 · 未查询物流' : '手动记录'; const summary = this.summaryShipment(item); if (summary?.status === 'returned') return '已退货 / 退回'; if (summary?.status === 'returning') return '退货 / 退回中'; if (summary?.needsReceiptConfirmation && !summary.picked) return '已送达·待确认'; if (item.collected || item.status === 'picked') return summary && this.isReceiptShipment(summary) ? '已收货' : '已取件'; if (item.status === 'pending') return '待取件'; if (item.status === 'awaiting_code') return '已到站 · 暂无取件码'; if (item.status === 'transit') return '运输中'; if (item.status === 'signed') return '物流已签收 · 未标记领取'; if (packageProgressMatches(item, 'waiting')) return '待发货'; if (!(item.shipments || []).length) return this.isTerminalStatus(item) ? item.orderStatus || item.tradeStatus || '交易已结束' : '暂无物流'; return '物流待更新'; },
     completionState(shipment) {
       const value = shipment?.pickupCompletion;
       if (!value || value.version !== 1) return null;
@@ -442,7 +442,6 @@ export default {
     getWaybillCount(list) { return list.filter(item => item.source !== 'manual').reduce((total, item) => total + (item.shipments || []).filter(s => s && !s.hidden && String(s.waybillNo || '').trim()).length, 0); },
     getCheckedCount(list) { return summarizePackages(list, 'done').total; },
     hasDetails(item) { return item.source === 'online' || !!(item.shipments?.length || item.orderStatus || item.tradeStatus || item.refundStatus); },
-    isWaitingShipmentStatus(item) { return /WAIT_SELLER_SEND_GOODS|待发货|等待卖家发货|卖家待发货/i.test([item.tradeStatus, item.orderStatus].filter(Boolean).join(' ')); },
     isTerminalStatus(item) { const value = [item.tradeStatus, item.orderStatus].filter(Boolean).join(' '); return /TRADE_(?:CLOSED|FINISHED|SUCCESS)|(?:closed|close|failed|failure|completed|complete|finished|success)|交易(?:关闭|完成|成功)|已(?:关闭|完成|成功)|失败/i.test(value) && !/(?:待|未)完成/.test(value); },
     async action(action, payload) { try { this.applySnapshot(await mutate(action, payload)); } catch (e) { uni.showToast({ title: e.message || '操作失败', icon: 'none' }); } },
     toggleCheck(item) { if (this.isExpiredOrder(item)) return; this.action('savePackage', { order: { id: item.id, platform: item.platform, title: item.title, amount: item.amount, orderDate: item.orderDate, checked: !item.checked } }); },
