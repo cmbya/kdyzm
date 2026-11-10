@@ -937,7 +937,7 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
         orderStatus: asText(order.statusInfo?.orderStateName) };
       if (kind === 'skip') { skipped++; orderUpdates.push(metadata); }
       else orders.push({ ...metadata, title: (order.wareList || []).map(ware => asText(ware.name)).filter(Boolean).join(' / '),
-        imageUrl: productImage(order.wareList, ['imageUrl', 'imgUrl']) });
+        imageUrl: productImage(order.wareList, ['imgPath', 'imageUrl', 'imgUrl']) });
       // JD can assign a waybill and publish warehouse events before the order leaves the warehouse.
       if (kind !== 'skip' || isActiveKnownOrder(known)) candidates.add(platformOrderId);
     }

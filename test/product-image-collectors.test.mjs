@@ -5,7 +5,7 @@ import { createCollector } from '../src/collectors.mjs';
 const NOW = Date.parse('2026-11-10T10:00:00+08:00');
 const response = value => new Response(JSON.stringify(value));
 const sources = {
-  jd: { host: 'img10.360buyimg.com', fields: ['imageUrl', 'imgUrl'], cookie: 'thor=SYNTHETIC',
+  jd: { host: 'img10.360buyimg.com', fields: ['imgPath', 'imageUrl', 'imgUrl'], cookie: 'thor=SYNTHETIC',
     order: (id, items, done) => ({ orderId: id, dateSubmit: NOW, wareList: items.map(item => ({ name: item.title, ...item })),
       statusInfo: { orderStateName: done ? '已完成' : '待发货' } }) },
   pdd: { host: 'img.pddpic.com', fields: ['thumb_url', 'thumbUrl'], cookie: 'pdd_user_id=SYNTHETIC',
@@ -39,6 +39,29 @@ async function collect(platform, orders) {
   assert.ok(calls.length > 0);
   return result;
 }
+
+test('jd prefers its goods imgPath while retaining the older image fields as fallbacks', async () => {
+  const image = 'https://img10.360buyimg.com/n0/s500x500_jfs/t1/SYNTHETIC.png';
+  const result = await collect('jd', [sources.jd.order('one', [{ title: 'Synthetic item', imgPath: image.slice(6),
+    imageUrl: 'https://img10.360buyimg.com/older.jpg', imgUrl: 'https://img10.360buyimg.com/oldest.jpg' }])]);
+  assert.equal(result.orders[0].imageUrl, image);
+  for (const field of ['imageUrl', 'imgUrl']) {
+    const fallback = await collect('jd', [sources.jd.order('one', [{ title: 'Synthetic item', imgPath: 'https://untrusted.example/item.jpg', [field]: image }])]);
+    assert.equal(fallback.orders[0].imageUrl, image);
+  }
+});
+
+test('jd does not invent images from imgPathPostfix or borrow another order image after an invalid imgPath', async () => {
+  const image = 'https://img10.360buyimg.com/n0/s500x500_jfs/t1/SYNTHETIC.png';
+  const result = await collect('jd', [
+    sources.jd.order('invalid', [{ title: 'Synthetic invalid', imgPath: 'https://untrusted.example/item.jpg', imgPathPostfix: 'jfs/t1/SYNTHETIC.png' }]),
+    sources.jd.order('postfix-only', [{ title: 'Synthetic postfix', imgPathPostfix: image }]),
+    sources.jd.order('other', [{ title: 'Synthetic other', imgPath: image }]),
+  ]);
+  assert.equal(result.orders.find(order => order.platformOrderId === 'invalid').imageUrl, '');
+  assert.equal(result.orders.find(order => order.platformOrderId === 'postfix-only').imageUrl, '');
+  assert.equal(result.orders.find(order => order.platformOrderId === 'other').imageUrl, image);
+});
 
 for (const [platform, source] of Object.entries(sources)) {
   test(`${platform} selects the first valid image from its own goods while retaining the aggregate title`, async () => {

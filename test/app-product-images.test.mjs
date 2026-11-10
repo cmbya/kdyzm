@@ -1,16 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createCollector } from '../src/collectors.mjs';
+import { Store } from '../src/store.mjs';
 import '../app-source/pickcode/core/load-core.mjs';
 
 const account = { id: 'images', platform: '淘宝', label: '商品图测试' };
-function fixture() {
+function fixture(accountInfo = account) {
   let state = '';
   const dispatch = (action = 'snapshot', payload = {}) => {
     const result = JSON.parse(globalThis.PickCodeCore.dispatch(state, JSON.stringify({ action, payload })));
     state = JSON.stringify(result.state);
     return result.result;
   };
-  dispatch('syncMeta', { bound: true, baseUrl: 'https://fixture.example', deviceId: 'device', accounts: [account] });
+  dispatch('syncMeta', { bound: true, baseUrl: 'https://fixture.example', deviceId: 'device', accounts: [accountInfo] });
   return dispatch;
 }
 function sync(dispatch, orders, revision, importVersion = 326) {
@@ -53,4 +55,39 @@ test('upgraded importer fills images even when the server revision has not chang
   const s = sync(c, [{ id: 'a', imageUrl: 'https://img.alicdn.com/a.jpg' }], 1, 326);
   assert.equal(s.packages[0].imageUrl, 'https://img.alicdn.com/a.jpg');
   assert.equal(s.online.importVersion, 326);
+});
+
+test('JD full collection carries imgPath through storage and core, filling an existing unreceived order image', async () => {
+  const now = Date.parse('2026-11-11T10:00:00+08:00');
+  const jdAccount = { id: 'images', platform: 'jd', label: 'SYNTHETIC' };
+  const image = id => `https://img10.360buyimg.com/n0/s500x500_jfs/t1/${id}.png`;
+  const store = new Store({ filename: ':memory:', key: Buffer.alloc(32, 7), now: () => now });
+  try {
+    store.saveAccount({ platform: jdAccount.platform, label: jdAccount.label, cookie: 'SYNTHETIC' }, jdAccount.id, true);
+    store.importResult(jdAccount.id, { orders: [{ platformOrderId: 'existing', title: 'Synthetic existing', orderStatus: '待发货', orderDate: now }], shipments: [] });
+    const dispatch = fixture(jdAccount);
+    const before = store.snapshot([jdAccount.id]);
+    const first = dispatch('syncImport', { importVersion: 326, syncedAt: now, snapshot: before });
+    assert.equal(first.packages.length, 1);
+    assert.equal(first.packages[0].imageUrl, '');
+    const result = await createCollector({ now: () => now, maxPages: 1, fetchImpl: async url => {
+      const target = new URL(url);
+      assert.equal(target.hostname, 'api.m.jd.com');
+      if (target.searchParams.get('functionId') === 'pcdetail_traceMultiPackage') return new Response(JSON.stringify({ multiPackageTrackInfoList: [] }));
+      assert.equal(target.searchParams.get('functionId'), 'pcorder_center_list');
+      return new Response(JSON.stringify({ success: true, data: { totalNum: 2, orderList: ['existing', 'new'].map(id => ({
+        orderId: id, dateSubmit: now, statusInfo: { orderStateName: '待发货' },
+        wareList: [{ name: `Synthetic ${id}`, imgPath: image(id).slice(6), imgPathPostfix: `jfs/t1/${id}.png` }],
+      })) } }));
+    } })(jdAccount, 'thor=SYNTHETIC', { knownOrders: before.orders });
+    store.importResult(jdAccount.id, result);
+    const snapshot = store.snapshot([jdAccount.id]);
+    const refreshed = dispatch('syncImport', { importVersion: 326, syncedAt: now, snapshot });
+    for (const orders of [result.orders, snapshot.orders, refreshed.packages]) {
+      assert.deepEqual(Object.fromEntries(orders.map(order => [order.platformOrderId, order.imageUrl])), {
+        existing: image('existing'), new: image('new'),
+      });
+    }
+    assert.equal(refreshed.packages.find(order => order.platformOrderId === 'existing').id, first.packages[0].id);
+  } finally { store.close(); }
 });
