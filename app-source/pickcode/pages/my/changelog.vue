@@ -2,6 +2,14 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.45 · 私人版</text><text class="version-date">2026-11-10</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag optimize">采集</text><text class="content">配套后台每个平台15分钟自动采集，京东、拼多多、淘宝错开约5分钟</text></view>
+          <view class="update-item"><text class="tag optimize">刷新</text><text class="content">打开先读取已有数据，整账号采集超过30分钟才自动补采集，手动刷新仍可主动获取</text></view>
+          <view class="update-item"><text class="tag fix">同步</text><text class="content">合并重复请求，保留采集冷却和重试，兼容旧后台与已有缓存</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.44 · 私人版</text><text class="version-date">2026-11-10</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag fix">淘宝</text><text class="content">修复明确已取却未更新状态的问题，完善多包裹物流读取和时间识别</text></view>

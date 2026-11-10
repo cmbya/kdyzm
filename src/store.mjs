@@ -9,6 +9,7 @@ import { PickupCompletionStore } from './pickup-completion-store.mjs';
 import { effectivePicked, pickupCompletionState } from './pickup-completion.mjs';
 import { normalizeRetentionFields, orderRetention, retainedSignedShipment, validRetentionDate } from './order-retention.mjs';
 import { cookieIdentity } from './cookie-sync.mjs';
+import { COLLECTION_COOLDOWN, scheduledSyncAt } from './collection-schedule.mjs';
 import { retainMilestoneEvents, shippingEvidence } from './shipment-lifecycle.mjs';
 
 export const stableId = (...values) => hash(JSON.stringify(values)).slice(0, 32);
@@ -160,6 +161,10 @@ export class Store {
         }
       }
       this.migrateIdentityState();
+      for (const account of this.accounts()) if (account.collectionScheduleVersion !== 1) {
+        this.updateAccount(account.id, { collectionScheduleVersion: 1, intervalMinutes: 15, lastFullSuccessAt: 0,
+          nextSyncAt: scheduledSyncAt(account.platform, Math.max(this.now(), (account.lastAttemptAt || 0) + COLLECTION_COOLDOWN)) });
+      }
     });
     new PickupCompletionStore({ store: this, now });
   }
@@ -399,8 +404,8 @@ export class Store {
     if (familyId && !this.family(familyId)) fail(400, 'INVALID_FAMILY', '请选择有效家人，待归属请留空');
     const platform = body.platform ?? old?.platform;
     if (!['taobao', 'pdd', 'jd'].includes(platform) || (old && platform !== old.platform)) fail(400, 'INVALID_PLATFORM', '平台必须是淘宝、拼多多或京东，创建后不可改变');
-    const intervalMinutes = body.intervalMinutes ?? old?.intervalMinutes ?? 60;
-    if (![30, 60].includes(intervalMinutes)) fail(400, 'INVALID_INTERVAL', '同步间隔仅支持30或60分钟');
+    const intervalMinutes = body.intervalMinutes ?? old?.intervalMinutes ?? 15;
+    if (![15, 30, 60].includes(intervalMinutes)) fail(400, 'INVALID_INTERVAL', '同步间隔仅支持15、30或60分钟');
     if (body.enabled !== undefined && typeof body.enabled !== 'boolean') fail(400, 'INVALID_INPUT', 'enabled 必须是布尔值');
     const label = text(body.label ?? old?.label, '账号名称', 80);
     let credential = this.db.prepare('SELECT credential FROM accounts WHERE id=?').get(id)?.credential;
@@ -414,8 +419,10 @@ export class Store {
     const data = { id, platform, label, familyId, familyName: this.family(familyId)?.name || '',
       familyAssigned: !!(familyId || old?.familyAssigned || old?.familyId), enabled: body.enabled ?? old?.enabled ?? true, intervalMinutes,
       status: body.cookie !== undefined || !old ? 'configured' : old.status, lastSuccessAt: old?.lastSuccessAt || 0,
+      collectionScheduleVersion: 1, lastFullSuccessAt: old?.lastFullSuccessAt || 0,
       lastAttemptAt: body.cookie !== undefined && !preserveSyncSchedule ? 0 : old?.lastAttemptAt || 0,
-      nextSyncAt: !old || (body.cookie !== undefined && !preserveSyncSchedule) ? this.now() + intervalMinutes * 60000 : old.nextSyncAt,
+      nextSyncAt: !old || (body.cookie !== undefined && !preserveSyncSchedule) || intervalMinutes !== old.intervalMinutes
+        ? scheduledSyncAt(platform, this.now(), intervalMinutes) : old.nextSyncAt,
       error: body.cookie !== undefined ? '' : old?.error || '', revision: this.revision(), fixture,
       // Ownership changes also invalidate results collected under the previous scope.
       credentialVersion: (old?.credentialVersion || 0) + (body.cookie !== undefined || !old || familyId !== old.familyId ? 1 : 0),

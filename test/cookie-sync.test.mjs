@@ -339,7 +339,10 @@ test('credential replacement preserves schedule in the same database write and t
   const manual = await s.request(`/v1/admin/accounts/${a.id}`, { method: 'PATCH', admin: true, body: { cookie: COOKIES.taobao } });
   assert.equal(manual.status, 200);
   assert.equal(manual.data.account.lastAttemptAt, 0);
-  assert.equal(manual.data.account.nextSyncAt, TIME + 60 * 60000);
+  assert.equal(manual.data.account.intervalMinutes, 15);
+  const nextSyncAt = manual.data.account.nextSyncAt;
+  assert.ok(nextSyncAt > TIME && nextSyncAt <= TIME + 15 * 60000);
+  assert.equal(nextSyncAt % (15 * 60000), 10 * 60000, '淘宝对齐每轮第10分钟');
 });
 
 for (const action of ['revocation', 'family transfer', 'shutdown']) test(`deferred collection is canceled by ${action}`, async t => {

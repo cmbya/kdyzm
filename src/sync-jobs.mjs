@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { fail } from './security.mjs';
 import { activeKnownOrders } from './collector-enrichment.mjs';
+import { COLLECTION_COOLDOWN, isCollectionStale, scheduledPlatform, scheduledSyncAt } from './collection-schedule.mjs';
 import { createLogisticsQueue } from './sync-logistics.mjs';
 import { stableId } from './store.mjs';
 
-const INTERVAL = 5 * 60000;
+const INTERVAL = COLLECTION_COOLDOWN;
 const active = job => ['queued', 'running'].includes(job.state);
 const safeError = error => ({ ACCOUNT_EXPIRED: '平台登录态已失效，请在后台更新登录信息',
   UPSTREAM_RATE_LIMITED: '平台暂时限流，已保存进度并等待重试',
@@ -113,7 +114,8 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
     Object.assign(record.job, { state: 'running', retryAt: 0, startedAt: now(), error: '',
       familyId: (record.job.orderId ? store.order(record.job.orderId) : account)?.familyId || '' });
     persist(record);
-    store.updateAccount(accountId, { status: 'syncing', lastAttemptAt: now(), nextSyncAt: now() + account.intervalMinutes * 60000, error: '' });
+    store.updateAccount(accountId, { status: 'syncing', lastAttemptAt: now(),
+      nextSyncAt: scheduledSyncAt(account.platform, now() + INTERVAL - 1, account.intervalMinutes), error: '' });
     const task = Promise.resolve().then(async () => {
       let continuing = false;
       try {
@@ -162,6 +164,7 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
         valid();
         if (result.refreshedCookie) store.refreshCookie(accountId, result.refreshedCookie);
         importDelta(result, false);
+        if (!record.job.orderId) store.updateAccount(accountId, { lastFullSuccessAt: now() });
         try { onCompleted(accountId); } catch { /* Cached classification is refreshed on the next sync. */ }
         record.job.state = 'completed';
         if (record.job.orderId) orderOutcome(record.job, result); else fullResult(record.job, result);
@@ -193,11 +196,12 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
     });
     running.set(accountId, task);
   }
-  function request(accountId, orderId = '') {
+  function request(accountId, orderId = '', { onlyIfStale = false } = {}) {
     if (closed) fail(503, 'SERVICE_STOPPING', '服务正在重启，请稍后重试');
     const account = store.account(accountId);
     if (!account) fail(404, 'NOT_FOUND', '账号不存在');
     if (orderId && store.order(orderId)?.accountId !== accountId) fail(403, 'SCOPE_FORBIDDEN', '订单不在授权范围内');
+    if (onlyIfStale && (!isCollectionStale(account, now()) || running.has(accountId) || queues.get(accountId)?.length)) return null;
     const key = `${accountId}:${orderId}`, existing = scopes.get(key);
     if (existing && existing.accountVersion === account.credentialVersion && (active(existing.job) || (account.enabled && existing.job.state === 'cooldown' && existing.job.retryAt > now()))) {
       if (existing.job.state === 'queued') pump(accountId);
@@ -271,6 +275,15 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
   // Delay recovery until the service has finished constructing its import callbacks.
   queueMicrotask(() => { for (const id of queues.keys()) pump(id); });
   return { running, request, pump,
+    runDue() {
+      if (closed) return [];
+      const time = now(), platform = scheduledPlatform(time), accounts = store.accounts();
+      // A late timer or restart must not bunch adjacent platforms together.
+      if (accounts.some(account => account.platform !== platform && account.lastAttemptAt && time - account.lastAttemptAt < INTERVAL)) return [];
+      return accounts.filter(account => account.enabled && account.status !== 'expired' && account.platform === platform
+        && account.nextSyncAt <= time && !running.has(account.id) && !queues.get(account.id)?.length)
+        .map(account => request(account.id));
+    },
     latest(accountId) {
       return saved(accountId, '');
     },

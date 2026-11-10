@@ -4,6 +4,7 @@ import packageInfo from '../package.json' with { type: 'json' };
 
 const core = globalThis.PickCodeCore;
 const storageKey = 'pickcode.private.state.v1';
+const ONLINE_IMPORT_VERSION = 325;
 let initialization;
 let initialized = false;
 let snapshotInFlight;
@@ -191,10 +192,11 @@ async function previewOnline(action, payload) {
     if (!previewSession?.token) throw new Error('请先绑定线上服务');
     try {
       const readSnapshot = async () => {
-        const result = await previewFetch('/v1/snapshot', { headers: previewSession.etag && !payload.force && action !== 'refreshOrder' && !localDispatch('snapshot').online.needsPickupSync ? { 'If-None-Match': previewSession.etag } : {} });
+        const cachedOnline = localDispatch('snapshot').online;
+        const result = await previewFetch('/v1/snapshot', { headers: previewSession.etag && !payload.force && action !== 'refreshOrder' && cachedOnline.importVersion >= ONLINE_IMPORT_VERSION && !cachedOnline.needsPickupSync ? { 'If-None-Match': previewSession.etag } : {} });
         if (!result.unchanged) {
           if (result.data.serverRevision < localDispatch('snapshot').online.serverRevision) throw new Error('后台返回旧版本数据，已保留本地记录，请稍后重试');
-          localDispatch('syncImport', { snapshot: result.data, syncedAt: Date.now(), importVersion: 324 });
+          localDispatch('syncImport', { snapshot: result.data, syncedAt: Date.now(), importVersion: ONLINE_IMPORT_VERSION });
           previewSession.jobAccounts = new Set((result.data.accounts || []).map(account => account.id));
           previewSession.jobOrders = new Set((result.data.orders || []).map(order => order.id));
           previewSession.snapshotJobIds = new Set((result.data.syncJobs || []).map(job => job.id));
@@ -211,16 +213,23 @@ async function previewOnline(action, payload) {
       }
       const jobAllowed = job => job.orderId ? previewSession.jobOrders?.has(job.orderId) : previewSession.jobAccounts?.has(job.accountId);
       const online = localDispatch('snapshot').online;
+      const now = Date.now();
+      const conditional = !payload.force && action !== 'refreshOrder' && online.capabilities?.includes('conditionalSync')
+        && (online.accounts || []).some(account => account.id && account.enabled !== false && account.status !== 'expired'
+          && !(online.jobs || []).some(job => jobAllowed(job) && job.accountId === account.id && ['queued', 'running'].includes(job.state))
+          && (!Number.isSafeInteger(account.lastFullSuccessAt) || account.lastFullSuccessAt <= 0 || account.lastFullSuccessAt > now
+            || now - account.lastFullSuccessAt > 30 * 60000));
       let needsSnapshot = false;
-      if (payload.force || action === 'refreshOrder') {
+      if (payload.force || action === 'refreshOrder' || conditional) {
         if (!online.capabilities?.includes('syncJobs') || (action === 'refreshOrder' && !online.capabilities?.includes('orderRefresh'))) throw new Error('请先将后台升级到3.1.5或以上版本，再重新获取订单');
         const path = action === 'refreshOrder' ? '/v1/orders/' + encodeURIComponent(localDispatch('onlineOrderTarget', { id: payload.id }).orderId) + '/refresh' : '/v1/accounts/sync';
-        const { data } = await previewFetch(path, { method: 'POST', body: '{}' });
+        const { data } = await previewFetch(path, { method: 'POST', body: conditional ? JSON.stringify({ onlyIfStale: true }) : '{}' });
         if (!Array.isArray(data.jobs)) throw new Error('后台未返回采集任务，请升级后台后重试');
         const retained = (online.jobs || []).filter(job => jobAllowed(job) && !data.jobs.some(next => next.id === job.id) && (['queued','running'].includes(job.state) || !data.jobs.some(next => next.accountId === job.accountId && (!next.orderId || next.orderId === job.orderId))));
         localDispatch('syncMeta', { jobs: retained.concat(data.jobs) });
-        needsSnapshot = true;
-      } else {
+        needsSnapshot = !conditional || data.jobs.length > 0;
+      }
+      if (!needsSnapshot) {
         const jobs = await Promise.all((online.jobs || []).filter(jobAllowed).map(async job => {
           if (!['queued','running'].includes(job.state) || previewSession.snapshotJobIds?.has(job.id)) return job;
           needsSnapshot = true;

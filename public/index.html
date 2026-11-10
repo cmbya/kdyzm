@@ -131,8 +131,8 @@
           <input id="account-id" type="hidden">
           <label>所属家人<select id="account-family"></select></label><div class="row"><label>平台<select id="platform"><option value="taobao">淘宝</option><option value="pdd">拼多多</option><option value="jd">京东</option><option disabled>抖音商城 · 待接入</option></select></label><label>账号名称<input id="label" required maxlength="80" placeholder="例如：日常购物"></label></div>
           <label>平台 Cookie<textarea id="cookie" rows="3" maxlength="16384" autocomplete="off" spellcheck="false" placeholder="仅在此后台粘贴；设备不会收到 Cookie"></textarea></label>
-          <div class="row"><label>采集间隔<select id="interval"><option value="60">60 分钟</option><option value="30">30 分钟</option></select></label><label class="checkbox"><input id="enabled" type="checkbox" checked>启用自动同步</label></div>
-          <p class="hint">更新已有账号时，留空保留原 Cookie。保存不会立刻访问平台，可点击账号的“立即采集”。</p>
+          <div class="row"><label>采集间隔<select id="interval"><option value="15">15 分钟</option><option value="30">30 分钟</option><option value="60">60 分钟</option></select></label><label class="checkbox"><input id="enabled" type="checkbox" checked>启用自动同步</label></div>
+          <p class="hint">三个平台自动错开约 5 分钟采集。更新已有账号时，留空保留原 Cookie。保存不会立刻访问平台，可点击账号的“立即采集”。</p>
           <div class="actions"><button>保存账号</button><button id="account-collect" type="button" class="secondary" hidden>立即采集</button><button id="cancel-edit" type="button" class="secondary">取消编辑</button></div>
         </form>
         <section id="cookie-sync-panel" hidden aria-labelledby="cookie-sync-title">

@@ -96,7 +96,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
   const requestSync = id => jobs.request(id).done;
   const cookieSync = createCookieSyncHandler({ store, jobs, configuration, now, rate, fixture, bodyOf, send, admin });
   const timer = scheduler ? setInterval(() => {
-    for (const account of store.accounts()) if (account.enabled && account.nextSyncAt <= now()) void requestSync(account.id);
+    jobs.runDue();
     stationAi.runDue();
     logisticsAi.runDue();
     logisticsDaily.runDue();
@@ -386,9 +386,11 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
       if (path === '/v1/devices/current' && req.method === 'DELETE') { send(res, 200, store.revoke(current.id)); return; }
       if (path === '/v1/accounts' && req.method === 'GET') { send(res, 200, { accounts: store.accounts(current.accountIds), familyIds: current.familyIds, legacyAccountIds: current.legacyAccountIds, families: store.families(current.familyIds) }); return; }
       if (path === '/v1/accounts/sync' && req.method === 'POST') {
-        onlyKeys(await bodyOf(req), []);
+        const body = await bodyOf(req); onlyKeys(body, ['onlyIfStale']);
+        if (body.onlyIfStale !== undefined && typeof body.onlyIfStale !== 'boolean') fail(400, 'INVALID_INPUT', 'onlyIfStale 必须是布尔值');
         store.refreshStationRecognition(stations.stationRules().stations);
-        send(res, 202, { accepted: true, jobs: device(req).accountIds.map(id => jobs.request(id).job) }); return;
+        send(res, 202, { accepted: true, jobs: device(req).accountIds.map(id => jobs.request(id, '', { onlyIfStale: body.onlyIfStale === true }))
+          .filter(Boolean).map(record => record.job) }); return;
       }
       const syncPath = path.match(/^\/v1\/accounts\/([^/]+)\/sync$/);
       if (syncPath && req.method === 'POST') {

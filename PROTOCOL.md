@@ -27,7 +27,7 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 | DELETE /v1/devices/current | 设备；撤销自己 |
 | GET /v1/accounts | 设备；只返回获授权账号 |
 | GET /v1/connection | 设备；`{schemaVersion:1,serviceId,lanBaseUrl}`，只应经已绑定可信地址获取 |
-| POST /v1/accounts/sync | 设备；请求获授权账号采集，不是同步完成回执 |
+| POST /v1/accounts/sync | 设备；请求获授权账号采集，可选布尔 `onlyIfStale`，不是同步完成回执 |
 | GET /v1/snapshot | 设备；完整快照，支持ETag/If-None-Match/304 |
 | POST /v1/operations | 设备；批量幂等人工操作 |
 
@@ -82,6 +82,16 @@ App 3.1.0使用以下兼容JSON接口。HTTPS origin不得带路径或凭证。�
 账号status为expired表示后台更新Cookie，设备仍有效；设备401表示重新绑定。错误JSON形如`{error:{code,message}}`。分页缺失、网络失败和上游过期时保留历史，真实结果以账号状态与lastSuccessAt为准。
 
 ## 局域网连接与采集摘要（兼容 v1）
+
+### 定时与条件采集
+
+后台每30秒检查到期账号，独立于手机运行。`intervalMinutes` 支持15/30/60，默认15；京东、拼多多、淘宝分别使用每15分钟周期内第0、5、10分钟开始的窗口。自动采集距离其他平台最近一次开始至少5分钟，服务重启或定时器延迟时不同时补跑三个平台。手动、条件补采集和续跑仍走原任务队列与5分钟账号冷却，不受平台窗口限制。
+
+旧账号缺少 `collectionScheduleVersion:1` 时，首次启动在迁移事务内将间隔改为15、`lastFullSuccessAt` 置0、下一次采集对齐平台时段；账号启停、凭据、权限和订单不变。迁移后手工选择30/60分钟在重启时保留。新增账号和修改采集间隔同样对齐时段。
+
+快照能力 `conditionalSync` 表示支持 `POST /v1/accounts/sync` 的可选 `{onlyIfStale:true}`。服务端仅对当前设备获授权、启用、非expired、无排队/运行任务且整账号采集已过期的账号创建任务。过期为当前时间与 `lastFullSuccessAt` 严格相差超过30分钟；时间缺失、非正安全整数或在未来也视为过期。返回 `{accepted:true,jobs:[]}` 是无需补采集的成功结果。字段不是布尔值返回400；省略或false保留原手动采集行为。
+
+公开账号包含 `enabled,lastFullSuccessAt`。`lastFullSuccessAt` 只在整账号采集任务成功完成后更新，单订单刷新、增量进度和失败不推进；它表示整轮完成，并不保证每个上游字段都有数据，局部警告仍看任务摘要。客户端打开或被动同步先读快照（保留ETag/304），再按此时间决定是否条件采集；设备本地 `online.lastSuccessAt` 与账号 `lastSuccessAt` 均不能替代。旧客户端忽略新增字段；新客户端面对未声明该能力的旧后台仍被动只读。
 
 `lanBaseUrl`默认为空，只接受无路径、查询、片段或凭据的HTTPS origin；后台不猜测容器宿主机地址。管理员在服务设置中配置一次，旧App忽略新字段且旧设置请求不会清除它。环境变量模式使用可选`LAN_BASE_URL`，仍只读；管理模式通过设置保存。实际入口须提供匹配地址且由手机系统信任的有效证书。
 

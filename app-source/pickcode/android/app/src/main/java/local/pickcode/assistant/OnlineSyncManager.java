@@ -20,7 +20,7 @@ import java.util.concurrent.FutureTask;
 
 /** Serializes device sessions, not the SQLite store; every network request occurs outside store transactions. */
 public final class OnlineSyncManager {
-    static final int IMPORT_VERSION = 324;
+    static final int IMPORT_VERSION = 325;
     private static final int MAX_JOBS = 100;
     private static final ExecutorService STATION_UPLOADS = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "pickcode-station-fragments");
@@ -348,8 +348,9 @@ public final class OnlineSyncManager {
             }
             JSONObject online = store.snapshot().optJSONObject("online");
             JSONArray jobs = authorizedJobs(safeJobs(online == null ? null : online.optJSONArray("jobs")), latest == null ? online : latest);
+            boolean conditional = !start && needsConditionalSync(online, jobs, System.currentTimeMillis());
             boolean poll = !start && needsJobPolling(jobs, snapshotJobIds);
-            if (start) {
+            if (start || conditional) {
                 if (!hasCapability(online, "syncJobs") || (localOrderId != null && !hasCapability(online, "orderRefresh")))
                     throw new OnlineClient.Failure("feature_unavailable", "请先将后台升级到 3.1.5 或更高版本，再主动刷新；已有数据仍可同步");
                 String path = "/v1/accounts/sync";
@@ -361,12 +362,14 @@ public final class OnlineSyncManager {
                     if (!orderId.matches("[0-9a-f]{32}")) throw new OnlineClient.Failure("order_unavailable", "此订单无法刷新，请重新同步后选择订单");
                     path = "/v1/orders/" + orderId + "/refresh";
                 }
-                JSONObject result = client.request("POST", path, new JSONObject(), null).body;
+                JSONObject result = client.request("POST", path, conditional ? new JSONObject().put("onlyIfStale", true) : new JSONObject(), null).body;
                 if (!Boolean.TRUE.equals(result.opt("accepted")) || result.optJSONArray("jobs") == null) throw invalidResponse();
                 JSONArray started = safeJobs(result.getJSONArray("jobs"));
-                if (started.length() == 0) throw new OnlineClient.Failure("no_accounts", "没有可刷新的线上账号，请检查后台账号与设备授权");
+                if (started.length() == 0 && !conditional) throw new OnlineClient.Failure("no_accounts", "没有可刷新的线上账号，请检查后台账号与设备授权");
                 jobs = authorizedJobs(mergeStartedJobs(jobs, started), latest == null ? online : latest);
-            } else if (poll) {
+                start = start || started.length() > 0;
+            }
+            if (!start && poll) {
                 // One status request per pending task; collection itself is never waited on in this thread.
                 jobs = pollJobs(client, jobs, snapshotJobIds);
             }
@@ -387,6 +390,26 @@ public final class OnlineSyncManager {
             scheduleMatchingFeedback();
             return snapshot;
         } catch (Exception failure) { return recordFailure(failure); }
+    }
+    static boolean needsConditionalSync(JSONObject online, JSONArray jobs, long now) throws Exception {
+        if (!hasCapability(online, "conditionalSync")) return false;
+        JSONArray accounts = online.optJSONArray("accounts");
+        if (accounts == null) return false;
+        for (int i = 0; i < accounts.length(); i++) {
+            JSONObject account = accounts.getJSONObject(i);
+            String id = account.optString("id");
+            if (id.isEmpty() || Boolean.FALSE.equals(account.opt("enabled")) || "expired".equals(account.optString("status"))) continue;
+            boolean pending = false;
+            for (int j = 0; j < jobs.length(); j++) {
+                JSONObject job = jobs.getJSONObject(j);
+                if (id.equals(job.optString("accountId")) && pendingJob(job)) { pending = true; break; }
+            }
+            Object value = account.opt("lastFullSuccessAt");
+            double completedAt = value instanceof Number ? ((Number) value).doubleValue() : 0;
+            if (!pending && (Double.isNaN(completedAt) || Double.isInfinite(completedAt) || completedAt <= 0 || completedAt != Math.floor(completedAt)
+                    || completedAt > now || now - completedAt > 30 * 60_000L)) return true;
+        }
+        return false;
     }
     private JSONObject pullSnapshot(OnlineClient client, boolean full) throws Exception {
         if (store.snapshot().getJSONObject("online").optBoolean("needsPickupSync")) full = true;
@@ -873,7 +896,12 @@ public final class OnlineSyncManager {
                 value.put(key, safeText(account, key, 200));
             }
             String status = account.optString("status");
+            value.put("enabled", !Boolean.FALSE.equals(account.opt("enabled")));
             value.put("lastSuccessAt", Math.max(0, account.optLong("lastSuccessAt")));
+            Object fullSuccess = account.opt("lastFullSuccessAt");
+            double completedAt = fullSuccess instanceof Number ? ((Number) fullSuccess).doubleValue() : 0;
+            value.put("lastFullSuccessAt", !Double.isNaN(completedAt) && !Double.isInfinite(completedAt) && completedAt > 0 && completedAt <= 9007199254740991D
+                    && completedAt == Math.floor(completedAt) ? ((Number) fullSuccess).longValue() : 0);
             value.put("lastAttemptAt", Math.max(0, account.optLong("lastAttemptAt")));
             value.put("warnings", safeWarnings(account.optJSONArray("warnings")));
             value.put("error", "expired".equals(status) ? "后台账号登录已失效，请在后台更新登录信息"
