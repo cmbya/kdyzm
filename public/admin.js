@@ -492,10 +492,23 @@ function edit(account) {
   $('account-id').value = account.id; $('label').value = account.label; $('platform').value = account.platform;
   $('platform').disabled = true; $('cookie').value = ''; $('interval').value = account.intervalMinutes; $('enabled').checked = account.enabled;
   $('account-heading').textContent = '账号详情与设置';
+  $('account-delete-section').hidden = false; $('account-delete-error').textContent = '';
   $('account-collect').hidden = false; $('account-collect').onclick = () => run(() => requestSync(account.id), $('account-collect'));
   $('account-dialog').showModal(); openCookieSync(account);
 }
-function resetForm() { clearCookieSync(); $('account-form').reset(); $('account-id').value = ''; $('platform').disabled = false; $('account-heading').textContent = '添加平台账号'; }
+function resetForm() { clearCookieSync(); $('account-form').reset(); $('account-id').value = ''; $('platform').disabled = false; $('account-heading').textContent = '添加平台账号'; $('account-delete-section').hidden = true; $('account-delete-error').textContent = ''; }
+async function deleteAccount() {
+  const id = $('account-id').value, account = accounts.find(value => value.id === id);
+  if (!account || !confirm(`确认删除“${account.label}”账号？\n\n登录 Cookie 将清除，自动采集和此账号的插件同步授权将停止。已有订单和取件记录保留。再次使用需重新添加账号。`)) return;
+  $('account-delete-error').textContent = '';
+  try {
+    await api(`/v1/admin/accounts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch (error) { $('account-delete-error').textContent = error.message; throw error; }
+  accounts = accounts.filter(value => value.id !== id);
+  syncSubmitting.delete(id); resetForm(); $('account-dialog').close();
+  renderAccounts(); renderFamilies();
+  await refreshAfterChange(); notice('账号已删除，登录信息已清除；历史订单和取件记录已保留。');
+}
 const familyName = id => families.find(f => f.id === id)?.name || '待归属';
 const needsAttention = account => ['expired', 'error'].includes(account.status) || !!account.error;
 function renderFamilies() {
@@ -678,6 +691,7 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && token) run(() => refresh(false));
 });
 $('cancel-edit').addEventListener('click', () => { resetForm(); $('account-dialog').close(); });
+$('account-delete').addEventListener('click', () => run(deleteAccount, $('account-form')));
 $('cookie-sync-generate').addEventListener('click', event => run(generateCookiePairing, event.currentTarget));
 $('cookie-sync-copy').addEventListener('click', event => run(async () => {
   if (!cookieSyncPairing) return;

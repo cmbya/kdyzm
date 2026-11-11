@@ -386,6 +386,11 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
         const accountPath = path.match(/^\/v1\/admin\/accounts\/([^/]+)(\/sync)?$/);
         if (accountPath) {
           if (!store.account(accountPath[1])) fail(404, 'NOT_FOUND', '账号不存在');
+          if (!accountPath[2] && req.method === 'DELETE') {
+            const result = store.deleteAccount(accountPath[1]);
+            jobs.cancelAccount(accountPath[1]);
+            send(res, 200, result); return;
+          }
           if (!accountPath[2] && req.method === 'PATCH') {
             const body = await bodyOf(req);
             configuration.authenticate(req.headers['x-admin-token']);

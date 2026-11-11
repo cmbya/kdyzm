@@ -94,6 +94,15 @@ export function createCookieSyncHandler({ store, jobs, configuration, now, rate,
       UPDATE cookie_sync_connections SET revoked_at=COALESCE(revoked_at,NEW.revoked_at),
         confirmation_hash='',confirmation_digest='',confirmation_expires_at=0 WHERE family_connection_id=NEW.id;
     END;`);
+  db.exec(`CREATE TRIGGER IF NOT EXISTS cookie_sync_account_delete AFTER UPDATE OF data ON accounts
+    WHEN json_extract(OLD.data,'$.deletedAt') IS NULL AND json_extract(NEW.data,'$.deletedAt') IS NOT NULL
+    BEGIN
+      DELETE FROM cookie_sync_pairing WHERE account_id=NEW.id;
+      UPDATE cookie_sync_connections SET revoked_at=COALESCE(revoked_at,json_extract(NEW.data,'$.deletedAt')),
+        confirmation_hash='',confirmation_digest='',confirmation_expires_at=0 WHERE account_id=NEW.id;
+      DELETE FROM cookie_sync_family_creation WHERE platform=json_extract(NEW.data,'$.platform')
+        AND family_connection_id IN (SELECT id FROM cookie_sync_family_connections WHERE family_id=json_extract(NEW.data,'$.familyId'));
+    END;`);
   const identityHash = (platform, identity) => createHmac('sha256', store.key).update(`cookie-sync:${platform}:${identity}`).digest('hex');
   const cleanup = () => {
     db.prepare('DELETE FROM cookie_sync_pairing WHERE expires_at<=?').run(now());
