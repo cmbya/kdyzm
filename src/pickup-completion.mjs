@@ -7,6 +7,9 @@ const validTime = value => Number.isSafeInteger(value) && value > 0 && value <= 
 const compact = value => typeof value === 'string' ? value.normalize('NFKC').replace(/[\s\p{P}]/gu, '') : '';
 const forbidden = /未(?:曾|能|有)?(?:签收|取件|领取|取走|取出)|没有(?:签收|取件|领取|取走|取出)|尚未|并未|无法|不能|拒收|拒签|取消|撤销|误签|虚假签收|非本人|非收件人|退回|退货|退件|返件|退签|重新派送|重新入库|二次派送|代收|代签|门卫|保安|前台|邻居|驿站签收|快递柜签收|门口|门外|揽收|寄件|寄出|发件人|快递员|配送员|派件员|工作人员|预计|预定|将于|即将|等待|等待领取|待取件|待领取|待签收|请(?:您|用户|收件人|本人)?(?:及时|尽快|前往)?(?:签收|取件|领取|取走|取出)|需要(?:签收|取件|领取)|(?:签收|取件|领取|取走|取出)(?:失败|未成功|异常|有误|作废)/u;
 const signature = /(?:本人|收件人)(?:本人)?(?:已|已经)?(?:确认)?签收|已由(?:收件人)?本人签收|签收人(?:为|是)?(?:收件人|本人)/u;
+// Match an actual receipt clause, never instructions such as 请签收人凭码签收.
+const codeReceipt = description => typeof description === 'string' && description.split(/[，,。；;！!？?\r\n]/u)
+  .some(part => /^(?:已签收[:：]?)?签收人(?:已)?凭(?:取货|取件)码(?:完成)?签收$/.test(compact(part)));
 const collection = /(?:用户|客户|您|本人|收件人)(?:本人)?(?:已|已经)(?:完成)?(?:取件|领取|取走|取出)|(?:用户|客户|您|本人|收件人)(?:本人)?(?:取件|领取|取出)成功|(?:用户|客户|您|本人|收件人)(?:已|已经)从[^。；!?]{0,24}(?:柜|驿站)(?:中|内)?取出/u;
 const collectionExtension = /(?:用户|客户|您|本人|收件人)(?:本人)?(?:(?:已|已经)(?:完成)?(?:提货|提取|自提)|(?:领取|取件|提货|提取|自提|收取)(?:完毕|完成|成功))/u;
 const incomplete = /申请|预约|计划|准备|可能|可以|必须|无需|无须|需要|届时|如果|并非|不是|未能|没能|不曾|否认|拒绝|尚待|(?:将|待|未|请|若|如|需|可|会|没有)(?:由)?(?:本人|收件人|用户|客户|您).{0,8}(?:签收|领取|取件|取出|提货|提取|自提|收取)|(?:本人|收件人|用户|客户|您)(?:将|会|待|正|拟|未|需|可).{0,8}(?:签收|领取|取件|取出|提货|提取|自提|收取)|(?:签收|领取|取件|取走|取出|提货|提取|自提|收取)(?:成功|完毕|完成)?(?:后|时|前|中|失败|未成功|未完成|异常|有误|作废)/u;
@@ -38,12 +41,14 @@ export function completionKind(description) {
   const narrative = completionNarrative(description), text = compact(narrative);
   // Keep question punctuation until uncertainty is checked; compacting it would turn a question into a fact.
   if (!text || parcelNotReceived(narrative) || uncertainty.test(narrative) || uncertainty.test(text) || forbidden.test(text) || incomplete.test(text) || nonParcel.test(text) || instruction.test(text)) return '';
+  if (codeReceipt(narrative)) return 'user_collected';
   if (signature.test(text)) return 'recipient_signed';
   if (collection.test(text) || collectionExtension.test(text)) return 'user_collected';
   return '';
 }
 
 export const builtinPickupCompletionRules = Object.freeze([
+  { id: 'builtin-code-receipt-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
   { id: 'builtin-recipient-signature-v1', version: 1, kind: 'recipient_signed', keywords: [], enabled: true, origin: 'builtin' },
   { id: 'builtin-user-collection-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
   { id: 'builtin-pdd-out-cabinet-v1', version: 1, kind: 'user_collected', keywords: [], enabled: true, origin: 'builtin' },
@@ -88,7 +93,10 @@ export function detectPickupCompletion(shipment, { rules = [], now = Date.now() 
     && globalThis.PickCodeLogistics.eventTimeIssue(event, now) !== 'timeConflict' && (providerCollection(event) || completionKind(event.description)))
     .sort((a, b) => b.time - a.time);
   for (const event of candidates) {
-    if (validTime(shipment.arrivalAt) && shipment.arrivalAt >= event.time) continue;
+    // Legacy station parsing can stamp this same receipt as the arrival because
+    // its thank-you text names a locker. A distinct pending event still vetoes it below.
+    if (validTime(shipment.arrivalAt) && (shipment.arrivalAt > event.time
+      || shipment.arrivalAt === event.time && !codeReceipt(event.description))) continue;
     if (events.some(other => other?.time === event.time && other.description === event.description
       && (!other.provider || !event.provider || other.provider === event.provider)
       && globalThis.PickCodeLogistics.eventTimeIssue(other, now) === 'timeConflict')) continue;
@@ -103,7 +111,8 @@ export function detectPickupCompletion(shipment, { rules = [], now = Date.now() 
     })) continue;
     const kind = structured ? 'user_collected' : completionKind(event.description);
     const description = String(event.description).slice(0, 600), value = compact(description);
-    const builtinId = structured || (signature.test(value) ? 'builtin-recipient-signature-v1' : collection.test(value) ? 'builtin-user-collection-v1' : '');
+    const builtinId = structured || (codeReceipt(description) ? 'builtin-code-receipt-v1'
+      : signature.test(value) ? 'builtin-recipient-signature-v1' : collection.test(value) ? 'builtin-user-collection-v1' : '');
     const builtins = builtinPickupCompletionRules.filter(rule => rule.id === builtinId);
     const rule = [...builtins, ...rules.filter(rule => rule.enabled && rule.kind === kind && rule.keywords?.length && rule.keywords.every(keyword => value.includes(compact(keyword))))]
       .find(rule => rule.enabled && rule.kind === kind);

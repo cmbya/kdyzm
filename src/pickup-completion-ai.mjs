@@ -198,7 +198,8 @@ export class PickupCompletionAi {
   status() {
     const candidates = this.candidates(), config = this.stations.aiConfig();
     const monitorRules = builtinPickupCompletionRules.flatMap(rule => (rule.id === 'builtin-pdd-out-cabinet-v1' ? ['拼多多节点：已取件（OUT_CABINET_501）']
-      : rule.id === 'builtin-taobao-pickup-point-exit-v1' ? ['淘宝节点：包裹已从代收点取出'] : monitorExamples[rule.kind]).map((example, index) => ({
+      : rule.id === 'builtin-taobao-pickup-point-exit-v1' ? ['淘宝节点：包裹已从代收点取出']
+      : rule.id === 'builtin-code-receipt-v1' ? ['签收人凭取货码签收', '签收人凭取件码签收'] : monitorExamples[rule.kind]).map((example, index) => ({
       id: `${rule.id}-example-${index + 1}`, kind: rule.kind, keywords: [example], origin: rule.origin, version: rule.version,
       label: /builtin-(?:pdd|taobao)-/.test(rule.id) ? '平台已取件 · 结构化证据' : `${rule.kind === 'recipient_signed' ? '本人签收' : '用户领取'} · 内置示例`, isExample: true, enabled: rule.enabled,
     }))).concat(this.completionStore.rules().map(rule => ({ id: rule.id, kind: rule.kind, keywords: rule.keywords, origin: rule.origin, version: rule.version,

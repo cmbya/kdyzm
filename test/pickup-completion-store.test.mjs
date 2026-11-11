@@ -24,6 +24,32 @@ function fixture(t, filename) {
   return { store, sync, read, bind, device, op };
 }
 
+test('code receipts repair old pending records on restart and respect manual pending overrides', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'pickup-code-receipt-')), filename = join(directory, 'test.sqlite');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let store = new Store({ key, now: () => NOW, filename });
+  store.saveAccount({ platform: 'taobao', label: '测试', cookie: 'FIXTURE' }, 'a', true);
+  store.importResult('a', { orders: [{ platformOrderId: 'o' }], shipments: ['auto', 'manual'].map(waybillNo => ({
+    platformOrderId: 'o', waybillNo, status: 'arrived', arrivalAt: NOW - 1000,
+    logisticsEvents: [{ time: NOW - 1000, description: '已签收，签收人凭取货码签收。感谢使用示例丰巢柜【自提柜】' }]
+  })) });
+  for (const row of store.db.prepare('SELECT id,data FROM shipments').all()) {
+    const shipment = JSON.parse(row.data);
+    shipment.picked = false; shipment.arrivalAt = NOW - 1000;
+    shipment.pickupCompletion = { version: 1, autoPicked: false, manualOverride: shipment.waybillNo === 'manual' ? 'pending' : '', completedAt: 0, evidence: null };
+    store.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), row.id);
+  }
+  store.close();
+  store = new Store({ key, now: () => NOW, filename });
+  try {
+    const parcels = store.snapshot(['a']).shipments;
+    assert.equal(parcels.find(p => p.waybillNo === 'auto').picked, true);
+    assert.equal(parcels.find(p => p.waybillNo === 'auto').pickupCompletion.completedAt, NOW - 1000);
+    assert.equal(parcels.find(p => p.waybillNo === 'manual').picked, false);
+    assert.equal(parcels.length, 2);
+  } finally { store.close(); }
+});
+
 test('automatic evidence is separate, defaults on, survives refresh and manual restore wins until resumed', t => {
   const { store, sync, read, op, device } = fixture(t);
   const shipment = sync();

@@ -6,6 +6,26 @@ const NOW = 1800000000000;
 const event = (description, time = NOW - 1000) => ({ time, description });
 const detect = (...logisticsEvents) => detectPickupCompletion({ logisticsEvents }, { now: NOW });
 
+test('code receipt completes collection despite locker location and legacy same-time arrival', () => {
+  const description = '已签收，签收人凭取货码签收。感谢使用圆通及示例小区值班室旁丰巢柜【自提柜】，期待再次为您服务。';
+  for (const text of [description, description.replace('取货码', '取件码')]) {
+    const result = detectPickupCompletion({ arrivalAt: NOW - 1000, logisticsEvents: [event(text)] }, { now: NOW });
+    assert.equal(result?.ruleId, 'builtin-code-receipt-v1');
+    assert.equal(result?.kind, 'user_collected');
+    assert.equal(result?.eventTime, NOW - 1000);
+  }
+  for (const text of ['请签收人凭取货码签收', '等待签收人凭取货码签收', '签收人凭取货码签收后通知',
+    '签收人凭取货码签收失败', '签收人凭取货码签收？', '疑似签收人凭取货码签收',
+    description + '用户反馈未收到包裹', description + '实际未取件', description + '虚假签收',
+    '驿站代收，请凭取货码取件', '已签收，丰巢柜代收']) assert.equal(detect(event(text)), null, text);
+  for (const text of ['待取件', '重新入库', '用户未收到包裹']) {
+    assert.equal(detect(event(description), event(text)), null);
+    assert.equal(detect(event(description, NOW - 2000), event(text)), null);
+  }
+  assert.equal(detect(event(description, 0)), null);
+  assert.equal(detect(event(description, NOW + 1)), null);
+});
+
 const pddCollected = (time = NOW - 1000) => ({ ...event('【代收点】您的快件已投递，收件人凭取件码在【示例菜鸟驿站】领取，如有疑问请电联代收点：10000000000', time),
   provider: 'pdd', providerStatus: 'OUT_CABINET', providerStatusTag: '已取件', providerSubStatus: 'OUT_CABINET_501', providerStatusText: '已签收' });
 
