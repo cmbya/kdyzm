@@ -131,7 +131,7 @@ AI 复用后台默认渠道、全局启用、共享调用额度与冷却，从�
 
 - 管理员 `GET/POST /v1/admin/stations`，`PATCH /v1/admin/stations/:id`，字段 `name,region,enabled,aliases:[{id?,name,source,subLocation}]`，保存增加规则版本。
 - 管理员 `GET /v1/admin/station-candidates`，`POST /v1/admin/station-candidates/:id/approve`（`stationId?,alias?,subLocation?,name?,region?`）或 `/ignore`（空对象）。只有批准写规则。
-- 管理员 `GET/PATCH /v1/admin/station-ai`，设置 `channelName,baseUrl,model,apiKey?,clearApiKey?,enabled,intervalMinutes,dailyLimit`。密钥加密；GET 只返回 `hasApiKey/apiKeyMasked`，空值保留，清除须显式指定。`enabled`控制定期及新证据自动分析，已完整配置时关闭自动仍可手动分析。后台3.1.24起 `intervalMinutes` 固定360；兼容接收旧5/60/1440并规范为360。`dailyLimit`默认20且硬上限20，更小额度保留；旧大额度及旧频率在启动时迁移，开关、渠道与凭据不变。`usageToday`为上海时区当天所有渠道、站点、物流、手机模板、连接测试和重试的实际调用数。上传每批20条、候选队列2000条的限制独立于每日额度。
+- 管理员 `GET/PATCH /v1/admin/station-ai`，设置 `channelName,baseUrl,model,apiKey?,clearApiKey?,enabled,intervalMinutes,dailyLimit`。密钥加密；GET 只返回 `hasApiKey/apiKeyMasked`，空值保留，清除须显式指定。`enabled`控制定期及新证据自动分析，已完整配置时关闭自动仍可手动分析。后台3.1.24起 `intervalMinutes` 固定360；兼容接收旧5/60/1440并规范为360。`dailyLimit`默认20且硬上限100，更小额度保留；旧大额度及旧频率在启动时迁移，开关、渠道与凭据不变。`usageToday`为上海时区当天所有渠道、站点、物流、手机模板、连接测试和重试的实际调用数。上传每批20条、候选队列2000条的限制独立于每日额度。
 - 管理员 `POST /v1/admin/station-ai/test` 和 `/run` 均为空对象；测试只发固定无隐私JSON。运行返回202及 `{accepted,running,code,message,retryAt?}`。`code`包括 `AI_ACCEPTED/AI_NOT_CONFIGURED/AI_RUNNING/AI_DAILY_LIMIT/AI_NO_PENDING/AI_RETRY_COOLDOWN/SERVICE_STOPPING`；定时器还可能返回 `AI_AUTOMATIC_DISABLED/AI_NOT_DUE`。`retryAt`为等待截止毫秒。请求未接受时不调用模型、不扣额度。失败等待6小时后重试，每候选累计最多3次非取消尝试；`attempts`累计实际调用，`cancelledAttempts`单独记录取消的调用，取消仍扣每日额度，但不耗尽失败重试次数。其余结果按已授权自动调优与校验边界处理。
 - 新站名、物流片段或新增独立站点依据持久记录事件，可提前触发；站点和物流共用60秒事件冷却。重复快照、重复候选与重复回执不构成新事件。未知物流的公开站名可进入站点队列，但未确认前不允许物流AI凭空构造依据或直接关联包裹。空队列不调用；额度耗尽后等待上海时区次日恢复。
 - 设备 `POST /v1/station-candidates`，`{items:[{id,stationName,fragment,source:'sms'}]}`，最多20项，只允许脱敏站名，返回 `acceptedIds` 供客户端确认。
@@ -153,7 +153,7 @@ SQLite按认证设备ID+反馈ID保存持久收据。相同版本、相同内容
 
 支持`station_rule_receipts_v1`的设备可`POST /v1/station-rule-receipts`提交`{stationRulesVersion,serverLogisticsRulesVersion}`。成功返回`{accepted:true,receipt:{deviceId,stationRulesVersion,serverLogisticsRulesVersion,receivedAt,effectStatus:'unverified'}}`；同一设备和版本对的重复提交复用原回执。快照同时声明该 capability，旧设备不提交时不视为已取得规则。
 
-分析复用后台默认AI渠道、6小时周期及新证据触发、共享每日最多20次额度和有限重试。AI输入用`confirmedMapping`独立保存脱敏源站名、真实物流站名、目标ID、柜号和固定原因；内部运单/设备/反馈ID不送AI。别名与证据须逐字来自脱敏源片段，不能用目标站名伪造证据。自动应用继续受`enabled/autoApply`配置控制；目标不符、位置编号冲突、已有别名位置不同、原站名不完整或证据不足均留待核对。后台既有AI候选列表显示人工样本、确认关系、状态与原因；已有自动优化记录入口支持审计和保护人工后续修改的回滚。
+分析复用后台默认AI渠道、6小时周期及新证据触发、共享每日最多100次额度和有限重试。AI输入用`confirmedMapping`独立保存脱敏源站名、真实物流站名、目标ID、柜号和固定原因；内部运单/设备/反馈ID不送AI。别名与证据须逐字来自脱敏源片段，不能用目标站名伪造证据。自动应用继续受`enabled/autoApply`配置控制；目标不符、位置编号冲突、已有别名位置不同、原站名不完整或证据不足均留待核对。后台既有AI候选列表显示人工样本、确认关系、状态与原因；已有自动优化记录入口支持审计和保护人工后续修改的回滚。
 
 平台候选仅从有效末端已到站、非已取/隐藏/归档的近期记录收集；AI异步处理与订单采集隔离。短信端默认关闭，开启后本地仅保留7天/200项队列。候选和传输均不含完整短信、取件码、运单、Cookie。修改密码与撤权后接口沿用原认证边界。
 
@@ -205,7 +205,7 @@ SQLite按认证设备ID+反馈ID保存持久收据。相同版本、相同内容
 
 ### 每日物流专项（后台3.1.39）
 
-`dailyLearning` 为只读摘要：`enabled/timezone/hour/nextRunAt/running/timeFormatLearning/lastRun`。北京时间03:00检查存量遗漏，重启优先续跑未完成轮次；沿用`enabled/logisticsEnabled/autoApply`、统一渠道、冷却及每日20次共享上限。无新高频证据不调用AI，忽略和回滚状态不重置。
+`dailyLearning` 为只读摘要：`enabled/timezone/hour/nextRunAt/running/timeFormatLearning/lastRun`。北京时间03:00检查存量遗漏，重启优先续跑未完成轮次；沿用`enabled/logisticsEnabled/autoApply`、统一渠道、冷却及每日100次共享上限。无新高频证据不调用AI，忽略和回滚状态不重置。
 
 `lastRun` 分别返回扫描状态、`scanned/changed`、`candidateCount/processedCount`、`states`、`appliedRules/backfilledCount`、当前缺失/未知/冲突计数及脱敏时间形状。扫描完成、候选入队或生成建议不代表已应用或回填；规则回滚后统计随真实数据更新。未知时间格式标为`requires_review`，不生成解析代码、猜测日期或训练模型参数。新增两张内部运行/样本表自动创建，不重建已有订单数据库。
 

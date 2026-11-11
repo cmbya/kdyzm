@@ -35,7 +35,7 @@ test('legacy migration retains original encrypted secret, selected provider and 
   const stations = new StationStore({ db, key, now: () => NOW });
   assert.equal(stations.aiConfig().channelId, 'default'); assert.equal(stations.aiConfig().enabled, true);
   assert.equal(stations.aiConfig().defaultSelectionRevision, 1);
-  assert.equal(stations.aiConfig().dailyLimit, 20); assert.equal(stations.aiConfig().intervalMinutes, 360);
+  assert.equal(stations.aiConfig().dailyLimit, 31); assert.equal(stations.aiConfig().intervalMinutes, 360);
   assert.equal(stations.aiCredentials().apiKey, 'legacy-private-key');
   assert.equal(db.prepare('SELECT credential FROM station_ai_settings').get().credential, credential);
   assert.equal(db.prepare('SELECT credential FROM ai_channels').get().credential, credential);
@@ -63,11 +63,11 @@ test('registry limits, encryption, pause and selected channel semantics preserve
   assert.throws(() => stations.saveAiConfig({ channelId: 'missing' }), { code: 'AI_CHANNEL_UNAVAILABLE' });
 });
 
-test('creating the first channel retains the six-hour policy and capped budget saved before credentials', () => {
+test('creating the first channel retains the six-hour policy and budget saved before credentials', () => {
   const db = new DatabaseSync(':memory:'), stations = new StationStore({ db, key: Buffer.alloc(32, 8) });
   stations.saveAiConfig({ dailyLimit: 41, intervalMinutes: 5 });
   stations.saveAiChannel(undefined, ready);
-  assert.equal(stations.aiConfig().dailyLimit, 20); assert.equal(stations.aiConfig().intervalMinutes, 360); assert.equal(stations.aiConfig().enabled, false);
+  assert.equal(stations.aiConfig().dailyLimit, 41); assert.equal(stations.aiConfig().intervalMinutes, 360); assert.equal(stations.aiConfig().enabled, false);
   db.close();
 });
 

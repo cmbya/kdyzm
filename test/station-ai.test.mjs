@@ -85,19 +85,19 @@ test('retry cooldown and daily budget refusals provide actionable reason codes',
   const exhausted = jobs.request(); assert.equal(exhausted.code, 'AI_DAILY_LIMIT'); assert.ok(exhausted.message.includes('测试和重试'));
 });
 
-test('an excessive configured limit still allows at most twenty calls while upload batches remain capped at twenty', async t => {
+test('an excessive configured limit still allows at most one hundred calls while upload batches remain capped at twenty', async t => {
   let calls = 0;
   const { stations, jobs } = fixture(t, async request => {
     calls++; const input = JSON.parse(JSON.parse(request.body).messages[1].content);
     return reply({ kind: 'locker', suggestedName: input.fragment, alias: input.fragment, evidence: [input.fragment] });
   });
-  stations.saveAiConfig({ dailyLimit: 30 });
-  const items = Array.from({ length: 25 }, (_, i) => ({ id: `c${i}`, stationName: `4卡${i}号柜`, fragment: `4卡${i}号柜`, source: 'sms' }));
+  stations.saveAiConfig({ dailyLimit: 200 });
+  const items = Array.from({ length: 105 }, (_, i) => ({ id: `c${i}`, stationName: `4卡${i}号柜`, fragment: `4卡${i}号柜`, source: 'sms' }));
   assert.throws(() => stations.enqueue(items), { code: 'INVALID_CANDIDATES' });
-  stations.enqueue(items.slice(0, 20)); stations.enqueue(items.slice(20));
+  for (let offset = 0; offset < items.length; offset += 20) stations.enqueue(items.slice(offset, offset + 20));
   jobs.request(); await jobs.running;
-  assert.equal(calls, 20); assert.equal(stations.aiConfig().usageToday, 20);
-  assert.equal(stations.candidates().filter(c => c.status === 'review').length, 20);
+  assert.equal(calls, 100); assert.equal(stations.aiConfig().usageToday, 100);
+  assert.equal(stations.candidates().filter(c => c.status === 'review').length, 100);
   assert.equal(stations.candidates().filter(c => c.status === 'pending').length, 5);
 });
 

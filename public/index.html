@@ -111,7 +111,7 @@
                 <div id="ai-auto-apply-row" class="setting-row" hidden><label for="ai-auto-apply">自动调优（站点＋物流）<small id="ai-auto-apply-help">自动添加有证据的站点别名，并优化物流识别规则。通过样例与反例校验后生效，冲突留待核对；最近修改可回滚。</small></label><input id="ai-auto-apply" name="autoApply" type="checkbox" aria-describedby="ai-auto-apply-help"></div>
                 <div class="setting-row"><label for="ai-channel-select">使用渠道</label><select id="ai-channel-select" name="channelId"><option value="">请先保存渠道</option></select></div>
                 <div class="setting-row"><label for="ai-interval">自动检查频率<small>新证据提前检查，重复片段合并处理</small></label><select id="ai-interval" name="intervalMinutes"><option value="360">每 6 小时</option></select></div>
-                <div class="setting-row"><label for="ai-limit">共享每日调用上限<small>最多20次；所有渠道、站点、手机模板、测试和重试共用</small><small id="ai-usage">当日用量尚未读取</small></label><input id="ai-limit" name="dailyLimit" type="number" min="1" max="20" step="1" value="20" inputmode="numeric" required></div>
+                <div class="setting-row"><label for="ai-limit">共享每日调用上限<small>最多100次；所有渠道、站点、手机模板、测试和重试共用</small><small id="ai-usage">当日用量尚未读取</small></label><input id="ai-limit" name="dailyLimit" type="number" min="1" max="100" step="1" value="20" inputmode="numeric" required></div>
                 <p class="upload-note">手机开启“站点片段增强”后自动上报脱敏片段；物流优化只使用脱敏轨迹。AI 不读取完整短信，也不直接合并包裹。规则同步后，由匹配算法重新核对。</p>
                 <div class="settings-actions"><button id="ai-settings-save" type="submit">保存自动优化设置</button></div>
                 <p id="ai-settings-result" class="verify-result" role="status" aria-live="polite"></p>

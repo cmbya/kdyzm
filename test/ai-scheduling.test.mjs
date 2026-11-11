@@ -147,7 +147,7 @@ test('confirming a safe alias while intake discovers a new station does not reen
   assert.equal(f.logisticsJobs.candidates()[0].reason, 'NO_STATION_EVIDENCE');
 });
 
-test('capability checks, phone templates, station jobs and logistics share a hard twenty-call limit across channels', async t => {
+test('capability checks, phone templates, station jobs and logistics share a hard hundred-call limit across channels', async t => {
   const f = fixture(t, { automaticEvents: false }), id = f.stations.aiConfig().channelId;
   assert.equal((await f.assistance.test(id)).ok, true);
   await f.assistance.template({ sample: TEMPLATE_SAMPLE, expectedCode: '654321' }, 'device-a', () => {});
@@ -155,14 +155,14 @@ test('capability checks, phone templates, station jobs and logistics share a har
   f.enqueue('人工分析证据'); f.stationJobs.request(); await f.stationJobs.running;
   assert.equal(f.calls.length, 6);
   f.stations.saveAiConfig({ dailyLimit: 200 });
-  for (let i = 0; i < 20; i++) f.enqueue(`自动证据合成驿站${i}`);
+  for (let i = 0; i < 100; i++) f.enqueue(`自动证据合成驿站${i}`);
   await f.advance(60000); f.stationJobs.runDue(); await f.stationJobs.running;
-  assert.equal(f.calls.length, 20); assert.equal(f.stations.aiConfig().usageToday, 20);
+  assert.equal(f.calls.length, 100); assert.equal(f.stations.aiConfig().usageToday, 100);
   const second = f.stations.saveAiChannel(undefined, { name: '第二合成渠道', baseUrl: 'https://second.example.com/v1', model: 'synthetic', apiKey: randomBytes(24).toString('hex') });
   f.stations.saveAiConfig({ channelId: second.id });
   assert.equal((await f.assistance.test(second.id)).capabilities.station_alias.code, 'AI_DAILY_LIMIT');
   await assert.rejects(f.assistance.template({ sample: TEMPLATE_SAMPLE, expectedCode: '654321' }, 'device-b', () => {}), { code: 'AI_DAILY_LIMIT' });
-  assert.equal(f.calls.length, 20);
+  assert.equal(f.calls.length, 100);
 });
 
 test('the automatic quota timer resumes at Shanghai midnight without polling and honors lower limits', async t => {
@@ -208,15 +208,15 @@ test('a logistics call advancing shared cooldown after a station timer is armed 
 
 test('stored hourly or excessive settings migrate durably without changing switches, default revision or encrypted credentials', t => {
   const f = fixture(t, { automaticEvents: false });
-  for (const limit of [35, 7]) {
+  for (const limit of [200, 100, 35, 20, 7]) {
     const row = f.store.db.prepare('SELECT data,credential FROM station_ai_settings WHERE id=1').get();
     const previous = { ...JSON.parse(row.data), intervalMinutes: 60, dailyLimit: limit, autoApply: false, enabled: true, logisticsEnabled: false };
     f.store.db.prepare('UPDATE station_ai_settings SET data=? WHERE id=1').run(JSON.stringify(previous));
     const channels = f.store.db.prepare('SELECT * FROM ai_channels').all();
     const migrated = new StationStore({ db: f.store.db, key: f.key });
     const after = f.store.db.prepare('SELECT data,credential FROM station_ai_settings WHERE id=1').get();
-    assert.deepEqual(JSON.parse(after.data), { ...previous, intervalMinutes: 360, dailyLimit: Math.min(limit, 20) });
+    assert.deepEqual(JSON.parse(after.data), { ...previous, intervalMinutes: 360, dailyLimit: Math.min(limit, 100) });
     assert.equal(after.credential, row.credential); assert.deepEqual(f.store.db.prepare('SELECT * FROM ai_channels').all(), channels);
-    assert.equal(migrated.aiConfig().intervalMinutes, 360); assert.equal(migrated.aiConfig().dailyLimit, Math.min(limit, 20));
+    assert.equal(migrated.aiConfig().intervalMinutes, 360); assert.equal(migrated.aiConfig().dailyLimit, Math.min(limit, 100));
   }
 });

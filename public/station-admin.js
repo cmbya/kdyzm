@@ -409,7 +409,7 @@ export function initStationAdmin({ api, notice }) {
     if (force || !state.aiDirty && !state.aiSaving) {
       get('ai-enabled').setAttribute('aria-checked', String(Boolean(config?.enabled))); get('ai-enabled').classList.toggle('off', !config?.enabled);
       get('ai-auto-apply').checked = Boolean(config?.autoApply && config?.logisticsEnabled);
-      channelOptions('ai-channel-select', config?.channelId); get('ai-interval').value = '360'; get('ai-limit').value = String(Math.min(config?.dailyLimit || 20, 20)); state.aiDirty = false;
+      channelOptions('ai-channel-select', config?.channelId); get('ai-interval').value = '360'; get('ai-limit').value = String(Math.min(config?.dailyLimit || 20, 100)); state.aiDirty = false;
     }
     const configured = Boolean(config?.channelId && config?.channelEnabled && config?.hasApiKey && config?.baseUrl && config?.model);
     setText('ai-config-state', configured ? config.enabled ? config.autoApply && config.logisticsEnabled ? '自动调优已开启' : '自动分析已开启' : '自动优化已关闭' : config?.channelId ? '渠道不可用' : '待配置');
@@ -536,7 +536,7 @@ export function initStationAdmin({ api, notice }) {
     if (state.tuningSupported) { body.autoApply = get('ai-auto-apply').checked; body.logisticsEnabled = body.autoApply; }
     if (channelId) body.channelId = channelId;
     if (body.enabled && !channelId) throw new Error('请先保存并选择可用渠道。');
-    if (!Number.isSafeInteger(body.dailyLimit) || body.dailyLimit < 1 || body.dailyLimit > 20) throw new Error('每日调用上限须为1至20的整数。');
+    if (!Number.isSafeInteger(body.dailyLimit) || body.dailyLimit < 1 || body.dailyLimit > 100) throw new Error('每日调用上限须为1至100的整数。');
     const session = state.session; state.aiVersion++; state.aiSaving = true;
     setFormBusy('ai-settings-form', true); setText('ai-settings-result', '正在保存…');
     try { const data = await api('/v1/admin/station-ai', { method: 'PATCH', body: JSON.stringify(body) }); if (session !== state.session) return; state.aiVersion++; applyConfig(data.config || data, true); setText('ai-settings-result', '自动优化设置已保存。'); }

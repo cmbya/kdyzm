@@ -139,10 +139,22 @@ test('站点设置只保存渠道选择、频率、开关和共享额度，不�
   assert.match(page.elements.get('ai-settings-result').textContent,/已保存/);assert.match(page.elements.get('ai-config-state').textContent,/渠道不可用/);
 });
 
-test('共享额度超过20时显示错误且不发保存请求',async t=>{
-  const page=await browser(t);await page.fill('ai-limit','21');await page.submit('ai-settings-form');
+test('共享额度可保存100且刷新后保持100，输入框允许100',async t=>{
+  const page=await browser(t);await page.fill('ai-limit','100');await page.submit('ai-settings-form');
+  const saved=page.calls.find(c=>c.path==='/v1/admin/station-ai'&&c.method==='PATCH');
+  assert.equal(saved.body.dailyLimit,100);
+  assert.equal(page.elements.get('ai-limit').value,'100');
+  await page.click('basic-settings-tab');await page.click('station-settings-tab');assert.equal(page.elements.get('ai-limit').value,'100');
+  assert.match(page.elements.get('ai-usage').textContent,/0 次 \/ 100 次/);
+  const html=await readFile(new URL('../public/index.html',import.meta.url),'utf8');
+  assert.match(html,/<input id="ai-limit"[^>]*max="100"/);
+  assert.match(html,/最多100次；所有渠道、站点、手机模板、测试和重试共用/);
+});
+
+test('共享额度超过100时显示错误且不发保存请求',async t=>{
+  const page=await browser(t);await page.fill('ai-limit','101');await page.submit('ai-settings-form');
   assert.equal(page.calls.some(c=>c.path==='/v1/admin/station-ai'&&c.method==='PATCH'),false);
-  assert.match(JSON.stringify(page.notices),/1至20/);
+  assert.match(JSON.stringify(page.notices),/1至100/);
 });
 
 test('编辑渠道留空保留密钥，创建后不回显密钥，清除只暂停所选渠道',async t=>{

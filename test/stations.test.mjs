@@ -156,9 +156,25 @@ test('AI settings encrypt credentials, never echo key material, and require expl
   assert.throws(() => stations.saveAiConfig({ clearApiKey: true }), { code: 'AI_NOT_CONFIGURED' });
   config = stations.saveAiConfig({ enabled: false, clearApiKey: true });
   assert.equal(config.hasApiKey, false);
-  assert.equal(stations.saveAiConfig({ dailyLimit: 200 }).dailyLimit, 20);
+  assert.equal(stations.saveAiConfig({ dailyLimit: 200 }).dailyLimit, 100);
   for (const dailyLimit of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '20', null]) assert.throws(() => stations.saveAiConfig({ dailyLimit }));
   for (const body of [{ intervalMinutes: 1 }, { baseUrl: 'http://api.example.com' }, { apiKey: 'bad\r\nkey' }]) assert.throws(() => stations.saveAiConfig(body));
+});
+
+test('raising an exhausted twenty-call budget to one hundred preserves usage and stops at one hundred', t => {
+  const { stations } = fixture(t);
+  assert.equal(stations.aiConfig().dailyLimit, 20);
+  for (let i = 0; i < 20; i++) assert.equal(stations.reserveAiCall(), true);
+  assert.equal(stations.reserveAiCall(), false);
+  assert.equal(stations.saveAiConfig({ dailyLimit: 100 }).dailyLimit, 100);
+  assert.equal(stations.aiConfig().usageToday, 20);
+  for (let i = 20; i < 100; i++) assert.equal(stations.reserveAiCall(), true);
+  assert.equal(stations.reserveAiCall(), false);
+  assert.equal(stations.aiConfig().usageToday, 100);
+  stations.saveAiConfig({ dailyLimit: 7 });
+  assert.equal(stations.aiConfig().dailyLimit, 7);
+  assert.equal(stations.aiConfig().usageToday, 100);
+  assert.equal(stations.reserveAiCall(), false);
 });
 
 test('platform candidates require current pickup provenance and repeated snapshots do not inflate counts', t => {
