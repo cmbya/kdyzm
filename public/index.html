@@ -141,6 +141,11 @@
           <div class="row"><label>采集间隔<select id="interval"><option value="15">15 分钟</option><option value="30">30 分钟</option><option value="60">60 分钟</option></select></label><label class="checkbox"><input id="enabled" type="checkbox" checked>启用自动同步</label></div>
           <p class="hint">三个平台自动错开约 5 分钟采集。更新已有账号时，留空保留原 Cookie。保存不会立刻访问平台，可点击账号的“立即采集”。</p>
           <div class="actions"><button>保存账号</button><button id="account-collect" type="button" class="secondary" hidden>立即采集</button><button id="cancel-edit" type="button" class="secondary">取消编辑</button></div>
+          <div id="account-delete-section" class="account-delete-section" hidden>
+            <button id="account-delete" type="button" class="danger">删除账号</button>
+            <p class="hint">清除登录信息并停止同步，已有订单和取件记录保留。重新使用时需再次添加账号。</p>
+            <p id="account-delete-error" class="account-error" role="alert"></p>
+          </div>
         </form>
         <section id="cookie-sync-panel" hidden aria-labelledby="cookie-sync-title">
           <h3 id="cookie-sync-title">浏览器 Cookie 同步</h3>

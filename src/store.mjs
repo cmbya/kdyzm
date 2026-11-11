@@ -328,7 +328,7 @@ export class Store {
         const evidence = pickupEvidence(events, rules);
         const pickup = evidence.arrivalAt ? pickupData({ logisticsState: 'ok', logisticsEvents: events, arrivalAt: 0 }, old, events, rules, this.now()) : evidence;
         const fallback = old.status === 'arrived' && old.arrivalAtSource === 'platform_event' ? 'unknown' : old.status;
-        const status = this.account(old.accountId)?.platform === 'jd' ? jdShipmentStatus(events, fallback, rules, this.now(), fallback === 'arrived' && !!old.pickupCode)
+        const status = this.order(old.orderId)?.platform === 'jd' ? jdShipmentStatus(events, fallback, rules, this.now(), fallback === 'arrived' && !!old.pickupCode)
           : eventStatus(events[0].description, fallback, rules);
         if (status === old.status && Object.keys(pickup).every(key => pickup[key] === old[key])) continue;
         const updated = this.pickupCompletion.project({ ...old, ...pickup, status, updatedAt: this.now() });
@@ -391,16 +391,33 @@ export class Store {
     const familyId = account.familyId || '';
     return { ...account, familyId, familyName: this.family(familyId)?.name || '' };
   }
-  account(id) { return this.accountFamily(parse(this.db.prepare('SELECT data FROM accounts WHERE id=?').get(id))); }
+  account(id) {
+    const account = parse(this.db.prepare('SELECT data FROM accounts WHERE id=?').get(id));
+    return account?.deletedAt ? undefined : this.accountFamily(account);
+  }
   order(id) { return parse(this.db.prepare('SELECT data FROM orders WHERE id=?').get(id)); }
   shipment(id) { return parse(this.db.prepare('SELECT data FROM shipments WHERE id=?').get(id)); }
   accounts(ids) {
     const allowed = ids && new Set(ids);
-    return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !allowed || allowed.has(a.id)).map(a => this.accountFamily(a));
+    return this.db.prepare('SELECT data FROM accounts ORDER BY id').all().map(parse).filter(a => !a.deletedAt && (!allowed || allowed.has(a.id))).map(a => this.accountFamily(a));
+  }
+  deleteAccount(id) {
+    return this.transaction(() => {
+      const account = this.account(id);
+      if (!account) fail(404, 'NOT_FOUND', '账号不存在或已删除');
+      // Keep the account identity for historical records and existing device scopes,
+      // but permanently remove its login credential and invalidate in-flight work.
+      const deleted = { ...account, enabled: false, status: 'deleted', deletedAt: this.now(),
+        nextSyncAt: 0, error: '', warnings: [], credentialVersion: account.credentialVersion + 1, revision: this.revision() };
+      this.db.prepare("UPDATE accounts SET data=?,credential='' WHERE id=?").run(JSON.stringify(deleted), id);
+      this.db.prepare('DELETE FROM pairing WHERE used_at IS NULL AND EXISTS (SELECT 1 FROM json_each(pairing.account_ids) WHERE value=?)').run(id);
+      return { deleted: true, historyPreserved: true };
+    });
   }
   saveAccount(body, id = randomUUID(), fixture = false, { preserveSyncSchedule = false, inTransaction = false } = {}) {
     if (inTransaction && !this.db.isTransaction) throw new Error('saveAccount requires an active transaction');
     onlyKeys(body, ['platform', 'label', 'cookie', 'enabled', 'intervalMinutes', 'familyId']);
+    if (parse(this.db.prepare('SELECT data FROM accounts WHERE id=?').get(id))?.deletedAt) fail(404, 'NOT_FOUND', '账号已删除，请重新添加');
     const old = this.account(id);
     const familyId = body.familyId === undefined ? old?.familyId || '' : text(body.familyId, '家人ID', 128, false);
     if (familyId && !this.family(familyId)) fail(400, 'INVALID_FAMILY', '请选择有效家人，待归属请留空');
@@ -447,10 +464,11 @@ export class Store {
   }
   cookie(id) {
     const row = this.db.prepare('SELECT credential FROM accounts WHERE id=?').get(id);
-    return row && decryptCookie(row.credential, this.key, id);
+    return row?.credential ? decryptCookie(row.credential, this.key, id) : undefined;
   }
   refreshCookie(id, cookie) {
     const account = this.account(id);
+    if (!account) fail(404, 'NOT_FOUND', '账号不存在或已删除');
     let identity;
     try { identity = cookieIdentity(account.platform, this.cookie(id), false); }
     catch (error) { if (error.code !== 'COOKIE_IDENTITY_REQUIRED') throw error; }
@@ -475,7 +493,7 @@ export class Store {
   }
   scope(familyIds = [], legacyAccountIds = []) {
     const familySet = new Set(familyIds);
-    const accountIds = [...new Set([...legacyAccountIds, ...this.accounts().filter(a => a.familyId && familySet.has(a.familyId)).map(a => a.id)])];
+    const accountIds = [...new Set([...legacyAccountIds.filter(id => this.account(id)), ...this.accounts().filter(a => a.familyId && familySet.has(a.familyId)).map(a => a.id)])];
     return { familyIds, legacyAccountIds, accountIds };
   }
   canRead(device, record) {
@@ -863,7 +881,7 @@ export class Store {
                 archivedAt: retention.archivedAt, archiveRestoredAnchor: operation.anchorDate, archiveRestoredAt: operation.occurredAt };
               this.db.prepare('UPDATE orders SET data=? WHERE id=?').run(JSON.stringify(restored), order.id);
             }
-            this.updateAccount(order.accountId, {});
+            if (this.account(order.accountId)) this.updateAccount(order.accountId, {}); else this.revision();
             this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
           }
           appliedIds.push(operation.id); continue;
@@ -886,7 +904,7 @@ export class Store {
               this.db.prepare('UPDATE orders SET data=? WHERE id=?').run(JSON.stringify(order), order.id);
             }
             // Acknowledging a stale offline edit must still refresh the client's optimistic value.
-            this.updateAccount(order.accountId, {});
+            if (this.account(order.accountId)) this.updateAccount(order.accountId, {}); else this.revision();
             this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
           }
           appliedIds.push(operation.id); continue;
@@ -929,7 +947,7 @@ export class Store {
           this.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(shipment), shipment.id);
         }
         this.db.prepare('INSERT INTO operations VALUES(?,?,?,?)').run(device.id, operation.id, digest, JSON.stringify({ ...operation, appliedAt: this.now(), status: stale ? 'superseded' : 'applied' }));
-        this.updateAccount(shipment.accountId, {});
+        if (this.account(shipment.accountId)) this.updateAccount(shipment.accountId, {}); else this.revision();
         appliedIds.push(operation.id);
       }
       return { appliedIds };

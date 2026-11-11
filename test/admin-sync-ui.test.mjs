@@ -102,6 +102,7 @@ async function browser(hash = '') {
     addEventListener: (name, listener) => listeners.set(name, listener),
   };
   const context = vm.createContext({ document, URL, Date, console, location, history, syncStatus,
+    confirm: message => { state.confirmationMessage = message; return state.confirmDelete !== false; },
     createServerClock: () => createServerClock(() => state.monotonic, () => NOW + 86_400_000),
     setTimeout: (callback, delay) => { const id = ++timerId; timeouts.set(id, { callback, delay }); return id; },
     clearTimeout: id => timeouts.delete(id), setInterval: callback => { const id = ++timerId; intervals.set(id, callback); return id; }, clearInterval: id => intervals.delete(id),
@@ -118,7 +119,13 @@ async function browser(hash = '') {
         if (state.blockAccounts) await state.blockAccounts;
         if (state.offline) throw new Error('offline');
         if (state.unauthorized) return response({ error: { code: 'ADMIN_UNAUTHORIZED', message: '请重新登录' } }, 401);
-        return response({ accounts: [account(state.job, state.platform)], serverTime: NOW + state.monotonic - 100 });
+        return response({ accounts: state.deleted ? [] : [account(state.job, state.platform)], serverTime: NOW + state.monotonic - 100 });
+      }
+      if (path.startsWith('/v1/admin/cookie-sync/connections?')) return response({ connections: [] });
+      if (path === '/v1/admin/accounts/a' && options.method === 'DELETE') {
+        if (state.blockDelete) await state.blockDelete;
+        if (state.deleteError) return response({ error: { message: state.deleteError } }, 500);
+        state.deleted = true; return response({ deleted: true, historyPreserved: true });
       }
       if (path === '/v1/admin/devices') return response({ devices: [] });
       if (path === '/v1/admin/families') {
@@ -138,7 +145,7 @@ async function browser(hash = '') {
       throw new Error(`Unexpected request: ${path}`);
     },
   });
-  vm.runInContext(source.replace(/^import[^\n]+\n/, '') + '\n globalThis.adminTest = { refresh, requestSync, renderSyncStates };', context);
+  vm.runInContext(source.replace(/^import[^\n]+\n/, '') + '\n globalThis.adminTest = { refresh, requestSync, renderSyncStates, edit, account: () => accounts[0] };', context);
   await settle();
   const dispatch = async (element, event) => { element.listeners.get(event)({ preventDefault() {}, currentTarget: element }); await settle(); };
   const login = async () => { elements.get('admin-token').value = 'password'; await dispatch(elements.get('login-form'), 'submit'); };
@@ -149,6 +156,38 @@ async function browser(hash = '') {
   const visibility = async hidden => { document.hidden = hidden; listeners.get('visibilitychange')(); await settle(); };
   return { state, elements, requests, timeouts, intervals, location, login, tick, visibility, dispatch, api: context.adminTest };
 }
+
+test('account deletion confirms history retention, prevents duplicate requests, and updates the account list', async () => {
+  const page = await browser(); await page.login();
+  page.api.edit(page.api.account()); await settle();
+  assert.equal(page.elements.get('account-delete-section').hidden, false);
+  page.state.confirmDelete = false;
+  await page.dispatch(page.elements.get('account-delete'), 'click');
+  assert.equal(page.requests.some(r => r.options.method === 'DELETE'), false);
+  assert.equal(page.elements.get('account-dialog').open, true);
+  assert.match(page.state.confirmationMessage, /已有订单和取件记录保留/);
+  page.state.confirmDelete = true;
+  let release; page.state.blockDelete = new Promise(resolve => { release = resolve; });
+  await page.dispatch(page.elements.get('account-delete'), 'click');
+  await page.dispatch(page.elements.get('account-delete'), 'click');
+  assert.equal(page.requests.filter(r => r.options.method === 'DELETE').length, 1);
+  release(); await settle(); await settle();
+  assert.equal(page.elements.get('account-dialog').open, false);
+  assert.equal(page.elements.get('metric-accounts').textContent, 0);
+  assert.match(page.elements.get('notice').textContent, /账号已删除.*历史订单和取件记录已保留/);
+  await page.dispatch(page.elements.get('new-account'), 'click');
+  assert.equal(page.elements.get('account-delete-section').hidden, true);
+});
+
+test('a failed account deletion keeps the drawer open with an actionable error', async () => {
+  const page = await browser(); await page.login(); page.api.edit(page.api.account()); await settle();
+  page.state.deleteError = '删除失败，请稍后重试';
+  await page.dispatch(page.elements.get('account-delete'), 'click');
+  assert.equal(page.elements.get('account-dialog').open, true);
+  assert.equal(page.elements.get('account-delete-error').textContent, page.state.deleteError);
+  assert.equal(page.elements.get('account-id').value, 'a');
+  assert.equal(page.elements.get('metric-accounts').textContent, 1);
+});
 
 test('reverse cookie request accepts base64url symbols, waits for login, and ignores invalid fragments', async () => {
   const valid = `CR-${'a'.repeat(41)}_-`;

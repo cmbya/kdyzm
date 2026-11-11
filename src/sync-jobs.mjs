@@ -142,6 +142,7 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
           if (imported?.evidenceChanged !== false) try { onImported(accountId, imported?.changedShipmentIds); } catch { /* Retry on the next import. */ }
           fullResult(record.job, delta);
         };
+        valid();
         const result = await collector(account, store.cookie(accountId), { ...options, durableLogistics: true,
           onCookieRefresh: cookie => {
             const current = store.account(accountId);
@@ -169,6 +170,9 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
         record.job.state = 'completed';
         if (record.job.orderId) orderOutcome(record.job, result); else fullResult(record.job, result);
       } catch (error) {
+        if (!store.account(accountId)) {
+          Object.assign(record.job, { state: 'disabled', retryAt: 0, error: '账号已删除，采集已停止' }); return;
+        }
         if (store.account(accountId)?.credentialVersion !== account.credentialVersion) {
           Object.assign(record.job, { state: 'error', error: '账号登录信息已更新，请重新刷新' }); return;
         }
@@ -275,6 +279,14 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
   // Delay recovery until the service has finished constructing its import callbacks.
   queueMicrotask(() => { for (const id of queues.keys()) pump(id); });
   return { running, request, pump,
+    cancelAccount(accountId) {
+      clearTimeout(timers.get(accountId)); timers.delete(accountId);
+      queues.delete(accountId);
+      for (const record of records.values()) if (record.job.accountId === accountId && active(record.job)) {
+        Object.assign(record.job, { state: 'disabled', retryAt: 0, error: '账号已删除，采集已停止' });
+        finish(record);
+      }
+    },
     runDue() {
       if (closed) return [];
       const time = now(), platform = scheduledPlatform(time), accounts = store.accounts();
