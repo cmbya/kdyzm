@@ -267,7 +267,8 @@ var PickCodeLogistics = (function () {
     if (pickupArrivalEvent(value, '', rules)) return 'arrived';
     if (safe && !FUTURE.test(value) && !/转运|分拣|分拨|物流中心/.test(value) && /(?:存入|已(?:经)?(?:成功)?(?:存放至|到达?|送(?:达|到|至)|派送(?:到|至)|妥投(?:至|到)?|投递(?:至|到)|放(?:在|到|至)?))[^，,。；;！？!?]*(?:驿站|代收点|柜|丰巢)|(?:驿站|代收点|自提柜|快递柜)代收/.test(value)) return 'arrived';
     if (homeDeliveryCompleted(value)) return 'signed';
-    if (safe && !FUTURE.test(value) && /待取件|等待取件|待自提|已存放至|存入.*(?:柜|驿站)|请(?:您)?(?:及时|尽快)?(?:取件|领取)|催取|取件提醒|凭取货码/.test(value)) return 'arrived';
+    // A code receipt is a completed signature; only code pickup instructions imply arrival.
+    if (safe && !FUTURE.test(value) && /待取件|等待取件|待自提|已存放至|存入.*(?:柜|驿站)|请(?:您)?(?:及时|尽快)?(?:取件|领取)|催取|取件提醒|凭(?:取货|取件)码(?:取件|领取|提货)/.test(value)) return 'arrived';
     if (/已完成签收|签收成功|已签收/.test(value) && !/签收失败|拒绝?签收|拒签/.test(value)
       && !/(?:未|待|拒绝?|请|等待|当面)[^，,。；;！？!?]{0,8}(?:已完成签收|签收成功|已签收)/.test(value)) return 'signed';
     if (/运输|发货|揽收|派送|派件中/.test(value)) return 'transit';

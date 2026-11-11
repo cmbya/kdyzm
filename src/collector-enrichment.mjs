@@ -126,10 +126,12 @@ export function corroborateTaobaoEventTimes(events, fullTrack, now = Date.now(),
     if (event.provider !== 'taobao' && !(allowLegacy && !event.provider) || event.time || !/^\d{2}-\d{2} \d{2}:\d{2}$/.test(event.timeText)) return event;
     // Use only a unique full timestamp returned for this waybill, never the server's current year.
     const matches = new Set(fullTrack.filter(other => Number.isSafeInteger(other.time) && other.time > 0 && other.time >= notBefore && other.time <= now
+      && logisticsEventTimeIssue(other, now) !== 'timeConflict'
       && other.time < 8640000000000000 - 8 * 3600000
       && new Date(other.time + 8 * 3600000).toISOString().slice(5, 16).replace('T', ' ') === event.timeText).map(other => other.time));
     if ((event.providerStatusTag === '已签收' || /^(?:已签收|签收)[：:]/.test(event.description)) && !fullTrack.some(other => matches.has(other.time)
-      && (/^(?:签收|已签收|签收成功)$/.test(other.description.trim()) || eventStatus(other.description, 'unknown') === 'signed'))) return event;
+      && (/^(?:签收|已签收|签收成功)$/.test(other.description.trim()) || eventStatus(other.description, 'unknown') === 'signed'
+        || completionKind(other.description)))) return event;
     return matches.size === 1 ? { ...event, provider: 'taobao', time: [...matches][0], timePrecision: 'minute' } : event;
   });
 }
