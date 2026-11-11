@@ -13,6 +13,21 @@ export class PickupCompletionStore {
   }
   config() { return JSON.parse(this.db.prepare('SELECT data FROM pickup_completion_config WHERE id=1').get().data); }
   rules() { return this.db.prepare('SELECT data FROM pickup_completion_rules ORDER BY id').all().map(row => JSON.parse(row.data)); }
+  editRule(id, input) {
+    onlyKeys(input, ['kind', 'keywords', 'enabled', 'expectedVersion']);
+    const builtin = builtinPickupCompletionRules.find(rule => rule.id === id);
+    if (id.startsWith('builtin-') && (!builtin || /builtin-(?:pdd|taobao)-/.test(id))) fail(400, 'RULE_READ_ONLY', '平台结构化证据不能改为文字规则');
+    const old = this.rules().find(rule => rule.id === id);
+    if (input.expectedVersion !== (old?.version || 0)) fail(409, 'RULE_CHANGED', '规则已变化，请刷新后再编辑');
+    const validated = validatePickupCompletionRule({ id: 'manual_validation', kind: input.kind, keywords: input.keywords, enabled: input.enabled, origin: 'manual' });
+    if (!/^[a-zA-Z0-9_-]{1,100}$/.test(id)) fail(400, 'INVALID_INPUT', '规则标识无效');
+    const rule = { ...validated, id, version: (old?.version || builtin?.version || 0) + 1 };
+    return this.atomic(() => {
+      if (!old && this.rules().length >= 100) fail(400, 'PICKUP_COMPLETION_RULE_LIMIT', '自动取件规则已达到上限');
+      this.db.prepare('INSERT INTO pickup_completion_rules VALUES(?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data').run(id, JSON.stringify(rule));
+      this.bump(); this.recalculate(); return rule;
+    });
+  }
   atomic(fn) {
     const name = `pickup_completion_${this.sequence = (this.sequence || 0) + 1}`;
     this.db.exec(`SAVEPOINT ${name}`);
@@ -46,7 +61,7 @@ export class PickupCompletionStore {
   removeRule(id) {
     return this.atomic(() => {
       if (!this.db.prepare('DELETE FROM pickup_completion_rules WHERE id=?').run(id).changes) return { changed: 0 };
-      this.bump(); return this.recalculate({ removedRuleId: id });
+      this.bump(); return this.recalculate(id.startsWith('builtin-') ? {} : { removedRuleId: id });
     });
   }
   migrate() {
@@ -84,7 +99,7 @@ export class PickupCompletionStore {
   }
   project(shipment, { startup = false, removedRuleId, rules = this.rules(), config = this.config() } = {}) {
     const state = pickupCompletionState(shipment), prior = state.evidence;
-    const enabledRules = [...builtinPickupCompletionRules, ...rules].filter(rule => rule.enabled);
+    const enabledRules = [...builtinPickupCompletionRules.filter(rule => !rules.some(custom => custom.id === rule.id)), ...rules].filter(rule => rule.enabled);
     const priorValid = prior && enabledRules.some(rule => rule.id === prior.ruleId && rule.version === prior.ruleVersion);
     const projectedEvents = [...(shipment.logisticsEvents || []), ...(prior ? [{ ...prior, time: prior.eventTime }] : [])];
     const evidence = detectPickupCompletion({ ...shipment, logisticsEvents: projectedEvents }, { rules, now: this.now() });

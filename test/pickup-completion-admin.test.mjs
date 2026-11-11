@@ -33,12 +33,47 @@ async function browser(t) {
     const body = options.body ? JSON.parse(options.body) : null; requests.push({ path, method: options.method || 'GET', body });
     if (control.waiting) await control.waiting;
     if (control.fail) throw new Error('合成网络失败');
-    if (options.method === 'PUT') state.config = body;
+    if (options.method === 'PUT' && !path.includes('/rules/')) state.config = body;
+    if (path.includes('/rules/')) {
+      const id = path.split('/').at(-1);
+      state.monitorRules = (state.monitorRules || []).filter(rule => rule.ruleId !== id);
+      if (options.method === 'PUT') state.monitorRules.push({ ...body, id, ruleId: id, expectedVersion: 1, editable: true, label: '人工词组' });
+    }
     if (path.endsWith('/rollback')) { assert.deepEqual(body, { historyId: 'one' }); state.history[0].canRollback = false; state.history[0].status = 'rolled_back'; }
     return structuredClone(state);
   } });
   return { elements, state, requests, notices, control, admin, click: async id => { await elements.get(id).click(); await settle(); } };
 }
+
+test('keyword editor saves explicit drafts, preserves failures and supports disable and delete', async t => {
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  const getRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, value: { getRandomValues } });
+  t.after(() => Object.defineProperty(globalThis, 'crypto', cryptoDescriptor));
+  const page = await browser(t); await page.click('pickup-completion-settings-tab');
+  await page.click('pickup-rule-new');
+  assert.equal(page.elements.get('pickup-rule-form').hidden, false);
+  page.elements.get('pickup-rule-keywords').value = ['用户已完成提货', '提货完成'].join(String.fromCharCode(13, 10));
+  page.elements.get('pickup-rule-kind').value = 'user_collected';
+  page.control.fail = true;
+  await page.elements.get('pickup-rule-form').dispatch('submit');
+  assert.equal(page.elements.get('pickup-rule-form').hidden, false);
+  assert.match(page.elements.get('pickup-rule-error').textContent, /网络失败/);
+  page.control.fail = false; await page.elements.get('pickup-rule-form').dispatch('submit');
+  assert.equal(page.elements.get('pickup-rule-form').hidden, true);
+  assert.deepEqual(page.state.monitorRules[0].keywords, ['用户已完成提货', '提货完成']);
+  assert.match(page.state.monitorRules[0].ruleId, /^manual_[a-f0-9]{32}$/);
+  const buttons = () => page.elements.get('pickup-completion-rules').querySelectorAll('button');
+  await buttons().find(button => button.textContent === '编辑').click();
+  assert.equal(page.elements.get('pickup-rule-keywords').value, ['用户已完成提货', '提货完成'].join(String.fromCharCode(10)));
+  page.elements.get('pickup-rule-keywords').value = '签收人凭取件码签收';
+  await page.elements.get('pickup-rule-form').dispatch('submit');
+  assert.deepEqual(page.state.monitorRules[0].keywords, ['签收人凭取件码签收']);
+  await buttons().find(button => button.textContent === '停用').click();
+  assert.equal(page.state.monitorRules[0].enabled, false);
+  await buttons().find(button => button.textContent === '删除').click();
+  assert.equal(page.state.monitorRules.length, 0);
+});
 
 test('native default-on labeled controls save only explicit draft and preserve failed draft', async t => {
   const page = await browser(t); await page.click('pickup-completion-settings-tab');

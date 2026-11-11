@@ -113,7 +113,7 @@ export function detectPickupCompletion(shipment, { rules = [], now = Date.now() 
     const description = String(event.description).slice(0, 600), value = compact(description);
     const builtinId = structured || (codeReceipt(description) ? 'builtin-code-receipt-v1'
       : signature.test(value) ? 'builtin-recipient-signature-v1' : collection.test(value) ? 'builtin-user-collection-v1' : '');
-    const builtins = builtinPickupCompletionRules.filter(rule => rule.id === builtinId);
+    const builtins = builtinPickupCompletionRules.filter(rule => rule.id === builtinId && !rules.some(custom => custom.id === rule.id));
     const rule = [...builtins, ...rules.filter(rule => rule.enabled && rule.kind === kind && rule.keywords?.length && rule.keywords.every(keyword => value.includes(compact(keyword))))]
       .find(rule => rule.enabled && rule.kind === kind);
     if (!rule) continue;

@@ -42,7 +42,20 @@
           <p id="pickup-completion-ai-state" class="hint">尚未读取 AI 状态。</p><div class="settings-actions"><button id="pickup-completion-save" type="submit" disabled>保存设置</button></div>
           <p id="pickup-completion-status" class="hint">尚未读取设置。</p>
         </form></section>
-        <section class="station-detail detail-body"><h3>监测关键词</h3><p class="hint">支持多组监测词，命中任一组后核对完整领取语义。组内用“＋”连接的词须同时出现。</p><ul id="pickup-completion-rules"></ul></section>
+        <section class="station-detail detail-body"><h3>监测关键词</h3><p class="hint">支持多组监测词，命中任一组后核对完整领取语义。组内用“＋”连接的词须同时出现。</p>
+          <button id="pickup-rule-new" type="button" class="secondary" disabled>＋ 新增规则</button>
+          <form id="pickup-rule-form" hidden>
+            <h4 id="pickup-rule-heading">新增规则</h4>
+            <p id="pickup-rule-note" class="hint"></p>
+            <label for="pickup-rule-kind">领取类型</label><select id="pickup-rule-kind"><option value="user_collected">用户已领取</option><option value="recipient_signed">本人已签收</option></select>
+            <label for="pickup-rule-keywords">关键词组（每行一个，须同时出现）</label><textarea id="pickup-rule-keywords" rows="4" required maxlength="365" placeholder="例如：签收人凭取货码签收"></textarea>
+            <p class="hint">最多 6 个词，每个 2–60 字。请填写明确完成领取的表述；“已签收”“取件码”等泛词不能单独作为完成依据。</p>
+            <label class="checkbox"><input id="pickup-rule-enabled" type="checkbox" checked>启用这条规则</label>
+            <div class="actions"><button id="pickup-rule-save" type="submit">保存规则</button><button id="pickup-rule-cancel" type="button" class="secondary">取消</button></div>
+            <p id="pickup-rule-error" role="alert" class="hint"></p>
+          </form>
+          <ul id="pickup-completion-rules"></ul>
+        </section>
         <section class="station-detail detail-body"><h3>最近自动完成</h3><ul id="pickup-completion-recent"></ul></section>
         <section class="station-detail detail-body"><h3>AI 监测词建议</h3><ul id="pickup-completion-candidates"></ul></section>
         <section class="station-detail detail-body"><h3>监测词变更记录</h3><ul id="pickup-completion-history"></ul></section>

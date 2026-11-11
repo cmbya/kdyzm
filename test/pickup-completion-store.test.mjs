@@ -24,6 +24,35 @@ function fixture(t, filename) {
   return { store, sync, read, bind, device, op };
 }
 
+test('manual rule edits and builtin disable survive restart without overriding manual pickup decisions', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'pickup-edit-rules-')), filename = join(directory, 'test.sqlite');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  let store = new Store({ key, now: () => NOW, filename });
+  try {
+    store.saveAccount({ platform: 'taobao', label: '测试', cookie: 'FIXTURE' }, 'a', true);
+    store.importResult('a', { orders: [{ platformOrderId: 'o' }], shipments: ['auto', 'manual'].map(waybillNo => ({
+      platformOrderId: 'o', waybillNo, logisticsEvents: [{ time: NOW - 1000, description: '本人已签收' }]
+    })) });
+    const device = store.device(store.redeem(store.createPairing(['a']).code, '测试').token);
+    const manual = store.snapshot(['a']).shipments.find(item => item.waybillNo === 'manual');
+    store.applyOperations(device, [{ id: 'manual-pick', shipmentId: manual.id, action: 'pick', occurredAt: NOW }]);
+    const saved = store.pickupCompletion.editRule('builtin-recipient-signature-v1', {
+      kind: 'recipient_signed', keywords: ['本人已签收'], enabled: false, expectedVersion: 0
+    });
+    store.pickupCompletion.editRule('manual_extra', { kind: 'user_collected', keywords: ['用户已完成提货'], enabled: true, expectedVersion: 0 });
+    store.close(); store = null;
+    store = new Store({ key, now: () => NOW, filename });
+    assert.equal(store.pickupCompletion.rules().length, 2);
+    assert.equal(store.pickupCompletion.rules().find(rule => rule.id === saved.id).version, saved.version);
+    const parcels = store.snapshot(['a']).shipments;
+    assert.equal(parcels.find(item => item.waybillNo === 'auto').picked, false);
+    assert.equal(parcels.find(item => item.waybillNo === 'manual').picked, true);
+    assert.throws(() => store.pickupCompletion.editRule(saved.id, { kind: saved.kind, keywords: saved.keywords, enabled: true, expectedVersion: 0 }), /规则已变化/);
+    store.pickupCompletion.removeRule(saved.id);
+    assert.equal(store.snapshot(['a']).shipments.find(item => item.waybillNo === 'auto').picked, true);
+  } finally { store?.close(); }
+});
+
 test('code receipts repair old pending records on restart and respect manual pending overrides', t => {
   const directory = mkdtempSync(join(tmpdir(), 'pickup-code-receipt-')), filename = join(directory, 'test.sqlite');
   t.after(() => rmSync(directory, { recursive: true, force: true }));

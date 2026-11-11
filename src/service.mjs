@@ -246,6 +246,16 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           send(res, 200, recognitionApi.review({ limit: Number(url.searchParams.get('limit') ?? 100), after: Number(url.searchParams.get('after') ?? 0) })); return;
         }
         const completionStatus = () => ({ config: pickupCompletion.config(), ...pickupCompletionAi.status() });
+        const completionRule = path.match(/^\/v1\/admin\/pickup-completion\/rules\/([a-zA-Z0-9_-]{1,100})$/);
+        if (completionRule && req.method === 'PUT') {
+          const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);
+          pickupCompletion.editRule(completionRule[1], body); pickupCompletionAi.configChanged();
+          send(res, 200, completionStatus()); return;
+        }
+        if (completionRule && req.method === 'DELETE') {
+          pickupCompletion.removeRule(completionRule[1]); pickupCompletionAi.configChanged();
+          send(res, 200, completionStatus()); return;
+        }
         if (path === '/v1/admin/pickup-completion' && req.method === 'GET') { send(res, 200, completionStatus()); return; }
         if (path === '/v1/admin/pickup-completion' && req.method === 'PUT') {
           const body = await bodyOf(req); configuration.authenticate(req.headers['x-admin-token']);

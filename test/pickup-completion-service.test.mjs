@@ -21,6 +21,30 @@ async function setup(t) {
   return { service, request };
 }
 
+test('administrators edit builtin and custom rules, reject unsafe words and stale saves, and restore defaults', async t => {
+  const { request, service } = await setup(t);
+  const path = '/v1/admin/pickup-completion/rules/builtin-recipient-signature-v1';
+  const body = { kind: 'recipient_signed', keywords: ['本人已签收'], enabled: false, expectedVersion: 0 };
+  assert.equal((await request(path, { method: 'PUT', body })).status, 401);
+  assert.equal((await request(path, { method: 'PUT', body, device: true })).status, 401);
+  assert.equal((await request(path, { method: 'DELETE', device: true })).status, 401);
+  const saved = await request(path, { method: 'PUT', body, admin: true });
+  assert.equal(saved.status, 200);
+  const entry = saved.data.monitorRules.find(rule => rule.ruleId === 'builtin-recipient-signature-v1');
+  assert.equal(entry.enabled, false); assert.equal(entry.editable, true);
+  assert.equal(service.store.snapshot(['a']).shipments[0].picked, false);
+  assert.equal((await request(path, { method: 'PUT', body, admin: true })).status, 409);
+  const rejected = await request(path, { method: 'PUT', admin: true, body: { ...body, expectedVersion: entry.expectedVersion, keywords: ['已签收'] } });
+  assert.equal(rejected.status, 400);
+  assert.equal((await request(path, { method: 'DELETE', admin: true })).status, 200);
+  assert.equal(service.store.snapshot(['a']).shipments[0].picked, true);
+  const customPath = '/v1/admin/pickup-completion/rules/manual_test';
+  assert.equal((await request(customPath, { method: 'PUT', admin: true, body: { ...body, enabled: true } })).status, 200);
+  assert.equal((await request(customPath, { method: 'DELETE', admin: true })).status, 200);
+  assert.equal(service.pickupCompletion.rules().length, 0);
+  assert.equal((await request('/v1/admin/pickup-completion/rules/builtin-pdd-out-cabinet-v1', { method: 'PUT', body, admin: true })).status, 400);
+});
+
 test('admin-only config is read-only to devices and metadata changes participate in snapshot ETag', async t => {
   const { request, service } = await setup(t);
   const settings = await request('/v1/admin/pickup-completion', { admin: true });
