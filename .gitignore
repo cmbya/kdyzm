@@ -6,4 +6,5 @@ data/
 *.db-wal
 .qa/
 .gstack/
-/app-updates/
+/app-updates/*
+!/app-updates/README.md
