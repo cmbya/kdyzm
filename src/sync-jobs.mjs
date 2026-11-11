@@ -108,7 +108,7 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
     queue.shift();
     if (record.accountVersion !== account.credentialVersion) {
       logistics.clear(record.job.id);
-      for (const field of ['logisticsProgress', 'retryCount', 'throttled', 'continuation']) delete record.job[field];
+      for (const field of ['logisticsProgress', 'retryCount', 'throttled', 'continuation', 'collectedOrderIds']) delete record.job[field];
     }
     record.accountVersion = account.credentialVersion;
     Object.assign(record.job, { state: 'running', retryAt: 0, startedAt: now(), error: '',
@@ -137,10 +137,18 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
             for (const key of ['orders', 'orderUpdates', 'shipments', 'logisticsFailures']) delta[key] = (delta[key] || []).filter(matches);
           }
           const imported = store.importResult(accountId, delta, { partial, reconcile: !importedOnce });
+          // Track this run, not every historical order touched by metadata reconciliation.
+          const ids = new Set(record.job.collectedOrderIds || []);
+          for (const item of [...delta.orders, ...delta.shipments, ...(delta.logisticsFailures || [])]) {
+            const id = stableId(accountId, account.platform, 'order', String(item.platformOrderId));
+            if (store.order(id)) ids.add(id);
+          }
+          record.job.collectedOrderIds = [...ids];
           importedOnce = true;
           if (!record.job.firstResultAt && delta.shipments.some(shipment => shipment.logisticsEvents?.length)) record.job.firstResultAt = now();
           if (imported?.evidenceChanged !== false) try { onImported(accountId, imported?.changedShipmentIds); } catch { /* Retry on the next import. */ }
           fullResult(record.job, delta);
+          persist(record);
         };
         valid();
         const result = await collector(account, store.cookie(accountId), { ...options, durableLogistics: true,
@@ -296,8 +304,27 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
         && account.nextSyncAt <= time && !running.has(account.id) && !queues.get(account.id)?.length)
         .map(account => request(account.id));
     },
-    latest(accountId) {
-      return saved(accountId, '');
+    latest(accountId, { includeOrders = false } = {}) {
+      const job = saved(accountId, '');
+      if (!includeOrders || !job || !Array.isArray(job.collectedOrderIds)) return job;
+      const rows = store.db.prepare(`SELECT data FROM orders WHERE account_id=?
+        AND id IN (SELECT value FROM json_each(?))`).all(accountId, JSON.stringify(job.collectedOrderIds));
+      const parcels = store.db.prepare(`SELECT data FROM shipments WHERE account_id=?
+        AND json_extract(data,'$.orderId') IN (SELECT value FROM json_each(?))`)
+        .all(accountId, JSON.stringify(job.collectedOrderIds)).map(row => JSON.parse(row.data));
+      const byOrder = new Map();
+      for (const parcel of parcels) {
+        if (parcel.hidden || parcel.deleted) continue;
+        const events = (parcel.logisticsEvents || []).filter(event => event.description);
+        const latest = events.reduce((best, event) => !best || (Number(event.time) || 0) > (Number(best.time) || 0) ? event : best, null);
+        const list = byOrder.get(parcel.orderId) || [];
+        list.push({ waybillNo: parcel.waybillNo, carrier: parcel.carrier,
+          latestEvent: latest ? { time: latest.time, description: latest.description } : null,
+          logisticsState: parcel.logisticsState, logisticsError: parcel.logisticsError });
+        byOrder.set(parcel.orderId, list);
+      }
+      return { ...job, orders: rows.map(row => JSON.parse(row.data)).filter(order => !order.hidden && !order.deleted)
+        .map(order => ({ id: order.id, title: order.title, platformOrderId: order.platformOrderId, shipments: byOrder.get(order.id) || [] })) };
     },
     snapshot(device, accountFilter) {
       const narrowed = accountFilter && new Set(accountFilter);

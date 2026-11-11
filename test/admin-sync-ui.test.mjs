@@ -179,6 +179,29 @@ test('account deletion confirms history retention, prevents duplicate requests, 
   assert.equal(page.elements.get('account-delete-section').hidden, true);
 });
 
+test('collection details show every product, split parcel and latest event safely and refresh with the next run', async () => {
+  const page = await browser();
+  page.state.job = { state: 'completed', orders: [
+    { title: '<img src=x onerror=alert(1)>', shipments: [
+      { waybillNo: 'TRACK-1', carrier: '中通', latestEvent: { time: NOW, description: '快递已到达上海转运中心' } },
+      { waybillNo: 'TRACK-2', latestEvent: null, logisticsError: '平台本次未返回物流轨迹' }
+    ] },
+    { title: '待发货商品', shipments: [] }, { title: '商品三', shipments: [] }, { title: '商品四', shipments: [] }
+  ] };
+  await page.login();
+  const section = () => page.elements.get('accounts').children[0].children.find(el => el.className === 'collection-orders');
+  assert.equal(section().children[0].textContent, '本次采集订单 · 4 笔');
+  assert.equal(section().children.filter(el => el.tagName === 'ARTICLE').length, 4);
+  const texts = section().querySelectorAll('*').map(el => el.textContent).join('\n');
+  for (const text of ['<img src=x onerror=alert(1)>', 'TRACK-1', 'TRACK-2', '上海转运中心', '快递单号：暂未提供', '最新物流：暂无物流信息']) assert.ok(texts.includes(text));
+  assert.equal(section().querySelectorAll('*').some(el => el.tagName === 'IMG'), false);
+  page.state.job = { state: 'completed', orders: [] }; await page.tick();
+  assert.match(section().children[1].textContent, /没有符合采集条件/);
+  assert.equal(section().children.some(el => el.tagName === 'ARTICLE'), false);
+  page.state.job = { state: 'queued' }; await page.tick();
+  assert.equal(section().hidden, true);
+});
+
 test('a failed account deletion keeps the drawer open with an actionable error', async () => {
   const page = await browser(); await page.login(); page.api.edit(page.api.account()); await settle();
   page.state.deleteError = '删除失败，请稍后重试';

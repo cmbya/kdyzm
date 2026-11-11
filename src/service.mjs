@@ -375,7 +375,7 @@ export function createService({ filename = ':memory:', encryptionKey, adminToken
           send(res, 200, await configuration.changePassword(req.headers['x-admin-token'], body.currentPassword, body.password)); return;
         }
         if (path === '/v1/admin/accounts' && req.method === 'GET') {
-          send(res, 200, { accounts: store.accounts().map(account => ({ ...account, syncJob: jobs.latest(account.id) })), serverTime: now() }); return;
+          send(res, 200, { accounts: store.accounts().map(account => ({ ...account, syncJob: jobs.latest(account.id, { includeOrders: true }) })), serverTime: now() }); return;
         }
         if (path === '/v1/admin/accounts' && req.method === 'POST') {
           const body = await bodyOf(req);

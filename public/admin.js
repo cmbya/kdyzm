@@ -434,6 +434,33 @@ async function requestSync(accountId) {
     renderSyncStates(); schedulePolling();
   }
 }
+function renderCollectionOrders(job) {
+  const section = node('section', '', 'collection-orders');
+  if (!job || !Array.isArray(job.orders)) {
+    section.hidden = true; return section;
+  }
+  section.append(node('h4', `本次采集订单 · ${job.orders.length} 笔`));
+  if (!job.orders.length) {
+    section.append(node('p', job.state === 'completed' ? '本次没有符合采集条件的订单。' : '正在等待订单数据…', 'hint'));
+    return section;
+  }
+  for (const order of job.orders) {
+    const card = node('article', '', 'collection-order');
+    card.append(node('p', order.title || '商品名称暂未提供', 'collection-product'));
+    const parcels = order.shipments?.length ? order.shipments : [{}];
+    for (const parcel of parcels) {
+      const row = node('div', '', 'collection-parcel');
+      row.append(node('p', `快递单号：${parcel.waybillNo || '暂未提供'}${parcel.carrier ? ` · ${parcel.carrier}` : ''}`, 'collection-waybill'));
+      const event = parcel.latestEvent;
+      row.append(node('p', event ? `最新物流：${event.description}` : '最新物流：暂无物流信息', 'collection-event'));
+      if (event?.time) row.append(node('p', date(event.time), 'collection-event-time hint'));
+      if (parcel.logisticsError) row.append(node('p', `${parcel.logisticsError}${event ? '（上方为已保存的最近轨迹）' : ''}`, 'hint'));
+      card.append(row);
+    }
+    section.append(card);
+  }
+  return section;
+}
 function renderAccounts() {
   syncRows.clear();
   $('accounts').replaceChildren();
@@ -453,7 +480,7 @@ function renderAccounts() {
     const button = action('立即采集', () => requestSync(account.id));
     syncRows.set(account.id, { status, details, button });
     actions.append(action('详情', () => edit(account)), button);
-    item.append(actions); $('accounts').append(item);
+    item.append(renderCollectionOrders(account.syncJob), actions); $('accounts').append(item);
   }
   renderSyncStates();
 }
