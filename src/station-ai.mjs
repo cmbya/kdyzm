@@ -1,4 +1,5 @@
 import { request as httpsRequest } from 'node:https';
+import { request as httpRequest } from 'node:http';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { fail } from './security.mjs';
@@ -9,12 +10,12 @@ import { aiCandidateDueAt, nextAiDay } from './ai-policy.mjs';
 const TIMEOUT = 12000, RESPONSE_LIMIT = 65536;
 const messages = {
   AI_ACCEPTED: '已开始分析待处理站点片段，结果仍需人工确认', AI_RUNNING: 'AI正在分析，请稍后核对候选',
-  AI_NOT_CONFIGURED: '请先完整配置AI渠道、HTTPS地址、模型和API Key', AI_AUTOMATIC_DISABLED: '定期AI已关闭，可使用立即分析手动运行',
+  AI_NOT_CONFIGURED: '请先完整配置AI渠道、接口地址、模型和API Key', AI_AUTOMATIC_DISABLED: '定期AI已关闭，可使用立即分析手动运行',
   AI_DAILY_LIMIT: '今日AI调用已达上限，含连接测试和重试', AI_NO_PENDING: '没有待分析的站点片段，已有建议请人工核对',
   AI_RETRY_COOLDOWN: '暂时失败的候选仍在重试等待期，请稍后再试', AI_NOT_DUE: '尚未到定期分析时间',
   SERVICE_STOPPING: '服务正在停止，AI分析已停止', AI_CONFIG_CHANGED: 'AI配置或密钥已更改，本次分析已停止',
   AI_INVALID_RESULT: 'AI结果未通过原文与格式校验，请人工核对', AI_TIMEOUT: 'AI请求超时，请稍后重试',
-  AI_ENDPOINT_BLOCKED: 'AI地址未通过公网HTTPS安全校验', AI_HTTP_ERROR: 'AI服务暂时不可用，请检查渠道配置后重试',
+  AI_ENDPOINT_BLOCKED: 'AI地址须为公网HTTPS或内网IP的HTTP/HTTPS地址，不能使用回环或特殊地址', AI_HTTP_ERROR: 'AI服务暂时不可用，请检查渠道配置后重试',
   AI_RESPONSE_TOO_LARGE: 'AI返回超过大小限制，未采纳', AI_DETAIL_LIMIT: '分析详情超过大小限制，未采纳',
   AI_REQUEST_FAILED: 'AI请求未完成，请检查渠道配置后重试',
   AI_CHANNEL_UNAVAILABLE: '所选AI渠道已暂停或未配置，请重新选择',
@@ -43,14 +44,20 @@ export function publicAddress(address) {
     && !(words[0] === 0x2001 && (words[1] < 0x0200 || words[1] === 0x0db8));
 }
 
+function privateAiAddress(address) {
+  if (isIP(address) !== 4) return false;
+  const [a, b] = address.split('.').map(Number);
+  return a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168;
+}
+
 export function validateAiBaseUrl(value) {
   try {
     if (typeof value !== 'string' || value.length > 2048 || /\s/u.test(value)) throw new Error();
     const url = new URL(value), host = url.hostname.replace(/^\[|\]$/gu, '').toLowerCase();
-    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || /\.(?:localhost|local|internal|lan)$/u.test(host) || ['localhost', 'local', 'internal', 'metadata.google.internal'].includes(host)
-      || isIP(host) && !publicAddress(host) || !isIP(host) && (!host.includes('.') || host.endsWith('.'))) throw new Error();
+    if (!(url.protocol === 'https:' || url.protocol === 'http:' && privateAiAddress(host)) || url.username || url.password || url.search || url.hash || /\.(?:localhost|local|internal|lan)$/u.test(host) || ['localhost', 'local', 'internal', 'metadata.google.internal'].includes(host)
+      || isIP(host) && !publicAddress(host) && !privateAiAddress(host) || !isIP(host) && (!host.includes('.') || host.endsWith('.'))) throw new Error();
     return url.href.replace(/\/+$/u, '');
-  } catch { fail(400, 'AI_ENDPOINT_BLOCKED', 'AI地址须为公网HTTPS地址，不能包含登录凭证、查询参数或片段'); }
+  } catch { fail(400, 'AI_ENDPOINT_BLOCKED', 'AI地址须为公网HTTPS或内网IP的HTTP/HTTPS地址，不能包含登录凭证、查询参数或片段'); }
 }
 
 export async function resolveAiEndpoint(baseUrl, resolver = lookup) {
@@ -58,12 +65,13 @@ export async function resolveAiEndpoint(baseUrl, resolver = lookup) {
   let records;
   try { records = isIP(host) ? [{ address: host, family: isIP(host) }] : await resolver(host, { all: true, verbatim: true }); }
   catch { throw aiError('AI_ENDPOINT_BLOCKED'); }
-  if (!Array.isArray(records) || !records.length || records.some(record => !publicAddress(record.address) || record.family !== isIP(record.address))) throw aiError('AI_ENDPOINT_BLOCKED');
+  if (!Array.isArray(records) || !records.length || records.some(record => !(publicAddress(record.address) || privateAiAddress(host) && record.address === host) || record.family !== isIP(record.address))) throw aiError('AI_ENDPOINT_BLOCKED');
   return { url, address: records[0].address, family: records[0].family };
 }
 
-export async function requestAiJson({ url: baseUrl, headers, body, signal }, resolver = lookup, requester = httpsRequest) {
+export async function requestAiJson({ url: baseUrl, headers, body, signal }, resolver = lookup, requester) {
   const endpoint = await resolveAiEndpoint(baseUrl, resolver);
+  requester ??= endpoint.url.protocol === 'http:' ? httpRequest : httpsRequest;
   if (signal?.aborted) throw aiError('AI_TIMEOUT');
   return new Promise((resolve, reject) => {
     const request = requester(endpoint.url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },

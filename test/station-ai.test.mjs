@@ -350,6 +350,36 @@ test('public HTTPS endpoint validation blocks private, special, credentialed and
   await assert.rejects(requestAiJson({ url: 'https://api.example.com', headers: {}, body: '{}', signal: new AbortController().signal }, async () => [{ address: '10.0.0.1', family: 4 }]), { code: 'AI_ENDPOINT_BLOCKED' });
 });
 
+test('explicit LAN IP endpoints accept HTTP while public HTTP and special addresses remain blocked', async () => {
+  for (const host of ['192.168.100.125', '10.0.0.2', '172.16.0.2', '172.31.255.254']) {
+    for (const scheme of ['http', 'https']) {
+      const url = `${scheme}://${host}:8318/v1`;
+      assert.equal(validateAiBaseUrl(url), url);
+      const endpoint = await resolveAiEndpoint(url, () => { throw new Error('IP must not use DNS'); });
+      assert.equal(endpoint.address, host);
+      assert.equal(endpoint.url.pathname, '/v1/chat/completions');
+    }
+  }
+  for (const host of ['127.0.0.1', '169.254.169.254', '0.0.0.0', '100.100.100.200', '8.8.8.8', '172.32.0.1', '[::1]']) {
+    assert.throws(() => validateAiBaseUrl(`http://${host}/v1`), { code: 'AI_ENDPOINT_BLOCKED' });
+  }
+  for (const suffix of ['?key=secret', '#fragment']) assert.throws(() => validateAiBaseUrl(`http://192.168.100.125/v1${suffix}`), { code: 'AI_ENDPOINT_BLOCKED' });
+  assert.throws(() => validateAiBaseUrl('http://user:pass@192.168.100.125/v1'), { code: 'AI_ENDPOINT_BLOCKED' });
+  const options = { url: 'http://192.168.100.125:8318/v1', headers: { Authorization: 'Bearer TEST' }, body: '{"model":"test"}' };
+  const requester = statusCode => (url, settings, callback) => {
+    assert.equal(url.protocol, 'http:'); assert.equal(url.pathname, '/v1/chat/completions');
+    assert.equal(settings.headers.Authorization, 'Bearer TEST');
+    const req = new EventEmitter(); req.setTimeout = () => req;
+    req.end = body => {
+      assert.equal(body, options.body);
+      const response = Readable.from([Buffer.from('{"ok":true}')]); response.statusCode = statusCode; callback(response);
+    };
+    return req;
+  };
+  assert.deepEqual(await requestAiJson(options, undefined, requester(200)), { ok: true });
+  await assert.rejects(requestAiJson(options, undefined, requester(302)), { code: 'AI_HTTP_ERROR' });
+});
+
 test('HTTPS transport pins the validated DNS address, refuses redirects and limits response bytes', async () => {
   const resolver = async () => [{ address: '1.1.1.1', family: 4 }];
   const options = { url: 'https://api.example.com/v1', headers: { Authorization: 'Bearer SYNTHETIC' }, body: '{}', signal: new AbortController().signal };

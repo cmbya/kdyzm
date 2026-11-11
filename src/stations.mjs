@@ -243,7 +243,7 @@ export class StationStore {
       prepared = this.prepareAiChannel(config.channelId, patch);
     }
     const channel = prepared ? { ...prepared.channel, hasApiKey: !!prepared.credential } : this.aiChannel(config.channelId);
-    if (config.enabled && (!channel?.enabled || !channel.name || !channel.baseUrl || !channel.model || !channel.hasApiKey)) fail(400, 'AI_NOT_CONFIGURED', '请先配置并启用渠道、HTTPS地址、模型和API Key');
+    if (config.enabled && (!channel?.enabled || !channel.name || !channel.baseUrl || !channel.model || !channel.hasApiKey)) fail(400, 'AI_NOT_CONFIGURED', '请先配置并启用渠道、接口地址、模型和API Key');
     if (old.channelId !== config.channelId) config.defaultSelectionRevision = old.defaultSelectionRevision + 1;
     this.transaction(() => {
       if (prepared) this.writeAiChannel(prepared);

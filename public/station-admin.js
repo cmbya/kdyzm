@@ -555,7 +555,7 @@ export function initStationAdmin({ api, notice }) {
   async function saveChannel(event, clearKey = false) {
     event?.preventDefault(); if (state.channelSaving) return;
     const id = state.channelId, body = clearKey ? { clearApiKey: true, enabled: false } : { name: get('ai-channel-name').value.trim(), baseUrl: get('ai-base-url').value.trim(), model: get('ai-model').value.trim(), enabled: get('ai-channel-enabled').value === 'true' };
-    if (!clearKey && (!body.name || !body.baseUrl || !body.model)) throw new Error('请填写渠道名称、HTTPS接口地址和模型。');
+    if (!clearKey && (!body.name || !body.baseUrl || !body.model)) throw new Error('请填写渠道名称、接口地址和模型。');
     const key = get('ai-api-key').value.trim(); if (!clearKey && key) body.apiKey = key;
     const session = state.session; state.channelVersion++; state.channelSaving = true; clearChannelTest('渠道设置正在更新，请保存后重新测试。');
     setFormBusy('ai-channel-form', true); setText('ai-channel-result', '正在保存渠道…');
