@@ -6,6 +6,7 @@ import { normalizeProductImageUrl } from './product-image.mjs';
 import { discoverPddSplit, fetchPddSplitTrack, fetchPddSplitCabinet, pddOrderMatches, pddWaybillMatches } from './pdd-split.mjs';
 import { activeKnownOrders, activeKnownParcels, isActiveKnownOrder, anchorTaobaoEventTimes, corroborateTaobaoEventTimes, eventStatus, homeDeliveryCompleted, logisticsEventTimeIssue, logisticsTimestamp, logisticsTimePrecision, normalizeLogisticsEvents, orderTimePrecision, pddShippingEvents, pickupCycleReset, pickupEvidence, taobaoDetailDateEvidence, taobaoStageEvents, taobaoTimeAnchorCandidate, taobaoTransitEvents } from './collector-enrichment.mjs';
 import { jdShipmentStatus } from './shipment-lifecycle.mjs';
+import { isLocalDeliveryOrder } from './order-fulfillment.mjs';
 
 const APPKEY = '12574478';
 const UA = 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/105.0.0.0 Mobile Safari/537.36';
@@ -373,6 +374,11 @@ async function collectTaobao(cookie, { fetchImpl, now, maxPages, knownOrders = [
         const platformOrderId = info.platformOrderId;
         if (!platformOrderId || seen.has(platformOrderId)) continue;
         newCount++; seen.add(platformOrderId);
+        if (isLocalDeliveryOrder(order, 'taobao')) {
+          skippedCount++;
+          if (known.has(platformOrderId)) orderUpdates.push({ platformOrderId, fulfillmentType: 'local_delivery' });
+          continue;
+        }
         const kind = taobaoOrderKind(info);
         if (kind === 'skip') skippedCount++;
         const previous = known.get(platformOrderId);
@@ -921,7 +927,7 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
     await collectDetails([{ platformOrderId: asText(targetOrder.platformOrderId) }]);
     return { orders, shipments, orderUpdates, logisticsFailures, warnings, refreshedCookie: session.cookie };
   }
-  const seen = new Set(), candidates = new Set();
+  const seen = new Set(), candidates = new Set(), excluded = new Set();
   let skipped = 0;
   for (let page = 1; page <= maxPages; page++) {
     const data = await request('pcorder_center_list', { page, d: 1, s: 4096 });
@@ -933,6 +939,11 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
       const platformOrderId = asText(order.orderId);
       if (!platformOrderId || seen.has(platformOrderId)) continue;
       seen.add(platformOrderId); added++;
+      if (isLocalDeliveryOrder(order, 'jd')) {
+        skipped++; excluded.add(platformOrderId);
+        if (knownOrders.some(item => asText(item.platformOrderId) === platformOrderId)) orderUpdates.push({ platformOrderId, fulfillmentType: 'local_delivery' });
+        continue;
+      }
       const kind = jdOrderKind(order);
       const known = knownOrders.find(item => asText(item.platformOrderId) === platformOrderId);
       if (known && !isActiveKnownOrder(known) || kind === 'skip' && !known) { if (kind === 'skip') skipped++; continue; }
@@ -951,7 +962,7 @@ async function collectJd(cookie, { fetchImpl, now, maxPages, knownOrders = [], t
     if (Number.isInteger(data.data.totalNum) && seen.size >= data.data.totalNum) break;
     if (page === maxPages) warnings.push('已达到京东分页上限；缺席订单不会删除或标记已取');
   }
-  for (const order of activeKnownOrders(knownOrders, new Set(candidates), knownOrders.length)) candidates.add(asText(order.platformOrderId));
+  for (const order of activeKnownOrders(knownOrders, new Set([...candidates, ...excluded]), knownOrders.length)) candidates.add(asText(order.platformOrderId));
   const lastChecked = id => {
     const known = knownOrders.find(order => asText(order.platformOrderId) === id);
     const parcels = activeKnownParcels(known);

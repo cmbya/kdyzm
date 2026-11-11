@@ -598,6 +598,7 @@ export class Store {
         const order = { ...old, id, accountId, platform: account.platform, platformOrderId,
           familyId: old ? old.familyId || '' : account.familyId, familyName: old ? old.familyName || '' : account.familyName,
           title: String(input.title || old?.title || ''), amount: input.amount == null ? old?.amount ?? null : input.amount,
+          ...(input.fulfillmentType === 'local_delivery' ? { fulfillmentType: 'local_delivery' } : {}),
           imageUrl: normalizeProductImageUrl(input.imageUrl) || normalizeProductImageUrl(old?.imageUrl),
           orderDate: replaceDate ? inputDate : old?.orderDate || 0,
           orderDatePrecision: refreshPrecision ? datePrecision(input.orderDatePrecision) : datePrecision(old?.orderDatePrecision),

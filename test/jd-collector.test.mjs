@@ -46,6 +46,18 @@ test('JD imports active physical orders with amounts in yuan, split waybills and
   assert.equal(result.orderUpdates.length, 0);
 });
 
+test('JD excludes local delivery including previously imported meals without querying their logistics', async () => {
+  const calls = [];
+  const result = await createCollector({ now, fetchImpl: network([
+    order('meal', '待收货', { wareList: [{ name: '手撕包菜+木桶饭 1人份', wareType: 0 }] }),
+    order('local', '待收货', { deliveryTypeName: '京东秒送' }),
+    order('food', '待发货', { wareList: [{ name: '速冻饺子 2袋', wareType: 0 }] })
+  ], {}, calls) })({ platform: 'jd' }, 'thor=FAKE', { knownOrders: [{ platform: 'jd', platformOrderId: 'meal', title: '旧名称', orderStatus: '待收货', shipments: [] }] });
+  assert.deepEqual(result.orders.map(o => o.platformOrderId), ['food']);
+  assert.equal(result.orderUpdates.find(o => o.platformOrderId === 'meal').fulfillmentType, 'local_delivery');
+  assert.deepEqual(calls.filter(c => c.input.orderId).map(c => c.input.orderId), ['food']);
+});
+
 test('JD newest signed event overrides old pickup notice without copying a parent code across parcels', () => {
   const first = parcel('A', '已签收');
   first.trackGroupInfo.orderTrackShowList.unshift({ CreationTime: '2026-10-30 12:00:00', StatusName: '待取件', Content: '已存放至驿站，取件码 8-2-0000' });

@@ -44,6 +44,23 @@ test('admin collection details retain this run across restart, isolate accounts,
   assert.equal(service.jobs.latest(account.id).orders, undefined, 'product data is added only to the admin response');
   await service.close(); await start();
   assert.deepEqual((await read()).orders, detail.orders);
+  const stored = service.store.db.prepare('SELECT id,data FROM shipments WHERE account_id=?').all(account.id);
+  for (const row of stored) {
+    const parcel = JSON.parse(row.data);
+    parcel.status = parcel.waybillNo === 'TRACK-A' ? 'signed' : 'arrived';
+    service.store.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(parcel), row.id);
+  }
+  assert.deepEqual((await read()).orders.find(o => o.platformOrderId === 'one').shipments.map(p => p.waybillNo), ['TRACK-B'], 'split order keeps its uncollected parcel');
+  for (const row of stored) {
+    const parcel = JSON.parse(row.data);
+    parcel.status = 'arrived';
+    parcel.logisticsEvents = [{ time: NOW, description: '已签收，签收人凭取货码签收。丰巢柜【自提柜】' }];
+    service.store.db.prepare('UPDATE shipments SET data=? WHERE id=?').run(JSON.stringify(parcel), row.id);
+  }
+  assert.equal((await read()).orders.some(o => o.platformOrderId === 'one'), false);
+  assert.equal(service.store.snapshot([account.id]).shipments.length, 2, 'hidden completed parcels remain in history');
+  service.store.importResult(account.id, { orders: [], shipments: [], orderUpdates: [{ platformOrderId: 'two', fulfillmentType: 'local_delivery' }] });
+  assert.equal((await read()).orders.some(o => o.platformOrderId === 'two'), false);
   now += 300000; empty = true;
   await service.jobs.request(account.id).done;
   assert.deepEqual((await read()).orders, [], 'a new empty run must not show old collected products');

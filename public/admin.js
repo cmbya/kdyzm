@@ -441,7 +441,7 @@ function renderCollectionOrders(job) {
   }
   section.append(node('h4', `本次采集订单 · ${job.orders.length} 笔`));
   if (!job.orders.length) {
-    section.append(node('p', job.state === 'completed' ? '本次没有符合采集条件的订单。' : '正在等待订单数据…', 'hint'));
+    section.append(node('p', job.state === 'completed' ? '本次没有符合采集条件的待收快递（外卖、已签收及已领取包裹不显示）。' : '正在等待订单数据…', 'hint'));
     return section;
   }
   for (const order of job.orders) {

@@ -18,6 +18,18 @@ function taobaoFetch(orders, fieldsById = {}, calls = []) {
   };
 }
 
+test('Taobao excludes local delivery metadata and keeps physical food and takeaway supplies', async () => {
+  const calls = [];
+  const row = (id, title, extra = {}) => ({ id, tradeStatus: 'WAIT_SELLER_SEND_GOODS', subOrders: [{ itemInfo: { title } }], ...extra });
+  const result = await createCollector({ fetchImpl: taobaoFetch([
+    row('meal', '一份午餐', { extra: { businessTypeName: '淘宝闪购外卖' } }),
+    row('food', '冷冻牛肉'), row('box', '外卖打包盒 100个')
+  ], {}, calls) })({ platform: 'taobao' }, '_m_h5_tk=TEST_1793350000', { knownOrders: [{ platform: 'taobao', platformOrderId: 'meal', orderStatus: '待收货', shipments: [{ waybillNo: 'LOCAL' }] }] });
+  assert.deepEqual(result.orders.map(o => o.platformOrderId), ['food', 'box']);
+  assert.equal(result.orderUpdates.find(o => o.platformOrderId === 'meal').fulfillmentType, 'local_delivery');
+  assert.equal(calls.some(c => c.target.hostname === 'pages-g.m.taobao.com'), false);
+});
+
 test('Taobao structured SSR retains every split waybill and never fans one parent code out to all parcels', () => {
   const fields = { multiPackages: { packages: [{ mailNo: 'A', cpCode: 'ZTO' }, { mailNo: 'B', cpCode: 'SF' }] } };
   assert.deepEqual(extractSsrFields(ssr(fields)), fields);

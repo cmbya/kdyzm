@@ -14,6 +14,7 @@
 // payment/shipping/receipt labels and unlabeled dates never qualify as the order date.
 
 import './logistics-rules.js';
+import { isLocalDeliveryOrder } from './order-fulfillment.mjs';
 import { completionKind } from './pickup-completion.mjs';
 import { retainMilestoneEvents, shippingEvent } from './shipment-lifecycle.mjs';
 const logistics = globalThis.PickCodeLogistics;
@@ -202,6 +203,7 @@ export function activeKnownParcels(order) {
 }
 
 export function isActiveKnownOrder(order) {
+  if (isLocalDeliveryOrder(order)) return false;
   if (!order || order.archived || order.hidden || order.deleted) return false;
   if (order.shipments?.length) return activeKnownParcels(order).length > 0;
   const status = text(order.orderStatus), trade = text(order.tradeStatus);

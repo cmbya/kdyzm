@@ -4,6 +4,7 @@ import { activeKnownOrders } from './collector-enrichment.mjs';
 import { COLLECTION_COOLDOWN, isCollectionStale, scheduledPlatform, scheduledSyncAt } from './collection-schedule.mjs';
 import { createLogisticsQueue } from './sync-logistics.mjs';
 import { stableId } from './store.mjs';
+import { isLocalDeliveryOrder } from './order-fulfillment.mjs';
 
 const INTERVAL = COLLECTION_COOLDOWN;
 const active = job => ['queued', 'running'].includes(job.state);
@@ -314,16 +315,22 @@ export function createSyncJobs({ store, collector, now, onImported = () => {}, o
         .all(accountId, JSON.stringify(job.collectedOrderIds)).map(row => JSON.parse(row.data));
       const byOrder = new Map();
       for (const parcel of parcels) {
-        if (parcel.hidden || parcel.deleted) continue;
+        if (parcel.hidden || parcel.deleted || parcel.archived || parcel.picked || parcel.status === 'signed') continue;
         const events = (parcel.logisticsEvents || []).filter(event => event.description);
         const latest = events.reduce((best, event) => !best || (Number(event.time) || 0) > (Number(best.time) || 0) ? event : best, null);
+        // Older Taobao records may still say arrived because the receipt mentions
+        // a locker. An explicit code-based receipt is completion, not a pickup notice.
+        if (/签收人凭(?:取货|取件)码签收/.test(latest?.description || '')
+          && !/未签收|待签收|等待|请凭|尚未|虚假|误签|未收到/.test(latest.description)) continue;
         const list = byOrder.get(parcel.orderId) || [];
         list.push({ waybillNo: parcel.waybillNo, carrier: parcel.carrier,
           latestEvent: latest ? { time: latest.time, description: latest.description } : null,
           logisticsState: parcel.logisticsState, logisticsError: parcel.logisticsError });
         byOrder.set(parcel.orderId, list);
       }
-      return { ...job, orders: rows.map(row => JSON.parse(row.data)).filter(order => !order.hidden && !order.deleted)
+      const ordersWithParcels = new Set(parcels.map(parcel => parcel.orderId));
+      return { ...job, orders: rows.map(row => JSON.parse(row.data)).filter(order => !order.hidden && !order.deleted && !order.archived
+        && !isLocalDeliveryOrder(order) && (!ordersWithParcels.has(order.id) || byOrder.has(order.id)))
         .map(order => ({ id: order.id, title: order.title, platformOrderId: order.platformOrderId, shipments: byOrder.get(order.id) || [] })) };
     },
     snapshot(device, accountFilter) {
