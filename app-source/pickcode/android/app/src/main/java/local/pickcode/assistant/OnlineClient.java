@@ -12,7 +12,8 @@ import java.nio.charset.StandardCharsets;
 
 /** Small authenticated transport. TLS trust and hostname verification remain platform defaults. */
 public final class OnlineClient {
-    static final int MAX_RESPONSE_BYTES = 2_000_000;
+    static final int MAX_RESPONSE_BYTES = 4_000_000;
+    private static final int MAX_REQUEST_BYTES = 2_000_000;
     private String baseUrl;
     private final String token, fallbackBaseUrl;
     private final Runnable onFallback;
@@ -37,7 +38,11 @@ public final class OnlineClient {
         public final JSONObject body;
         public final String etag;
         public final boolean notModified;
-        Response(JSONObject body, String etag, boolean notModified) { this.body = body; this.etag = etag; this.notModified = notModified; }
+        public final int status;
+        Response(JSONObject body, String etag, boolean notModified) { this(body, etag, notModified, notModified ? 304 : 200); }
+        Response(JSONObject body, String etag, boolean notModified, int status) {
+            this.body = body; this.etag = etag; this.notModified = notModified; this.status = status;
+        }
     }
     public Response request(String method, String path, JSONObject data, String etag) throws Exception {
         if (!allowedRequest(method, path))
@@ -67,15 +72,15 @@ public final class OnlineClient {
         try {
             if (data != null) {
                 byte[] bytes = data.toString().getBytes(StandardCharsets.UTF_8);
-                if (bytes.length > MAX_RESPONSE_BYTES) throw new Failure("payload_too_large", "本次同步数据过多，请稍后重试");
+                if (bytes.length > MAX_REQUEST_BYTES) throw new Failure("payload_too_large", "本次同步数据过多，请稍后重试");
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
                 connection.setDoOutput(true);
                 connection.setFixedLengthStreamingMode(bytes.length);
                 try (OutputStream stream = connection.getOutputStream()) { stream.write(bytes); }
             }
             int status = connection.getResponseCode();
-            if (status == 304 && "GET".equals(method) && "/v1/snapshot".equals(path) && etag != null && !etag.isEmpty())
-                return new Response(null, etag, true);
+            if (status == 304 && "GET".equals(method) && snapshotPath(path) && etag != null && !etag.isEmpty())
+                return new Response(null, etag, true, status);
             if (status >= 300 && status < 400) throw new Failure("redirect_blocked", "同步地址发生跳转，请使用后台提供的 HTTPS 原始地址");
             if (status == 401) throw new Failure(token == null ? "binding_invalid" : "device_unauthorized",
                     token == null ? "绑定码无效或已过期，请从后台重新生成" : "设备授权已失效，请重新绑定；本地历史已保留");
@@ -110,17 +115,22 @@ public final class OnlineClient {
             JSONObject body;
             try (InputStream stream = connection.getInputStream()) { body = parse(readBounded(stream)); }
             String receivedEtag = connection.getHeaderField("ETag");
-            return new Response(body, OnlineEndpoint.validEtag(receivedEtag) ? receivedEtag : "", false);
+            return new Response(body, OnlineEndpoint.validEtag(receivedEtag) ? receivedEtag : "", false, status);
         } finally { connection.disconnect(); }
     }
     static boolean allowedRequest(String method, String path) {
         if (path == null || method == null) return false;
-        if ("GET".equals(method)) return "/v1/ai/channels".equals(path) || "/v1/connection".equals(path) || "/v1/snapshot".equals(path) || path.matches("/v1/sync-jobs/[A-Za-z0-9_-]{1,100}");
+        if ("GET".equals(method)) return "/v1/ai/channels".equals(path) || "/v1/connection".equals(path) || snapshotPath(path)
+                || path.matches("/v1/shipments/[a-f0-9]{32}/logistics") || path.matches("/v1/sync-jobs/[A-Za-z0-9_-]{1,100}");
         if ("POST".equals(method)) return "/v1/devices".equals(path) || "/v1/pairing-codes/preview".equals(path) || "/v1/accounts/sync".equals(path)
                 || "/v1/ai/template-proposals".equals(path) || "/v1/operations".equals(path) || "/v1/station-candidates".equals(path) || "/v1/station-proposals".equals(path)
                 || "/v1/matching-feedback".equals(path) || "/v1/recognition-issues".equals(path) || "/v1/station-rule-receipts".equals(path)
+                || "/v1/device/diagnostics".equals(path)
                 || path.matches("/v1/orders/[0-9a-f]{32}/refresh");
         return "DELETE".equals(method) && "/v1/devices/current".equals(path);
+    }
+    private static boolean snapshotPath(String path) {
+        return path != null && path.matches("/v1/snapshot(?:\\?view=compact(?:&dataVersion=[a-f0-9]{64})?)?");
     }
     static Failure aiFailure(int status, String code) {
         switch (code) {

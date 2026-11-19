@@ -53,6 +53,15 @@ test('admin deletion erases credentials while retaining history, original scopes
     const snapshot = (await s.request('/v1/snapshot', { token: device.token })).data;
     assert.deepEqual(snapshot.accounts, []);
     assert.deepEqual(snapshot.orders, before.orders); assert.deepEqual(snapshot.shipments, before.shipments);
+    const compact = await s.request('/v1/snapshot?view=compact', { token: device.token });
+    assert.equal(compact.status, 200);
+    assert.equal(compact.data.projectionVersion, 2);
+    assert.deepEqual(compact.data.accounts, []);
+    assert.deepEqual(compact.data.orders.map(order => order.id), [before.orders[0].id]);
+    assert.deepEqual(compact.data.shipments.map(shipment => shipment.id), [before.shipments[0].id]);
+    const detail = await s.request(`/v1/shipments/${before.shipments[0].id}/logistics`, { token: device.token });
+    assert.equal(detail.status, 200);
+    assert.equal(detail.data.evidenceKey, compact.data.shipments[0].platformView.evidenceKey);
     assert.deepEqual((await s.request('/v1/accounts', { token: device.token })).data.accounts, []);
     assert.deepEqual((await s.request('/v1/accounts/sync', { method: 'POST', token: device.token, body: {} })).data.jobs, []);
   }

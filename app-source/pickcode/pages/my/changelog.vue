@@ -2,6 +2,54 @@
   <view class="changelog-container sf-page">
     <view class="version-list" :class="{ expanded: showOlder }">
       <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.2.1 · 私人版</text><text class="version-date">2026-11-13</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">淘宝</text><text class="content">分包轨迹独立排序，缺少年份默认沿用订单年份，年底跨年单独处理，柜号和取件码分开识别</text></view>
+          <view class="update-item"><text class="tag optimize">匹配</text><text class="content">优先核对平台取件码，同码信息冲突保留待核对，经重试后辅助识别</text></view>
+          <view class="update-item"><text class="tag feature">诊断</text><text class="content">自动记录脱敏同步诊断，便于排查手机与后台交互问题</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.2.0 · 私人版</text><text class="version-date">2026-11-13</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag feature">同步</text><text class="content">后台统一整理订单、站点和物流时间，手机负责短信匹配、确认与显示</text></view>
+          <view class="update-item"><text class="tag optimize">效率</text><text class="content">扫描短信独立执行；物流详情展开时加载，未变化的订单不重复传输</text></view>
+          <view class="update-item"><text class="tag feature">备份</text><text class="content">升级前自动备份后台和手机已有数据，保留历史记录与离线确认</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.52 · 私人版</text><text class="version-date">2026-11-12</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">站点</text><text class="content">门店卡位不再混入子位置，柜号单独保留，兼容旧建议并维持位置冲突保护</text></view>
+          <view class="update-item"><text class="tag fix">确认</text><text class="content">逐件确认收到互不阻塞，详情关闭后恢复操作，等待回复时明确显示确认中</text></view>
+          <view class="update-item"><text class="tag optimize">重试</text><text class="content">相同时间异常保留重试进度，AI优先核对真正缺失或冲突的时间证据</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.51 · 私人版</text><text class="version-date">2026-11-11</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">电话</text><text class="content">修复圆通姓名后接手机号、顺丰交给联系人等派送文案的号码遗漏</text></view>
+          <view class="update-item"><text class="tag optimize">识别</text><text class="content">区分快递员、网点和揽收号码，签收提示不再清空有效派送电话，改派与号码冲突保留未知</text></view>
+          <view class="update-item"><text class="tag optimize">兼容</text><text class="content">分别覆盖淘宝、拼多多、京东历史物流句式，已有本地轨迹无需重新采集即可识别</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.50 · 私人版</text><text class="version-date">2026-11-11</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">详情</text><text class="content">送达待确认卡片可打开对应包裹详情，商品名保持一行并支持展开全文</text></view>
+          <view class="update-item"><text class="tag optimize">信息</text><text class="content">订单基本信息增加当前运单号和派送员电话，缺少号码时明确提示</text></view>
+          <view class="update-item"><text class="tag optimize">电话</text><text class="content">物流中的完整手机号可点击打开拨号界面，不自动呼叫</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
+        <view class="version-header"><text class="version-name">v3.1.49 · 私人版</text><text class="version-date">2026-11-11</text></view>
+        <view class="update-list">
+          <view class="update-item"><text class="tag fix">待取</text><text class="content">送到门口的包裹直接显示在待取件列表，支持逐件确认收到</text></view>
+          <view class="update-item"><text class="tag fix">时间</text><text class="content">京东、顺丰门口送达时间作为到货时间，点击确认收到后记录签收时间</text></view>
+          <view class="update-item"><text class="tag optimize">识别</text><text class="content">已合并的旧运单退出异常追踪与重试，保留有效包裹和人工取件决定</text></view>
+        </view>
+      </view>
+      <view class="version-item sf-surface">
         <view class="version-header"><text class="version-name">v3.1.47 · 私人版</text><text class="version-date">2026-11-11</text></view>
         <view class="update-list">
           <view class="update-item"><text class="tag fix">京东</text><text class="content">仓库准备与等待揽收保持待发货，明确揽收才记录发货时间</text></view>
