@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "3.1.48",
+  "version": "3.2.1",
   "upstreamRepository": "https://github.com/SongZX0106/PickCode",
   "upstreamCommit": "07f9fed59122d7f2210a825aadedc2a913a83176",
   "note": "Production source snapshot with authorized downstream modifications; no private data or workflow history.",
@@ -39,6 +39,7 @@
     "android/gradlew.bat",
     "android/build.ps1",
     "server/src/logistics-rules.js",
+    "server/src/logistics-contacts.js",
     "scripts/uni-build.mjs",
     "scripts/sync-android.mjs",
     "scripts/verify.mjs",
@@ -62,7 +63,7 @@
       "reason": "Unused upstream image barrel with a stale relative import."
     }
   ],
-  "localImportChecks": 173,
+  "localImportChecks": 180,
   "files": [
     {
       "path": ".semgrep.yml",
@@ -81,8 +82,8 @@
     },
     {
       "path": "android/app/build.gradle",
-      "size": 3562,
-      "sha256": "a9c9bee52bd5a05799733baea25f521f9e84f29ea5792a973b9c275cd9bdfac7"
+      "size": 3561,
+      "sha256": "c55827bc4dcf4eefdefbd2e465e9b1f71dbd6d289654a1f2d980789c65f15b16"
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -111,8 +112,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/AssistantStore.java",
-      "size": 9258,
-      "sha256": "a937d5ee8f8aef76d96be4103a50ec1ee7c43265f5af3fbb09bae1a2ef5cc75f"
+      "size": 13211,
+      "sha256": "0d23bbbdf60705e8873bd5ff2558e9a7c7be44425baf510c6e1ce07960683f5c"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/BackendRoutes.java",
@@ -130,6 +131,11 @@
       "sha256": "7b3ccc20a54c08ad2112a6375549dba1ccdbad90a8507b673508a824159a51be"
     },
     {
+      "path": "android/app/src/main/java/local/pickcode/assistant/InteractionDiagnostics.java",
+      "size": 11539,
+      "sha256": "b73af903975c9e24c44fe8a2dd865f70bd3ffa0587b837edc8f0457ea090029b"
+    },
+    {
       "path": "android/app/src/main/java/local/pickcode/assistant/LargeWidgetProvider.java",
       "size": 12297,
       "sha256": "a4eec83c18ba500197749f299f75748da4b39a2ac39bd8dd261b6e7eea9a78e3"
@@ -141,13 +147,13 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/MainActivity.java",
-      "size": 43279,
-      "sha256": "0344c55ebd4eb5490bcdf303bb8621ec107076dd3918cae87190ef6225906d22"
+      "size": 44197,
+      "sha256": "229991ada37cd373051de2b16d9e118eb2f647081d79b7877a312dfe75ecc686"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineClient.java",
-      "size": 11844,
-      "sha256": "566b9305698e2fcc5a685370941022f32cbb9fbd072a0e60e68fedf3131471d8"
+      "size": 12417,
+      "sha256": "18d8bd13c5f46a8f2cd86d080c88cf9ac4ec680d9beb0185b0b9ac9ccc7bcf4a"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineEndpoint.java",
@@ -156,8 +162,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncManager.java",
-      "size": 88460,
-      "sha256": "4c53d5bdfa8ddfe6be1546b353907cb836844ebbbb19262b53f980c0d4b827af"
+      "size": 97304,
+      "sha256": "ffcbaeaabec71dc779eb12a5d9a44dbef29f8f15713132c1c87a868636bbbddc"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/OnlineSyncScheduler.java",
@@ -236,8 +242,8 @@
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/WidgetModel.java",
-      "size": 30202,
-      "sha256": "25d580cf6fd2b0d162d690ea5b42a83e1990dcc14e7de2351469e7709556f405"
+      "size": 30448,
+      "sha256": "cff1620456cca19d7f4ac316e2f6984e0424c9caf61bd199a30f15b12eb485de"
     },
     {
       "path": "android/app/src/main/java/local/pickcode/assistant/WidgetRenderer.java",
@@ -501,18 +507,23 @@
     },
     {
       "path": "components/LogisticsTimeline.vue",
-      "size": 4674,
-      "sha256": "5ce8428c012d802ddc1ded84784e4281d7cc02b7550f0809f38576bd229fa869"
+      "size": 5574,
+      "sha256": "76165ceae355e66efdbeae97b5a8cc19f00e4110445f38b3619197ead83a68b9"
     },
     {
       "path": "components/OrderOverview.vue",
-      "size": 13615,
-      "sha256": "8aff1ae763a3207b176afe79a0bf558a7c5914fd60aaabf6cc9e96d4c9ef561e"
+      "size": 20615,
+      "sha256": "e63525514f0cc339bdd20aaa7f0f3e61e73db3edf7b35b68168db22793b81d78"
     },
     {
       "path": "components/ParcelJourney.vue",
       "size": 21577,
       "sha256": "ace6befc1b490973280197a7b13d038ad6105113d273d9f77be386e0e0827705"
+    },
+    {
+      "path": "components/PhoneText.vue",
+      "size": 1724,
+      "sha256": "5f9576a4a7333ce8ed73099de779324ea515105b5dc119d2d7c5c725992b93b0"
     },
     {
       "path": "components/PickupDetail.vue",
@@ -541,13 +552,13 @@
     },
     {
       "path": "core/package-presentation.js",
-      "size": 9352,
-      "sha256": "074ba1e14d499bc3e9661a6487557cf5d26547faf06a969de14112924de81bee"
+      "size": 9459,
+      "sha256": "0c9d5acb868ca4658bc4e7ab3b1f3b9f678e2c02deb9d7dfff722bcd2ff84aec"
     },
     {
       "path": "core/pickcode-core.js",
-      "size": 178679,
-      "sha256": "2ddbef35bc747a4faa2b1741d893ea4777d87bcdf3d1c2d90c410cecf99b939f"
+      "size": 197050,
+      "sha256": "ddf1ea8ad40e8e738a9d7875f9e4cf335737ef9340c76606ec2e37947dc57ba1"
     },
     {
       "path": "index.html",
@@ -566,18 +577,18 @@
     },
     {
       "path": "manifest.json",
-      "size": 3242,
-      "sha256": "531522c008dced385782f493bc135a3b9a6f73dbb06c6ba752deb0af27898f85"
+      "size": 3241,
+      "sha256": "80a213ed44e104c17be1ce2ee2e0c84684c4de2d526b4eaf9f2e3b89e9577f04"
     },
     {
       "path": "package-lock.json",
-      "size": 256609,
-      "sha256": "d0a0a562e77b5e56025fcc5d6e29a659d9b7c5286a99aa549632f60159d53818"
+      "size": 256607,
+      "sha256": "24608b0fd9ea046fd4cf41ad3ca3f01370259958ddf108dda9a4dec5accfd226"
     },
     {
       "path": "package.json",
-      "size": 1728,
-      "sha256": "3857f284e789b442dfe14393131a26da79769a3fc61527f908c8527578288e17"
+      "size": 1727,
+      "sha256": "d2188b0feaa0632225c5c1c62f96cc6c5c2e3cbf8daf3f6beb2f652965a98e29"
     },
     {
       "path": "pages.json",
@@ -591,8 +602,8 @@
     },
     {
       "path": "pages/index/index.vue",
-      "size": 73459,
-      "sha256": "e990904353df759722fd0071fdc982bb2f5a88e9b56a744756560a3d9bec85cf"
+      "size": 79321,
+      "sha256": "cca9d4c6290859633dc65d2d60292ad5045f48ed4f07811c0715fc8226058396"
     },
     {
       "path": "pages/my/about.vue",
@@ -606,8 +617,8 @@
     },
     {
       "path": "pages/my/changelog.vue",
-      "size": 46199,
-      "sha256": "415ba8a9f1b5027b74a8a95c7b2ba25378ba4dc6668ff10e1511d5f10877f796"
+      "size": 51485,
+      "sha256": "c51bd7cf5fe8d1d23d135d403977ed2e6473a7ac4d1731b96a2f8cca0d6f6e43"
     },
     {
       "path": "pages/my/faq.vue",
@@ -626,8 +637,8 @@
     },
     {
       "path": "pages/my/logistics-rules.vue",
-      "size": 13581,
-      "sha256": "38e75342d8193248517c4317e1a283e0f76bee95740289a73b61b5faf9bb7abc"
+      "size": 13629,
+      "sha256": "27f5e015b324195e08842a414b21ca5002fa63ecbe955d07a757804120a2c20d"
     },
     {
       "path": "pages/my/match-rules.vue",
@@ -651,8 +662,8 @@
     },
     {
       "path": "pages/packages/index.vue",
-      "size": 78097,
-      "sha256": "82ff24d3de5cac3a4fd92a843fff3a9bbb0b948d2a144063cc838e704fde3d73"
+      "size": 78984,
+      "sha256": "7c931e9666970464bc6f79a220e7ecde79354f8eda5d60f8c01396a512c350b5"
     },
     {
       "path": "scripts/ai-context.mjs",
@@ -715,9 +726,14 @@
       "sha256": "a7265873925e40fb955561ee0a32f533a849907945f747d55978e006f78767aa"
     },
     {
+      "path": "server/src/logistics-contacts.js",
+      "size": 5606,
+      "sha256": "0e907c95a1e947f1e0a36bb1e124742490fac8b920d1b76506020c466b52c1cf"
+    },
+    {
       "path": "server/src/logistics-rules.js",
-      "size": 26768,
-      "sha256": "076f6c94b3309865cd00a0afd82a6238b6b8dc975d36142528cc1d47df380c8f"
+      "size": 29049,
+      "sha256": "201f960f2f194365338386efefd60d5bb0b5e9a384f1682bf4410b20286583ed"
     },
     {
       "path": "services/ai-service-view.js",
@@ -726,8 +742,8 @@
     },
     {
       "path": "services/assistant.js",
-      "size": 41075,
-      "sha256": "854e8b44f3720616c1ec4b7a0d8bb01b25b2c5c7de94c9e28f76c781f1c1dfa9"
+      "size": 44503,
+      "sha256": "e2fc98412f6053f21d107ea66ebfa71eb943294edfad6ce3dbc661a6681535c4"
     },
     {
       "path": "services/item-patch.js",
@@ -735,9 +751,14 @@
       "sha256": "a5a9007672a4c086f968c42c7bb183e9245a82e21b5b486077e0ab207f9a0b49"
     },
     {
+      "path": "services/logistics-contacts.js",
+      "size": 101,
+      "sha256": "ca45bfc20adbd327a8116d11a5f020db4400371c2f2bcc14462742220e246f1d"
+    },
+    {
       "path": "services/notification-dismissals.js",
-      "size": 2190,
-      "sha256": "9860ad642f08fb46d1ad7cf561fe1cf4eacbbeef4c07f89005a226e43ae25620"
+      "size": 2252,
+      "sha256": "cd4f13c3155ff01e0c0fb05ad0668b52f98f1a320e4b21ad2920f1d8250186ac"
     },
     {
       "path": "services/pairing-scan.js",
@@ -746,8 +767,8 @@
     },
     {
       "path": "services/parcel-journey.js",
-      "size": 8254,
-      "sha256": "9f8d3e81e83a50b5ec04eb841a6997ae14940bb78511d1337726d8cf7f485302"
+      "size": 8358,
+      "sha256": "28050559c72a858839e4e8e53b8b372df74111deb71caa1a2ff50a9b90259f2e"
     },
     {
       "path": "services/pickup-groups.js",
@@ -2608,8 +2629,8 @@
     },
     {
       "path": "README.md",
-      "size": 2055,
-      "sha256": "c8712f4aba90f98f17ac19abac1f01f528c66900553e77c4a007c55502d15f74"
+      "size": 2054,
+      "sha256": "bf78403f67c7ac1a308f790a96efcd1d98b6f33d429a7ff8dd0f7d1e76a61d5e"
     },
     {
       "path": ".gitignore",

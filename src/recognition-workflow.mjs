@@ -6,6 +6,8 @@ import { orderRetention } from './order-retention.mjs';
 
 const MINUTE = 60000, DAY = 86400000, OFFSET = 8 * 3600000;
 const TERMINAL = new Set(['resolved', 'ignored']);
+const REPORT_CODE_REASONS = new Set(['code_conflict', 'code_mismatch', 'code_station_conflict', 'code_cabinet_conflict',
+  'code_carrier_conflict', 'code_waybill_conflict', 'code_time_conflict', 'code_cycle_conflict']);
 const ACTIVE_LIMIT = 2000, HISTORY_LIMIT = 500, SCAN_LIMIT = 10000;
 const parse = row => row && JSON.parse(row.data);
 const dayKey = now => new Date(now + OFFSET - 3 * 3600000).toISOString().slice(0, 10);
@@ -71,30 +73,35 @@ export class RecognitionWorkflow {
   }
   scope(shipmentId) {
     const shipment = this.store.shipment(shipmentId), order = shipment && this.store.order(shipment.orderId), account = shipment && this.store.account(shipment.accountId);
-    if (!shipment || !order || !account || order.accountId !== shipment.accountId || shipment.picked || shipment.pickupCompletion?.autoPicked
+    if (!shipment || this.store.shipmentAlias(shipment.id).id !== shipment.id || !order || !account || order.accountId !== shipment.accountId || shipment.picked || shipment.pickupCompletion?.autoPicked
       || shipment.hidden || shipment.deleted || shipment.archived || ['returned', 'returning'].includes(shipment.status)
       || order.hidden || order.deleted || orderRetention(order, this.now()).archived) return { closed: true, reasonCode: 'SOURCE_INACTIVE' };
     if (!account.enabled || account.status === 'expired') return { shipment, order, account, blocked: true, reasonCode: account.enabled ? 'ACCOUNT_EXPIRED' : 'ACCOUNT_DISABLED' };
     return { shipment, order, account };
   }
-  fingerprint(shipment) {
-    const events = (shipment.logisticsEvents || []).map(event => [event.time, event.timeText, event.timePrecision, event.description, event.location,
+  fingerprint(shipment, target) {
+    const events = (shipment.logisticsEvents || []).filter(event => target !== 'event_time' || logisticsEventTimeIssue(event, this.now()))
+      .map(event => [event.time, event.timeText, event.timePrecision, event.description, event.location,
       event.provider, event.providerStatus, event.providerStatusTag, event.providerSubStatus, event.providerStatusText]);
+    if (target === 'event_time') return hash(JSON.stringify([[...new Set(events.map(event => JSON.stringify(event)))].sort(), shipment.pickupCycle?.id]));
     return hash(JSON.stringify([events, shipment.status, shipment.logisticsState, shipment.arrivalAt, shipment.arrivalAtSource, shipment.arrivalAtPrecision, shipment.station, shipment.pickupCycle?.id]));
   }
-  reportFingerprint(source, shipments) {
+  reportFingerprint(source, shipments, reasonCodes = []) {
     const evidence = shipments.map(shipment => [shipment.id, this.fingerprint(shipment), shipment.carrier, shipment.pickupCode, shipment.waybillNo])
       .sort(([one], [two]) => one.localeCompare(two));
-    return hash(JSON.stringify([source, evidence]));
+    const reasons = [...new Set((Array.isArray(reasonCodes) ? reasonCodes : [])
+      .filter(reason => REPORT_CODE_REASONS.has(reason)))].sort();
+    return hash(JSON.stringify(reasons.length ? [source, evidence, reasons] : [source, evidence]));
   }
   scrubReportSources() {
     for (const task of this.tasks()) {
       if (!task.source || !task.source.waybillNo && !task.source.pickupCode) continue;
       const shipments = (task.candidateShipmentIds || []).map(id => this.store.shipment(id));
-      const unchanged = shipments.length && shipments.every(Boolean) && this.reportFingerprint(task.source, shipments) === task.sourceFingerprint;
+      const unchanged = shipments.length && shipments.every(Boolean)
+        && this.reportFingerprint(task.source, shipments, task.reasonCodes) === task.sourceFingerprint;
       task.source.waybillNo = ''; task.source.pickupCode = '';
       // The original hash is also the identity used by historical AI reviews and in-flight work.
-      if (unchanged) task.privacyFingerprint = this.reportFingerprint(task.source, shipments);
+      if (unchanged) task.privacyFingerprint = this.reportFingerprint(task.source, shipments, task.reasonCodes);
       this.db.prepare('UPDATE recognition_tasks SET data=? WHERE id=?').run(JSON.stringify(task), task.id);
     }
   }
@@ -132,17 +139,22 @@ export class RecognitionWorkflow {
   upsert(scope, problem, extras = {}) {
     const { shipment, account } = scope;
     const id = `recognition-${hash(JSON.stringify([shipment.id, problem.target, extras.deviceId || '', extras.sourceId || ''])).slice(0, 32)}`;
-    const previous = this.task(id), fingerprint = extras.sourceFingerprint || this.fingerprint(shipment);
+    const previous = this.task(id);
+    const timeEvidenceFingerprint = problem.target === 'event_time' ? this.fingerprint(shipment, 'event_time') : '';
+    // Keep the existing AI review identity when only unrelated, valid logistics changed.
+    const fingerprint = extras.sourceFingerprint || (timeEvidenceFingerprint && previous?.timeEvidenceFingerprint === timeEvidenceFingerprint
+      ? previous.sourceFingerprint : this.fingerprint(shipment));
+    const evidence = timeEvidenceFingerprint ? { timeEvidenceFingerprint } : {};
     if (previous) {
       if (TERMINAL.has(previous.status) && previous.sourceFingerprint === fingerprint) return previous;
       const restart = previous.sourceFingerprint !== fingerprint && ['review', 'ai_pending', 'ai_running'].includes(previous.status);
-      if (!TERMINAL.has(previous.status) && !restart) return this.reevaluate(this.save({ ...previous, sourceFingerprint: fingerprint, problemCode: problem.reasonCode }));
+      if (!TERMINAL.has(previous.status) && !restart) return this.reevaluate(this.save({ ...previous, ...evidence, sourceFingerprint: fingerprint, problemCode: problem.reasonCode }));
     }
     if (!previous && this.db.prepare("SELECT COUNT(*) AS count FROM recognition_tasks WHERE json_extract(data,'$.status') NOT IN ('resolved','ignored')").get().count >= ACTIVE_LIMIT) return null;
     return this.store.transaction(() => {
       this.db.prepare('DELETE FROM recognition_attempts WHERE task_id=?').run(id);
       return this.save({ id, ...recognitionMethod(account.platform, problem.target), accountId: account.id, orderId: shipment.orderId, shipmentId: shipment.id,
-        sourceFingerprint: fingerprint, evidenceVersion: (previous?.evidenceVersion || 0) + 1, initialFailures: 1, retryCount: 0, aiAttempts: 0, status: scope.blocked ? 'blocked' : 'pending',
+        sourceFingerprint: fingerprint, ...evidence, evidenceVersion: (previous?.evidenceVersion || 0) + 1, initialFailures: 1, retryCount: 0, aiAttempts: 0, status: scope.blocked ? 'blocked' : 'pending',
         reasonCode: scope.blocked ? scope.reasonCode : problem.reasonCode, problemCode: problem.reasonCode, nextRetryAt: this.now() + 5 * MINUTE,
         createdAt: this.now(), lastJobId: '', lastJobIds: [], pendingJobs: [], candidateIds: [], ...extras });
     });
@@ -192,7 +204,8 @@ export class RecognitionWorkflow {
     if (report.source.occurredAt != null && report.source.occurredAt !== 0 && !validTime(report.source.occurredAt, this.now() + 5 * MINUTE)) fail(400, 'INVALID_RECOGNITION_REPORT', '来源时间无效');
     source.occurredAt = report.source.occurredAt || null;
     source.waybillNo = ''; source.pickupCode = '';
-    const scope = scopes.find(scope => !scope.blocked) || scopes[0], fingerprint = this.reportFingerprint(source, scopes.map(({ shipment }) => shipment));
+    const scope = scopes.find(scope => !scope.blocked) || scopes[0],
+      fingerprint = this.reportFingerprint(source, scopes.map(({ shipment }) => shipment), report.reasonCodes);
     const changed = !!previous && (previous.privacyFingerprint || previous.sourceFingerprint) !== fingerprint;
     const fresh = !previous || changed;
     const previousState = previous?.reportState || (previous?.reasonCode === 'CLIENT_MATCH_CONFIRMED' ? 'resolved'
